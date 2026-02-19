@@ -1,0 +1,712 @@
+-------------------------------------
+Translated Report (Full Report Below)
+-------------------------------------
+Process:             KinshasaApp [72102]
+Path:                /Users/USER/*/KinshasaApp.app/Contents/MacOS/KinshasaApp
+Identifier:          com.thiagoxp95.kinshasaapp
+Version:             0.1.0 (1)
+Code Type:           ARM-64 (Native)
+Role:                Foreground
+Parent Process:      launchd [1]
+Coalition:           com.thiagoxp95.kinshasaapp [167386]
+User ID:             501
+
+Date/Time:           2026-02-18 21:58:33.0000 -0500
+Launch Time:         2026-02-18 21:58:12.2253 -0500
+Hardware Model:      MacBookPro18,3
+OS Version:          macOS 26.2 (25C56)
+Release Type:        User
+
+Crash Reporter Key:  2475E24C-B0AF-C154-03FC-CD60E2D04994
+Incident Identifier: 4D433D86-0E2F-4113-8580-76B9EB14B6B8
+
+Sleep/Wake UUID:       0A6B45BE-06DA-4502-B2D4-F256C3BDF1AC
+
+Time Awake Since Boot: 930000 seconds
+Time Since Wake:       133123 seconds
+
+System Integrity Protection: enabled
+
+Triggered by Thread: 0, Dispatch Queue: com.apple.main-thread
+
+Exception Type:    EXC_BREAKPOINT (SIGTRAP)
+Exception Codes:   0x0000000000000001, 0x0000000185fa9c7c
+
+Termination Reason:  Namespace SIGNAL, Code 5, Trace/BPT trap: 5
+Terminating Process: exc handler [72102]
+
+
+Application Specific Backtrace 0:
+0   CoreFoundation                      0x00000001816798ec __exceptionPreprocess + 176
+1   libobjc.A.dylib                     0x0000000181152418 objc_exception_throw + 88
+2   CoreFoundation                      0x00000001817470f0 -[NSException initWithCoder:] + 0
+3   AppKit                              0x00000001865fecc0 -[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints] + 1716
+4   AppKit                              0x0000000185a4bfb4 -[NSView _informContainerThatSubviewsNeedUpdateConstraints] + 64
+5   AppKit                              0x00000001866fd3fc -[NSView setNeedsUpdateConstraints:] + 468
+6   SwiftUI                             0x00000001b5ddd894 $s7SwiftUI13NSHostingViewC14setNeedsUpdateyyF + 184
+7   SwiftUI                             0x00000001b5df13dc $s7SwiftUI13NSHostingViewC13requestUpdate5afterySd_tF + 700
+8   SwiftUICore                         0x000000022d726a14 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE14graphDidChangeyyF + 108
+9   SwiftUICore                         0x000000022d72d928 $s7SwiftUI9ViewGraphC7setSizeyyAA0cF0VF + 140
+10  SwiftUICore                         0x000000022d72ce9c $s7SwiftUI9ViewGraphC15setProposedSizeyySo6CGSizeVF + 32
+11  SwiftUI                             0x00000001b5dff0d0 $s7SwiftUI13NSHostingViewC10updateSizeyyF + 84
+12  SwiftUICore                         0x000000022d728aec $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyFyyXEfU_ + 728
+13  SwiftUICore                         0x000000022d7283a4 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyF + 288
+14  SwiftUICore                         0x000000022d7285f8 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE07_updatecD04bodyqd__Sgqd__AA0cD0CXE_tlF + 212
+15  SwiftUICore                         0x000000022d726524 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE13_sizeThatFitsySo6CGSizeVAA08ProposedC4SizeVF + 108
+16  SwiftUI                             0x00000001b5ddc524 $s7SwiftUI13NSHostingViewC7minSize33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyFTm + 284
+17  SwiftUI                             0x00000001b5ddc610 $s7SwiftUI13NSHostingViewC37minSizeRoundedRespectingSizingOptions33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyF + 96
+18  SwiftUI                             0x00000001b5ddcc24 $s7SwiftUI13NSHostingViewC41updateWindowContentSizeExtremaIfNecessary33_32B6F54841135BB466A5C1362EB89D05LLyyF + 684
+19  SwiftUI                             0x00000001b5dee914 $s7SwiftUI13NSHostingViewC17updateConstraintsyyF + 132
+20  SwiftUI                             0x00000001b5deea54 $s7SwiftUI13NSHostingViewC17updateConstraintsyyFTo + 28
+21  AppKit                              0x0000000185db5f40 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5268
+22  AppKit                              0x0000000185db5f68 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5308
+23  AppKit                              0x0000000185d787b0 block_destroy_helper + 5940
+24  AppKit                              0x0000000185d78dc8 block_destroy_helper + 7500
+25  AppKit                              0x000000018670e270 ___NSViewUpdateConstraints_block_invoke + 100
+26  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108
+27  AppKit                              0x0000000185a7f598 _NSViewUpdateConstraints + 96
+28  AppKit                              0x00000001866fcb48 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 804
+29  AppKit                              0x00000001866fc998 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 372
+30  AppKit                              0x00000001866fd080 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2 + 52
+31  AppKit                              0x0000000185a7f39c __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke + 224
+32  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108
+33  AppKit                              0x0000000185a7f2b0 -[NSView updateConstraintsForSubtreeIfNeeded] + 96
+34  AppKit                              0x0000000186a5f2cc -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded] + 172
+35  AppKit                              0x0000000185a90334 __NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke + 364
+36  AppKit                              0x0000000185a90194 NSDisplayCycleObserverInvoke + 168
+37  AppKit                              0x0000000185a8fe10 NSDisplayCycleFlush + 656
+38  QuartzCore                          0x000000018b2eed4c _ZN2CA11Transaction19run_commit_handlersE18CATransactionPhase + 120
+39  QuartzCore                          0x000000018b2ed2f4 _ZN2CA11Transaction6commitEv + 316
+40  QuartzCore                          0x000000018b4d3f74 _ZN2CA11Transaction25flush_as_runloop_observerEb + 140
+41  AppKit                              0x0000000186140510 stepTransactionFlush + 220
+42  UpdateCycle                         0x000000026ff402fc _ZN2UC10DriverCore18continueProcessingEv + 84
+43  CoreFoundation                      0x000000018162c9f8 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + 28
+44  CoreFoundation                      0x000000018162c98c __CFRunLoopDoSource0 + 172
+45  CoreFoundation                      0x000000018162c6f8 __CFRunLoopDoSources0 + 232
+46  CoreFoundation                      0x000000018162b388 __CFRunLoopRun + 820
+47  CoreFoundation                      0x00000001816e5e34 _CFRunLoopRunSpecificWithOptions + 532
+48  HIToolbox                           0x000000018e11b790 RunCurrentEventLoopInMode + 316
+49  HIToolbox                           0x000000018e11eab8 ReceiveNextEventCommon + 488
+50  HIToolbox                           0x000000018e2a8b64 _BlockUntilNextEventMatchingListInMode + 48
+51  AppKit                              0x0000000185f44b5c _DPSBlockUntilNextEventMatchingListInMode + 236
+52  AppKit                              0x0000000185a3ee48 _DPSNextEvent + 588
+53  AppKit                              0x0000000186509d0c -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688
+54  AppKit                              0x0000000186509a18 -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72
+55  AppKit                              0x0000000185a37780 -[NSApplication run] + 368
+56  AppKit                              0x0000000185a236dc NSApplicationMain + 880
+57  SwiftUI                             0x00000001b56823ec $s7SwiftUI6runAppys5NeverOSo21NSApplicationDelegate_So11NSResponderCXcFTf4e_nAA07TestingdG0C_Tg5Tm + 168
+58  SwiftUI                             0x00000001b5a3bb40 $s7SwiftUI6runAppys5NeverOxAA0D0RzlF + 112
+59  SwiftUI                             0x00000001b5d061d8 $s7SwiftUI3AppPAAE4mainyyFZ + 224
+60  KinshasaApp                         0x00000001046fe3e4 KinshasaApp_main + 36
+61  dyld                                0x00000001811c5d54 start + 7184
+Application Specific Backtrace 1:
+0   CoreFoundation                      0x00000001816798ec __exceptionPreprocess + 176
+1   libobjc.A.dylib                     0x0000000181152418 objc_exception_throw + 88
+2   CoreFoundation                      0x00000001817470f0 -[NSException initWithCoder:] + 0
+3   AppKit                              0x00000001865fecc0 -[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints] + 1716
+4   AppKit                              0x0000000185a4bfb4 -[NSView _informContainerThatSubviewsNeedUpdateConstraints] + 64
+5   AppKit                              0x00000001866fd3fc -[NSView setNeedsUpdateConstraints:] + 468
+6   SwiftUI                             0x00000001b5ddd894 $s7SwiftUI13NSHostingViewC14setNeedsUpdateyyF + 184
+7   SwiftUI                             0x00000001b5df13dc $s7SwiftUI13NSHostingViewC13requestUpdate5afterySd_tF + 700
+8   SwiftUICore                         0x000000022d726a14 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE14graphDidChangeyyF + 108
+9   SwiftUICore                         0x000000022d72d928 $s7SwiftUI9ViewGraphC7setSizeyyAA0cF0VF + 140
+10  SwiftUICore                         0x000000022d72ce9c $s7SwiftUI9ViewGraphC15setProposedSizeyySo6CGSizeVF + 32
+11  SwiftUI                             0x00000001b5dff0d0 $s7SwiftUI13NSHostingViewC10updateSizeyyF + 84
+12  SwiftUICore                         0x000000022d728aec $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyFyyXEfU_ + 728
+13  SwiftUICore                         0x000000022d7283a4 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyF + 288
+14  SwiftUICore                         0x000000022d7285f8 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE07_updatecD04bodyqd__Sgqd__AA0cD0CXE_tlF + 212
+15  SwiftUICore                         0x000000022d726524 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE13_sizeThatFitsySo6CGSizeVAA08ProposedC4SizeVF + 108
+16  SwiftUI                             0x00000001b5ddc524 $s7SwiftUI13NSHostingViewC7minSize33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyFTm + 284
+17  SwiftUI                             0x00000001b5ddc610 $s7SwiftUI13NSHostingViewC37minSizeRoundedRespectingSizingOptions33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyF + 96
+18  SwiftUI                             0x00000001b5ddcc24 $s7SwiftUI13NSHostingViewC41updateWindowContentSizeExtremaIfNecessary33_32B6F54841135BB466A5C1362EB89D05LLyyF + 684
+19  SwiftUI                             0x00000001b5dee914 $s7SwiftUI13NSHostingViewC17updateConstraintsyyF + 132
+20  SwiftUI                             0x00000001b5deea54 $s7SwiftUI13NSHostingViewC17updateConstraintsyyFTo + 28
+21  AppKit                              0x0000000185db5f40 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5268
+22  AppKit                              0x0000000185db5f68 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5308
+23  AppKit                              0x0000000185d787b0 block_destroy_helper + 5940
+24  AppKit                              0x0000000185d78dc8 block_destroy_helper + 7500
+25  AppKit                              0x000000018670e270 ___NSViewUpdateConstraints_block_invoke + 100
+26  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108
+27  AppKit                              0x0000000185a7f598 _NSViewUpdateConstraints + 96
+28  AppKit                              0x00000001866fcb48 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 804
+29  AppKit                              0x00000001866fc998 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 372
+30  AppKit                              0x00000001866fd080 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2 + 52
+31  AppKit                              0x0000000185a7f39c __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke + 224
+32  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108
+33  AppKit                              0x0000000185a7f2b0 -[NSView updateConstraintsForSubtreeIfNeeded] + 96
+34  AppKit                              0x0000000186a5f2cc -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded] + 172
+35  AppKit                              0x0000000185a90334 __NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke + 364
+36  AppKit                              0x0000000185a90194 NSDisplayCycleObserverInvoke + 168
+37  AppKit                              0x0000000185a8fe10 NSDisplayCycleFlush + 656
+38  QuartzCore                          0x000000018b2eed4c _ZN2CA11Transaction19run_commit_handlersE18CATransactionPhase + 120
+39  QuartzCore                          0x000000018b2ed2f4 _ZN2CA11Transaction6commitEv + 316
+40  QuartzCore                          0x000000018b4d3f74 _ZN2CA11Transaction25flush_as_runloop_observerEb + 140
+41  AppKit                              0x0000000186140510 stepTransactionFlush + 220
+42  UpdateCycle                         0x000000026ff402fc _ZN2UC10DriverCore18continueProcessingEv + 84
+43  CoreFoundation                      0x000000018162c9f8 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + 28
+44  CoreFoundation                      0x000000018162c98c __CFRunLoopDoSource0 + 172
+45  CoreFoundation                      0x000000018162c6f8 __CFRunLoopDoSources0 + 232
+46  CoreFoundation                      0x000000018162b388 __CFRunLoopRun + 820
+47  CoreFoundation                      0x00000001816e5e34 _CFRunLoopRunSpecificWithOptions + 532
+48  HIToolbox                           0x000000018e11b790 RunCurrentEventLoopInMode + 316
+49  HIToolbox                           0x000000018e11eab8 ReceiveNextEventCommon + 488
+50  HIToolbox                           0x000000018e2a8b64 _BlockUntilNextEventMatchingListInMode + 48
+51  AppKit                              0x0000000185f44b5c _DPSBlockUntilNextEventMatchingListInMode + 236
+52  AppKit                              0x0000000185a3ee48 _DPSNextEvent + 588
+53  AppKit                              0x0000000186509d0c -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688
+54  AppKit                              0x0000000186509a18 -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72
+55  AppKit                              0x0000000185a37780 -[NSApplication run] + 368
+56  AppKit                              0x0000000185a236dc NSApplicationMain + 880
+57  SwiftUI                             0x00000001b56823ec $s7SwiftUI6runAppys5NeverOSo21NSApplicationDelegate_So11NSResponderCXcFTf4e_nAA07TestingdG0C_Tg5Tm + 168
+58  SwiftUI                             0x00000001b5a3bb40 $s7SwiftUI6runAppys5NeverOxAA0D0RzlF + 112
+59  SwiftUI                             0x00000001b5d061d8 $s7SwiftUI3AppPAAE4mainyyFZ + 224
+60  KinshasaApp                         0x00000001046fe3e4 KinshasaApp_main + 36
+61  dyld                                0x00000001811c5d54 start + 7184
+
+
+Thread 0 Crashed::  Dispatch queue: com.apple.main-thread
+0   AppKit                        	       0x185fa9c7c +[NSApplication _crashOnException:] + 256
+1   AppKit                        	       0x185d78c24 0x185a1f000 + 3513380
+2   AppKit                        	       0x185d78dc8 0x185a1f000 + 3513800
+3   AppKit                        	       0x18670e270 ___NSViewUpdateConstraints_block_invoke + 100
+4   AppKit                        	       0x185a60a10 NSPerformVisuallyAtomicChange + 108
+5   AppKit                        	       0x185a7f598 _NSViewUpdateConstraints + 96
+6   AppKit                        	       0x1866fcb48 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 804
+7   AppKit                        	       0x1866fc998 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 372
+8   AppKit                        	       0x1866fd080 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2 + 52
+9   AppKit                        	       0x185a7f39c __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke + 224
+10  AppKit                        	       0x185a60a10 NSPerformVisuallyAtomicChange + 108
+11  AppKit                        	       0x185a7f2b0 -[NSView updateConstraintsForSubtreeIfNeeded] + 96
+12  AppKit                        	       0x186a5f2cc -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded] + 172
+13  AppKit                        	       0x185a90334 __NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke + 364
+14  AppKit                        	       0x185a90194 NSDisplayCycleObserverInvoke + 168
+15  AppKit                        	       0x185a8fe10 NSDisplayCycleFlush + 656
+16  QuartzCore                    	       0x18b2eed4c CA::Transaction::run_commit_handlers(CATransactionPhase) + 120
+17  QuartzCore                    	       0x18b2ed2f4 CA::Transaction::commit() + 316
+18  QuartzCore                    	       0x18b4d3f74 CA::Transaction::flush_as_runloop_observer(bool) + 140
+19  AppKit                        	       0x186140510 stepTransactionFlush + 220
+20  UpdateCycle                   	       0x26ff402fc UC::DriverCore::continueProcessing() + 84
+21  CoreFoundation                	       0x18162c9f8 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + 28
+22  CoreFoundation                	       0x18162c98c __CFRunLoopDoSource0 + 172
+23  CoreFoundation                	       0x18162c6f8 __CFRunLoopDoSources0 + 232
+24  CoreFoundation                	       0x18162b388 __CFRunLoopRun + 820
+25  CoreFoundation                	       0x1816e5e34 _CFRunLoopRunSpecificWithOptions + 532
+26  HIToolbox                     	       0x18e11b790 RunCurrentEventLoopInMode + 316
+27  HIToolbox                     	       0x18e11eab8 ReceiveNextEventCommon + 488
+28  HIToolbox                     	       0x18e2a8b64 _BlockUntilNextEventMatchingListInMode + 48
+29  AppKit                        	       0x185f44b5c _DPSBlockUntilNextEventMatchingListInMode + 236
+30  AppKit                        	       0x185a3ee48 _DPSNextEvent + 588
+31  AppKit                        	       0x186509d0c -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688
+32  AppKit                        	       0x186509a18 -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72
+33  AppKit                        	       0x185a37780 -[NSApplication run] + 368
+34  AppKit                        	       0x185a236dc NSApplicationMain + 880
+35  SwiftUI                       	       0x1b56823ec specialized runApp(_:) + 168
+36  SwiftUI                       	       0x1b5a3bb40 runApp<A>(_:) + 112
+37  SwiftUI                       	       0x1b5d061d8 static App.main() + 224
+38  KinshasaApp                   	       0x1046fe3e4 static KinshasaApp.$main() + 24 [inlined]
+39  KinshasaApp                   	       0x1046fe3e4 KinshasaApp_main + 36
+40  dyld                          	       0x1811c5d54 start + 7184
+
+Thread 1:
+
+Thread 2:
+
+Thread 3:
+
+Thread 4:
+
+Thread 5:: com.apple.NSEventThread
+0   libsystem_kernel.dylib        	       0x18154ac34 mach_msg2_trap + 8
+1   libsystem_kernel.dylib        	       0x18155d028 mach_msg2_internal + 76
+2   libsystem_kernel.dylib        	       0x18155398c mach_msg_overwrite + 484
+3   libsystem_kernel.dylib        	       0x18154afb4 mach_msg + 24
+4   CoreFoundation                	       0x18162cba0 __CFRunLoopServiceMachPort + 160
+5   CoreFoundation                	       0x18162b4f8 __CFRunLoopRun + 1188
+6   CoreFoundation                	       0x1816e5e34 _CFRunLoopRunSpecificWithOptions + 532
+7   AppKit                        	       0x185acea34 _NSEventThread + 184
+8   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+9   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 6:: caulk.messenger.shared:17
+0   libsystem_kernel.dylib        	       0x18154abb0 semaphore_wait_trap + 8
+1   caulk                         	       0x18dba3e08 caulk::semaphore::timed_wait(double) + 224
+2   caulk                         	       0x18dba3cb0 caulk::concurrent::details::worker_thread::run() + 32
+3   caulk                         	       0x18dba3950 void* caulk::thread_proxy<std::__1::tuple<caulk::thread::attributes, void (caulk::concurrent::details::worker_thread::*)(), std::__1::tuple<caulk::concurrent::details::worker_thread*>>>(void*) + 96
+4   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+5   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 7:: caulk.messenger.shared:high
+0   libsystem_kernel.dylib        	       0x18154abb0 semaphore_wait_trap + 8
+1   caulk                         	       0x18dba3e08 caulk::semaphore::timed_wait(double) + 224
+2   caulk                         	       0x18dba3cb0 caulk::concurrent::details::worker_thread::run() + 32
+3   caulk                         	       0x18dba3950 void* caulk::thread_proxy<std::__1::tuple<caulk::thread::attributes, void (caulk::concurrent::details::worker_thread::*)(), std::__1::tuple<caulk::concurrent::details::worker_thread*>>>(void*) + 96
+4   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+5   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 8:: caulk::deferred_logger
+0   libsystem_kernel.dylib        	       0x18154abb0 semaphore_wait_trap + 8
+1   caulk                         	       0x18dba3e08 caulk::semaphore::timed_wait(double) + 224
+2   caulk                         	       0x18dba3cb0 caulk::concurrent::details::worker_thread::run() + 32
+3   caulk                         	       0x18dba3950 void* caulk::thread_proxy<std::__1::tuple<caulk::thread::attributes, void (caulk::concurrent::details::worker_thread::*)(), std::__1::tuple<caulk::concurrent::details::worker_thread*>>>(void*) + 96
+4   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+5   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 9:: com.apple.audio.IOThread.client
+0   libsystem_kernel.dylib        	       0x18154abbc semaphore_wait_signal_trap + 8
+1   caulk                         	       0x18dbc0fac caulk::mach::semaphore::wait_signal_or_error(caulk::mach::semaphore&) + 36
+2   CoreAudio                     	       0x1848a36f0 HALC_ProxyIOContext::IOWorkLoop() + 5052
+3   CoreAudio                     	       0x1848a1c8c invocation function for block in HALC_ProxyIOContext::HALC_ProxyIOContext(unsigned int, unsigned int) + 172
+4   CoreAudio                     	       0x184a6f710 HALC_IOThread::Entry(void*) + 88
+5   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+6   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 10:: AudioSession - RootQueue
+0   libsystem_kernel.dylib        	       0x18154abc8 semaphore_timedwait_trap + 8
+1   libdispatch.dylib             	       0x181405c8c _dispatch_sema4_timedwait + 64
+2   libdispatch.dylib             	       0x1813d2f08 _dispatch_semaphore_wait_slow + 76
+3   libdispatch.dylib             	       0x1813e2dc0 _dispatch_worker_thread + 324
+4   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+5   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 11:: CVDisplayLink
+0   libsystem_kernel.dylib        	       0x18154e4f8 __psynch_cvwait + 8
+1   libsystem_pthread.dylib       	       0x18158e108 _pthread_cond_wait + 1028
+2   CoreVideo                     	       0x18bbb8b3c CVDisplayLink::waitUntil(unsigned long long) + 336
+3   CoreVideo                     	       0x18bbb7c24 CVDisplayLink::runIOThread() + 500
+4   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+5   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+Thread 12:: HIE: M_ d9ed38585cee7b8d 2026-02-18 21:58:32.922
+0   libsystem_kernel.dylib        	       0x18154ac34 mach_msg2_trap + 8
+1   libsystem_kernel.dylib        	       0x18155d028 mach_msg2_internal + 76
+2   libsystem_kernel.dylib        	       0x18157a7f4 thread_suspend + 108
+3   HIServices                    	       0x188c403f4 SOME_OTHER_THREAD_SWALLOWED_AT_LEAST_ONE_EXCEPTION + 20
+4   Foundation                    	       0x182e457a0 __NSThread__start__ + 732
+5   libsystem_pthread.dylib       	       0x18158dc08 _pthread_start + 136
+6   libsystem_pthread.dylib       	       0x181588ba8 thread_start + 8
+
+
+Thread 0 crashed with ARM Thread State (64-bit):
+    x0: 0x0000000b3c91a800   x1: 0x0000000b3d5d42ed   x2: 0xffffffffffffffec   x3: 0x0000000b3c91c2cc
+    x4: 0x0000000000cb8001   x5: 0x0000000000000020   x6: 0x0000000b3c91a800   x7: 0x0000000000001b0c
+    x8: 0x00000001ee508000   x9: 0x38e2854c27870001  x10: 0x38e2854c27870001  x11: 0x000000000000007f
+   x12: 0x0000000000000068  x13: 0x0000000b3c12d670  x14: 0x01000001ee4ce739  x15: 0x00000001ee4ce738
+   x16: 0x0000000181597360  x17: 0x00000001efa6b708  x18: 0x0000000000000000  x19: 0x0000000b3da3e2b0
+   x20: 0x0000000b3cc14900  x21: 0x0000000b3da3e2b0  x22: 0x000000029fe611b8  x23: 0x000000016b70c9d0
+   x24: 0x0000000b3c320c80  x25: 0x0000000b3c3201c0  x26: 0x000000016b70c9e0  x27: 0x0000000b3e03c630
+   x28: 0x0000000b3e03c720   fp: 0x000000016b70c9c0   lr: 0x0000000185fa9c74
+    sp: 0x000000016b70c980   pc: 0x0000000185fa9c7c cpsr: 0x60001000
+   far: 0x0000000000000000  esr: 0xf2000001 (Breakpoint) brk 1
+
+Binary Images:
+       0x1046f0000 -        0x104707fff com.thiagoxp95.kinshasaapp (0.1.0) <1479ce34-5b6b-31f2-a101-c75e51d999fa> /Users/USER/*/KinshasaApp.app/Contents/MacOS/KinshasaApp
+       0x10cdd8000 -        0x10cde3fff libobjc-trampolines.dylib (*) <d4baeab8-b553-3779-a0ff-d8848e7a22df> /usr/lib/libobjc-trampolines.dylib
+       0x1182a4000 -        0x1189f3fff com.apple.AGXMetalG13X (342.3) <e72567a6-9e47-382e-82bf-144fa719bba0> /System/Library/Extensions/AGXMetalG13X.bundle/Contents/MacOS/AGXMetalG13X
+       0x10b8d4000 -        0x10ba17fff com.apple.audio.units.Components (1.14) <0312381d-61ae-3ab9-9cea-b1e46a0c4e54> /System/Library/Components/CoreAudio.component/Contents/MacOS/CoreAudio
+       0x185a1f000 -        0x18714e27f com.apple.AppKit (6.9) <4e909aec-68bc-3fc9-a87a-de928e1e36e1> /System/Library/Frameworks/AppKit.framework/Versions/C/AppKit
+       0x18b2eb000 -        0x18b6fbbdf com.apple.QuartzCore (1193.49.3) <0bc5d4e0-0414-3f32-8aed-629119615d8f> /System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore
+       0x26ff3f000 -        0x26ff411ff com.apple.UpdateCycle (1) <b91f87ff-6896-3c6d-8ef2-1c776fce34be> /System/Library/PrivateFrameworks/UpdateCycle.framework/Versions/A/UpdateCycle
+       0x1815cd000 -        0x181b15c3f com.apple.CoreFoundation (6.9) <649000a2-3eb4-3cf5-970a-d3cb37b5780c> /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation
+       0x18e05a000 -        0x18e35d27f com.apple.HIToolbox (2.1.1) <fb92ce0c-1ee5-3f03-992c-df53ed9b3cb4> /System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/HIToolbox
+       0x1b5571000 -        0x1b6cb7d1f com.apple.SwiftUI (7.2.5.1.401) <f0703a94-2852-3e83-9379-1088351e37c9> /System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI
+       0x1811bd000 -        0x18125bfc3 dyld (*) <0975afba-c46b-364c-bd84-a75daa9e455a> /usr/lib/dyld
+               0x0 - 0xffffffffffffffff ??? (*) <00000000-0000-0000-0000-000000000000> ???
+       0x181594000 -        0x18159c3ef libsystem_platform.dylib (*) <4dbaf982-1576-3ffc-86be-03a9d2c96be5> /usr/lib/system/libsystem_platform.dylib
+       0x18154a000 -        0x18158649f libsystem_kernel.dylib (*) <548c45c8-9733-3f0d-8ef4-c06df1df2ad0> /usr/lib/system/libsystem_kernel.dylib
+       0x181587000 -        0x181593abb libsystem_pthread.dylib (*) <527c4ba0-91a5-378b-b3e2-d38269ca5a66> /usr/lib/system/libsystem_pthread.dylib
+       0x18dba2000 -        0x18dbcad7f com.apple.audio.caulk (1.0) <d4644b08-911d-30af-82e7-c404878abf47> /System/Library/PrivateFrameworks/caulk.framework/Versions/A/caulk
+       0x18469d000 -        0x184e4857f com.apple.audio.CoreAudio (5.0) <f37b241b-2a83-3f86-bd94-329a18ba4715> /System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio
+       0x1813cf000 -        0x181415e5f libdispatch.dylib (*) <a4b349e8-dd6f-3b71-84d9-34f3b4acd849> /usr/lib/system/libdispatch.dylib
+       0x192af4000 -        0x192bb681f com.apple.MediaExperience (1.0) <20e67caa-84cf-379a-98e4-b84267bf9982> /System/Library/PrivateFrameworks/MediaExperience.framework/Versions/A/MediaExperience
+       0x18bbb5000 -        0x18bc38fff com.apple.CoreVideo (1.8) <3a2dcc01-a913-32cc-9fdf-3f8bb6eb1e46> /System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo
+       0x188c0a000 -        0x188c7617f com.apple.HIServices (1.22) <92eb48f7-1411-3740-a32d-945d8ae71a4a> /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/HIServices
+       0x182e1f000 -        0x183dc24df com.apple.Foundation (6.9) <6a518869-0a98-34cb-8a15-cc28f898255e> /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+
+External Modification Summary:
+  Calls made by other processes targeting this process:
+    task_for_pid: 0
+    thread_create: 0
+    thread_set_state: 0
+  Calls made by this process:
+    task_for_pid: 0
+    thread_create: 0
+    thread_set_state: 0
+  Calls made by all processes on this machine:
+    task_for_pid: 1
+    thread_create: 0
+    thread_set_state: 1
+
+VM Region Summary:
+ReadOnly portion of Libraries: Total=1.8G resident=0K(0%) swapped_out_or_unallocated=1.8G(100%)
+Writable regions: Total=166.0M written=1154K(1%) resident=578K(0%) swapped_out=576K(0%) unallocated=164.9M(99%)
+
+                                VIRTUAL   REGION 
+REGION TYPE                        SIZE    COUNT (non-coalesced) 
+===========                     =======  ======= 
+Accelerate framework               128K        1 
+Activity Tracing                   256K        1 
+AttributeGraph Data               1024K        1 
+CG image                           416K        1 
+ColorSync                           32K        2 
+CoreAnimation                     1648K       60 
+CoreGraphics                        48K        3 
+CoreUI image data                  384K        3 
+Foundation                          48K        2 
+Kernel Alloc Once                   32K        1 
+MALLOC                           147.3M       31 
+MALLOC guard page                 3376K        4 
+STACK GUARD                       56.2M       13 
+Stack                             14.4M       13 
+VM_ALLOCATE                        768K       11 
+__AUTH                            5741K      634 
+__AUTH_CONST                      87.3M     1013 
+__CTF                               824        1 
+__DATA                            35.0M      963 
+__DATA_CONST                      32.6M     1022 
+__DATA_DIRTY                      8630K      874 
+__FONT_DATA                        2352        1 
+__INFO_FILTER                         8        1 
+__LINKEDIT                       592.1M        5 
+__OBJC_RO                         78.4M        1 
+__OBJC_RW                         2570K        1 
+__TEXT                             1.2G     1045 
+__TPRO_CONST                       128K        2 
+mapped file                      259.5M       37 
+page table in kernel               578K        1 
+shared memory                      992K       17 
+===========                     =======  ======= 
+TOTAL                              2.5G     5765 
+
+
+-----------
+Full Report
+-----------
+
+{"app_name":"KinshasaApp","timestamp":"2026-02-18 21:58:41.00 -0500","app_version":"0.1.0","slice_uuid":"1479ce34-5b6b-31f2-a101-c75e51d999fa","build_version":"1","platform":1,"bundleID":"com.thiagoxp95.kinshasaapp","share_with_app_devs":0,"is_first_party":0,"bug_type":"309","os_version":"macOS 26.2 (25C56)","roots_installed":0,"name":"KinshasaApp","incident_id":"4D433D86-0E2F-4113-8580-76B9EB14B6B8"}
+{
+  "uptime" : 930000,
+  "procRole" : "Foreground",
+  "version" : 2,
+  "userID" : 501,
+  "deployVersion" : 210,
+  "modelCode" : "MacBookPro18,3",
+  "coalitionID" : 167386,
+  "osVersion" : {
+    "train" : "macOS 26.2",
+    "build" : "25C56",
+    "releaseType" : "User"
+  },
+  "captureTime" : "2026-02-18 21:58:33.0000 -0500",
+  "codeSigningMonitor" : 1,
+  "incident" : "4D433D86-0E2F-4113-8580-76B9EB14B6B8",
+  "pid" : 72102,
+  "translated" : false,
+  "cpuType" : "ARM-64",
+  "procLaunch" : "2026-02-18 21:58:12.2253 -0500",
+  "procStartAbsTime" : 22391703427749,
+  "procExitAbsTime" : 22392200370975,
+  "procName" : "KinshasaApp",
+  "procPath" : "\/Users\/USER\/*\/KinshasaApp.app\/Contents\/MacOS\/KinshasaApp",
+  "bundleInfo" : {"CFBundleShortVersionString":"0.1.0","CFBundleVersion":"1","CFBundleIdentifier":"com.thiagoxp95.kinshasaapp"},
+  "storeInfo" : {"deviceIdentifierForVendor":"659A68D9-9EC8-5BB6-9078-2CA59F11BE74","thirdParty":true},
+  "parentProc" : "launchd",
+  "parentPid" : 1,
+  "coalitionName" : "com.thiagoxp95.kinshasaapp",
+  "crashReporterKey" : "2475E24C-B0AF-C154-03FC-CD60E2D04994",
+  "appleIntelligenceStatus" : {"state":"unavailable","reasons":["notOptedIn","assetIsNotReady"]},
+  "developerMode" : 1,
+  "codeSigningID" : "com.thiagoxp95.kinshasaapp",
+  "codeSigningTeamID" : "",
+  "codeSigningFlags" : 570425857,
+  "codeSigningValidationCategory" : 10,
+  "codeSigningTrustLevel" : 4294967295,
+  "codeSigningAuxiliaryInfo" : 0,
+  "instructionByteStream" : {"beforePC":"ACABkSX27JfgAxOquHRElAL5NJBCoACRJYtElCR3QpToKjTwAO0F+Q==","atPC":"IAAg1PMDAKrhAQA04AMTqhMbLpT\/AwD5AACA0hX27JcvGy6UIAAg1A=="},
+  "bootSessionUUID" : "3B77C97B-3A30-4486-80DB-289363047945",
+  "wakeTime" : 133123,
+  "sleepWakeUUID" : "0A6B45BE-06DA-4502-B2D4-F256C3BDF1AC",
+  "sip" : "enabled",
+  "exception" : {"codes":"0x0000000000000001, 0x0000000185fa9c7c","rawCodes":[1,6542761084],"type":"EXC_BREAKPOINT","signal":"SIGTRAP"},
+  "termination" : {"flags":0,"code":5,"namespace":"SIGNAL","indicator":"Trace\/BPT trap: 5","byProc":"exc handler","byPid":72102},
+  "os_fault" : {"process":"KinshasaApp"},
+  "asiBacktraces" : ["0   CoreFoundation                      0x00000001816798ec __exceptionPreprocess + 176\n1   libobjc.A.dylib                     0x0000000181152418 objc_exception_throw + 88\n2   CoreFoundation                      0x00000001817470f0 -[NSException initWithCoder:] + 0\n3   AppKit                              0x00000001865fecc0 -[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints] + 1716\n4   AppKit                              0x0000000185a4bfb4 -[NSView _informContainerThatSubviewsNeedUpdateConstraints] + 64\n5   AppKit                              0x00000001866fd3fc -[NSView setNeedsUpdateConstraints:] + 468\n6   SwiftUI                             0x00000001b5ddd894 $s7SwiftUI13NSHostingViewC14setNeedsUpdateyyF + 184\n7   SwiftUI                             0x00000001b5df13dc $s7SwiftUI13NSHostingViewC13requestUpdate5afterySd_tF + 700\n8   SwiftUICore                         0x000000022d726a14 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE14graphDidChangeyyF + 108\n9   SwiftUICore                         0x000000022d72d928 $s7SwiftUI9ViewGraphC7setSizeyyAA0cF0VF + 140\n10  SwiftUICore                         0x000000022d72ce9c $s7SwiftUI9ViewGraphC15setProposedSizeyySo6CGSizeVF + 32\n11  SwiftUI                             0x00000001b5dff0d0 $s7SwiftUI13NSHostingViewC10updateSizeyyF + 84\n12  SwiftUICore                         0x000000022d728aec $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyFyyXEfU_ + 728\n13  SwiftUICore                         0x000000022d7283a4 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyF + 288\n14  SwiftUICore                         0x000000022d7285f8 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE07_updatecD04bodyqd__Sgqd__AA0cD0CXE_tlF + 212\n15  SwiftUICore                         0x000000022d726524 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE13_sizeThatFitsySo6CGSizeVAA08ProposedC4SizeVF + 108\n16  SwiftUI                             0x00000001b5ddc524 $s7SwiftUI13NSHostingViewC7minSize33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyFTm + 284\n17  SwiftUI                             0x00000001b5ddc610 $s7SwiftUI13NSHostingViewC37minSizeRoundedRespectingSizingOptions33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyF + 96\n18  SwiftUI                             0x00000001b5ddcc24 $s7SwiftUI13NSHostingViewC41updateWindowContentSizeExtremaIfNecessary33_32B6F54841135BB466A5C1362EB89D05LLyyF + 684\n19  SwiftUI                             0x00000001b5dee914 $s7SwiftUI13NSHostingViewC17updateConstraintsyyF + 132\n20  SwiftUI                             0x00000001b5deea54 $s7SwiftUI13NSHostingViewC17updateConstraintsyyFTo + 28\n21  AppKit                              0x0000000185db5f40 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5268\n22  AppKit                              0x0000000185db5f68 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5308\n23  AppKit                              0x0000000185d787b0 block_destroy_helper + 5940\n24  AppKit                              0x0000000185d78dc8 block_destroy_helper + 7500\n25  AppKit                              0x000000018670e270 ___NSViewUpdateConstraints_block_invoke + 100\n26  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108\n27  AppKit                              0x0000000185a7f598 _NSViewUpdateConstraints + 96\n28  AppKit                              0x00000001866fcb48 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 804\n29  AppKit                              0x00000001866fc998 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 372\n30  AppKit                              0x00000001866fd080 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2 + 52\n31  AppKit                              0x0000000185a7f39c __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke + 224\n32  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108\n33  AppKit                              0x0000000185a7f2b0 -[NSView updateConstraintsForSubtreeIfNeeded] + 96\n34  AppKit                              0x0000000186a5f2cc -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded] + 172\n35  AppKit                              0x0000000185a90334 __NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke + 364\n36  AppKit                              0x0000000185a90194 NSDisplayCycleObserverInvoke + 168\n37  AppKit                              0x0000000185a8fe10 NSDisplayCycleFlush + 656\n38  QuartzCore                          0x000000018b2eed4c _ZN2CA11Transaction19run_commit_handlersE18CATransactionPhase + 120\n39  QuartzCore                          0x000000018b2ed2f4 _ZN2CA11Transaction6commitEv + 316\n40  QuartzCore                          0x000000018b4d3f74 _ZN2CA11Transaction25flush_as_runloop_observerEb + 140\n41  AppKit                              0x0000000186140510 stepTransactionFlush + 220\n42  UpdateCycle                         0x000000026ff402fc _ZN2UC10DriverCore18continueProcessingEv + 84\n43  CoreFoundation                      0x000000018162c9f8 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + 28\n44  CoreFoundation                      0x000000018162c98c __CFRunLoopDoSource0 + 172\n45  CoreFoundation                      0x000000018162c6f8 __CFRunLoopDoSources0 + 232\n46  CoreFoundation                      0x000000018162b388 __CFRunLoopRun + 820\n47  CoreFoundation                      0x00000001816e5e34 _CFRunLoopRunSpecificWithOptions + 532\n48  HIToolbox                           0x000000018e11b790 RunCurrentEventLoopInMode + 316\n49  HIToolbox                           0x000000018e11eab8 ReceiveNextEventCommon + 488\n50  HIToolbox                           0x000000018e2a8b64 _BlockUntilNextEventMatchingListInMode + 48\n51  AppKit                              0x0000000185f44b5c _DPSBlockUntilNextEventMatchingListInMode + 236\n52  AppKit                              0x0000000185a3ee48 _DPSNextEvent + 588\n53  AppKit                              0x0000000186509d0c -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688\n54  AppKit                              0x0000000186509a18 -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72\n55  AppKit                              0x0000000185a37780 -[NSApplication run] + 368\n56  AppKit                              0x0000000185a236dc NSApplicationMain + 880\n57  SwiftUI                             0x00000001b56823ec $s7SwiftUI6runAppys5NeverOSo21NSApplicationDelegate_So11NSResponderCXcFTf4e_nAA07TestingdG0C_Tg5Tm + 168\n58  SwiftUI                             0x00000001b5a3bb40 $s7SwiftUI6runAppys5NeverOxAA0D0RzlF + 112\n59  SwiftUI                             0x00000001b5d061d8 $s7SwiftUI3AppPAAE4mainyyFZ + 224\n60  KinshasaApp                         0x00000001046fe3e4 KinshasaApp_main + 36\n61  dyld                                0x00000001811c5d54 start + 7184","0   CoreFoundation                      0x00000001816798ec __exceptionPreprocess + 176\n1   libobjc.A.dylib                     0x0000000181152418 objc_exception_throw + 88\n2   CoreFoundation                      0x00000001817470f0 -[NSException initWithCoder:] + 0\n3   AppKit                              0x00000001865fecc0 -[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints] + 1716\n4   AppKit                              0x0000000185a4bfb4 -[NSView _informContainerThatSubviewsNeedUpdateConstraints] + 64\n5   AppKit                              0x00000001866fd3fc -[NSView setNeedsUpdateConstraints:] + 468\n6   SwiftUI                             0x00000001b5ddd894 $s7SwiftUI13NSHostingViewC14setNeedsUpdateyyF + 184\n7   SwiftUI                             0x00000001b5df13dc $s7SwiftUI13NSHostingViewC13requestUpdate5afterySd_tF + 700\n8   SwiftUICore                         0x000000022d726a14 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE14graphDidChangeyyF + 108\n9   SwiftUICore                         0x000000022d72d928 $s7SwiftUI9ViewGraphC7setSizeyyAA0cF0VF + 140\n10  SwiftUICore                         0x000000022d72ce9c $s7SwiftUI9ViewGraphC15setProposedSizeyySo6CGSizeVF + 32\n11  SwiftUI                             0x00000001b5dff0d0 $s7SwiftUI13NSHostingViewC10updateSizeyyF + 84\n12  SwiftUICore                         0x000000022d728aec $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyFyyXEfU_ + 728\n13  SwiftUICore                         0x000000022d7283a4 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE06updateD0yyF + 288\n14  SwiftUICore                         0x000000022d7285f8 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE07_updatecD04bodyqd__Sgqd__AA0cD0CXE_tlF + 212\n15  SwiftUICore                         0x000000022d726524 $s7SwiftUI25ViewGraphRootValueUpdaterPAAE13_sizeThatFitsySo6CGSizeVAA08ProposedC4SizeVF + 108\n16  SwiftUI                             0x00000001b5ddc524 $s7SwiftUI13NSHostingViewC7minSize33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyFTm + 284\n17  SwiftUI                             0x00000001b5ddc610 $s7SwiftUI13NSHostingViewC37minSizeRoundedRespectingSizingOptions33_32B6F54841135BB466A5C1362EB89D05LLSo6CGSizeVyF + 96\n18  SwiftUI                             0x00000001b5ddcc24 $s7SwiftUI13NSHostingViewC41updateWindowContentSizeExtremaIfNecessary33_32B6F54841135BB466A5C1362EB89D05LLyyF + 684\n19  SwiftUI                             0x00000001b5dee914 $s7SwiftUI13NSHostingViewC17updateConstraintsyyF + 132\n20  SwiftUI                             0x00000001b5deea54 $s7SwiftUI13NSHostingViewC17updateConstraintsyyFTo + 28\n21  AppKit                              0x0000000185db5f40 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5268\n22  AppKit                              0x0000000185db5f68 __getCGDisplayListGetHashSymbolLoc_block_invoke + 5308\n23  AppKit                              0x0000000185d787b0 block_destroy_helper + 5940\n24  AppKit                              0x0000000185d78dc8 block_destroy_helper + 7500\n25  AppKit                              0x000000018670e270 ___NSViewUpdateConstraints_block_invoke + 100\n26  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108\n27  AppKit                              0x0000000185a7f598 _NSViewUpdateConstraints + 96\n28  AppKit                              0x00000001866fcb48 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 804\n29  AppKit                              0x00000001866fc998 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:] + 372\n30  AppKit                              0x00000001866fd080 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2 + 52\n31  AppKit                              0x0000000185a7f39c __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke + 224\n32  AppKit                              0x0000000185a60a10 NSPerformVisuallyAtomicChange + 108\n33  AppKit                              0x0000000185a7f2b0 -[NSView updateConstraintsForSubtreeIfNeeded] + 96\n34  AppKit                              0x0000000186a5f2cc -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded] + 172\n35  AppKit                              0x0000000185a90334 __NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke + 364\n36  AppKit                              0x0000000185a90194 NSDisplayCycleObserverInvoke + 168\n37  AppKit                              0x0000000185a8fe10 NSDisplayCycleFlush + 656\n38  QuartzCore                          0x000000018b2eed4c _ZN2CA11Transaction19run_commit_handlersE18CATransactionPhase + 120\n39  QuartzCore                          0x000000018b2ed2f4 _ZN2CA11Transaction6commitEv + 316\n40  QuartzCore                          0x000000018b4d3f74 _ZN2CA11Transaction25flush_as_runloop_observerEb + 140\n41  AppKit                              0x0000000186140510 stepTransactionFlush + 220\n42  UpdateCycle                         0x000000026ff402fc _ZN2UC10DriverCore18continueProcessingEv + 84\n43  CoreFoundation                      0x000000018162c9f8 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + 28\n44  CoreFoundation                      0x000000018162c98c __CFRunLoopDoSource0 + 172\n45  CoreFoundation                      0x000000018162c6f8 __CFRunLoopDoSources0 + 232\n46  CoreFoundation                      0x000000018162b388 __CFRunLoopRun + 820\n47  CoreFoundation                      0x00000001816e5e34 _CFRunLoopRunSpecificWithOptions + 532\n48  HIToolbox                           0x000000018e11b790 RunCurrentEventLoopInMode + 316\n49  HIToolbox                           0x000000018e11eab8 ReceiveNextEventCommon + 488\n50  HIToolbox                           0x000000018e2a8b64 _BlockUntilNextEventMatchingListInMode + 48\n51  AppKit                              0x0000000185f44b5c _DPSBlockUntilNextEventMatchingListInMode + 236\n52  AppKit                              0x0000000185a3ee48 _DPSNextEvent + 588\n53  AppKit                              0x0000000186509d0c -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:] + 688\n54  AppKit                              0x0000000186509a18 -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:] + 72\n55  AppKit                              0x0000000185a37780 -[NSApplication run] + 368\n56  AppKit                              0x0000000185a236dc NSApplicationMain + 880\n57  SwiftUI                             0x00000001b56823ec $s7SwiftUI6runAppys5NeverOSo21NSApplicationDelegate_So11NSResponderCXcFTf4e_nAA07TestingdG0C_Tg5Tm + 168\n58  SwiftUI                             0x00000001b5a3bb40 $s7SwiftUI6runAppys5NeverOxAA0D0RzlF + 112\n59  SwiftUI                             0x00000001b5d061d8 $s7SwiftUI3AppPAAE4mainyyFZ + 224\n60  KinshasaApp                         0x00000001046fe3e4 KinshasaApp_main + 36\n61  dyld                                0x00000001811c5d54 start + 7184"],
+  "extMods" : {"caller":{"thread_create":0,"thread_set_state":0,"task_for_pid":0},"system":{"thread_create":0,"thread_set_state":1,"task_for_pid":1},"targeted":{"thread_create":0,"thread_set_state":0,"task_for_pid":0},"warnings":0},
+  "faultingThread" : 0,
+  "threads" : [{"triggered":true,"id":51317917,"threadState":{"x":[{"value":48260818944},{"value":48274162413},{"value":18446744073709551596},{"value":48260825804},{"value":13336577},{"value":32},{"value":48260818944},{"value":6924},{"value":8293220352,"symbolLocation":1368,"symbol":"_NSEnablePersistentUI.sEnabled"},{"value":4098985172987740161},{"value":4098985172987740161},{"value":127},{"value":104},{"value":48252507760},{"value":72057602330912569,"symbolLocation":72057594037927937,"symbol":"OBJC_CLASS_$___NSCFString"},{"value":8292984632,"symbolLocation":0,"symbol":"OBJC_CLASS_$___NSCFString"},{"value":6465090400,"symbolLocation":0,"symbol":"_platform_memmove"},{"value":8315647752},{"value":0},{"value":48278790832},{"value":48263940352},{"value":48278790832},{"value":11272589752,"symbolLocation":0,"symbol":"value witness table for ObservationTracking._AccessList"},{"value":6097521104},{"value":48254553216},{"value":48254550464},{"value":6097521120},{"value":48285074992},{"value":48285075232}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6542761076},"cpsr":{"value":1610616832},"fp":{"value":6097521088},"sp":{"value":6097521024},"esr":{"value":4060086273,"description":"(Breakpoint) brk 1"},"pc":{"value":6542761084,"matchesCrashFrame":1},"far":{"value":0}},"queue":"com.apple.main-thread","frames":[{"imageOffset":5811324,"symbol":"+[NSApplication _crashOnException:]","symbolLocation":256,"imageIndex":4},{"imageOffset":3513380,"imageIndex":4},{"imageOffset":3513800,"imageIndex":4},{"imageOffset":13562480,"symbol":"___NSViewUpdateConstraints_block_invoke","symbolLocation":100,"imageIndex":4},{"imageOffset":268816,"symbol":"NSPerformVisuallyAtomicChange","symbolLocation":108,"imageIndex":4},{"imageOffset":394648,"symbol":"_NSViewUpdateConstraints","symbolLocation":96,"imageIndex":4},{"imageOffset":13491016,"symbol":"-[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:]","symbolLocation":804,"imageIndex":4},{"imageOffset":13490584,"symbol":"-[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:]","symbolLocation":372,"imageIndex":4},{"imageOffset":13492352,"symbol":"__45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2","symbolLocation":52,"imageIndex":4},{"imageOffset":394140,"symbol":"__45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke","symbolLocation":224,"imageIndex":4},{"imageOffset":268816,"symbol":"NSPerformVisuallyAtomicChange","symbolLocation":108,"imageIndex":4},{"imageOffset":393904,"symbol":"-[NSView updateConstraintsForSubtreeIfNeeded]","symbolLocation":96,"imageIndex":4},{"imageOffset":17040076,"symbol":"-[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded]","symbolLocation":172,"imageIndex":4},{"imageOffset":463668,"symbol":"__NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke","symbolLocation":364,"imageIndex":4},{"imageOffset":463252,"symbol":"NSDisplayCycleObserverInvoke","symbolLocation":168,"imageIndex":4},{"imageOffset":462352,"symbol":"NSDisplayCycleFlush","symbolLocation":656,"imageIndex":4},{"imageOffset":15692,"symbol":"CA::Transaction::run_commit_handlers(CATransactionPhase)","symbolLocation":120,"imageIndex":5},{"imageOffset":8948,"symbol":"CA::Transaction::commit()","symbolLocation":316,"imageIndex":5},{"imageOffset":2002804,"symbol":"CA::Transaction::flush_as_runloop_observer(bool)","symbolLocation":140,"imageIndex":5},{"imageOffset":7476496,"symbol":"stepTransactionFlush","symbolLocation":220,"imageIndex":4},{"imageOffset":4860,"symbol":"UC::DriverCore::continueProcessing()","symbolLocation":84,"imageIndex":6},{"imageOffset":391672,"symbol":"__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__","symbolLocation":28,"imageIndex":7},{"imageOffset":391564,"symbol":"__CFRunLoopDoSource0","symbolLocation":172,"imageIndex":7},{"imageOffset":390904,"symbol":"__CFRunLoopDoSources0","symbolLocation":232,"imageIndex":7},{"imageOffset":385928,"symbol":"__CFRunLoopRun","symbolLocation":820,"imageIndex":7},{"imageOffset":1150516,"symbol":"_CFRunLoopRunSpecificWithOptions","symbolLocation":532,"imageIndex":7},{"imageOffset":792464,"symbol":"RunCurrentEventLoopInMode","symbolLocation":316,"imageIndex":8},{"imageOffset":805560,"symbol":"ReceiveNextEventCommon","symbolLocation":488,"imageIndex":8},{"imageOffset":2419556,"symbol":"_BlockUntilNextEventMatchingListInMode","symbolLocation":48,"imageIndex":8},{"imageOffset":5397340,"symbol":"_DPSBlockUntilNextEventMatchingListInMode","symbolLocation":236,"imageIndex":4},{"imageOffset":130632,"symbol":"_DPSNextEvent","symbolLocation":588,"imageIndex":4},{"imageOffset":11447564,"symbol":"-[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:]","symbolLocation":688,"imageIndex":4},{"imageOffset":11446808,"symbol":"-[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:]","symbolLocation":72,"imageIndex":4},{"imageOffset":100224,"symbol":"-[NSApplication run]","symbolLocation":368,"imageIndex":4},{"imageOffset":18140,"symbol":"NSApplicationMain","symbolLocation":880,"imageIndex":4},{"imageOffset":1119212,"symbol":"specialized runApp(_:)","symbolLocation":168,"imageIndex":9},{"imageOffset":5024576,"symbol":"runApp<A>(_:)","symbolLocation":112,"imageIndex":9},{"imageOffset":7950808,"symbol":"static App.main()","symbolLocation":224,"imageIndex":9},{"imageOffset":58340,"sourceFile":"KinshasaApp.swift","symbol":"static KinshasaApp.$main()","imageIndex":0,"symbolLocation":24,"inline":true},{"imageOffset":58340,"sourceFile":"KinshasaApp.swift","symbol":"KinshasaApp_main","symbolLocation":36,"imageIndex":0},{"imageOffset":36180,"symbol":"start","symbolLocation":7184,"imageIndex":10}]},{"id":51317983,"frames":[],"threadState":{"x":[{"value":6098661376},{"value":9731},{"value":6098124800},{"value":0},{"value":409604},{"value":18446744073709551615},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":0},"cpsr":{"value":4096},"fp":{"value":0},"sp":{"value":6098661376},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6465031060},"far":{"value":0}}},{"id":51317989,"frames":[],"threadState":{"x":[{"value":6099234816},{"value":18195},{"value":6098698240},{"value":0},{"value":409604},{"value":18446744073709551615},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":0},"cpsr":{"value":4096},"fp":{"value":0},"sp":{"value":6099234816},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6465031060},"far":{"value":0}}},{"id":51317994,"frames":[],"threadState":{"x":[{"value":6099808256},{"value":19715},{"value":6099271680},{"value":0},{"value":409604},{"value":18446744073709551615},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":0},"cpsr":{"value":4096},"fp":{"value":0},"sp":{"value":6099808256},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6465031060},"far":{"value":0}}},{"id":51317995,"frames":[],"threadState":{"x":[{"value":6100381696},{"value":77339},{"value":6099845120},{"value":0},{"value":409604},{"value":18446744073709551615},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":0},"cpsr":{"value":4096},"fp":{"value":0},"sp":{"value":6100381696},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6465031060},"far":{"value":0}}},{"id":51317996,"name":"com.apple.NSEventThread","threadState":{"x":[{"value":268451845},{"value":21592279046},{"value":8589934592,"objc-selector":""},{"value":131954280235008},{"value":0},{"value":131954280235008},{"value":2},{"value":4294967295},{"value":0},{"value":17179869184},{"value":0},{"value":2},{"value":0},{"value":0},{"value":30723},{"value":0},{"value":18446744073709551569},{"value":8315654304},{"value":0},{"value":4294967295},{"value":2},{"value":131954280235008},{"value":0},{"value":131954280235008},{"value":6100951176},{"value":8589934592,"objc-selector":""},{"value":21592279046},{"value":18446744073709550527},{"value":4412409862}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6464852008},"cpsr":{"value":4096},"fp":{"value":6100951024},"sp":{"value":6100950944},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777268},"far":{"value":0}},"frames":[{"imageOffset":3124,"symbol":"mach_msg2_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":77864,"symbol":"mach_msg2_internal","symbolLocation":76,"imageIndex":13},{"imageOffset":39308,"symbol":"mach_msg_overwrite","symbolLocation":484,"imageIndex":13},{"imageOffset":4020,"symbol":"mach_msg","symbolLocation":24,"imageIndex":13},{"imageOffset":392096,"symbol":"__CFRunLoopServiceMachPort","symbolLocation":160,"imageIndex":7},{"imageOffset":386296,"symbol":"__CFRunLoopRun","symbolLocation":1188,"imageIndex":7},{"imageOffset":1150516,"symbol":"_CFRunLoopRunSpecificWithOptions","symbolLocation":532,"imageIndex":7},{"imageOffset":719412,"symbol":"_NSEventThread","symbolLocation":184,"imageIndex":4},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319221,"name":"caulk.messenger.shared:17","threadState":{"x":[{"value":14},{"value":1},{"value":0},{"value":1},{"value":0},{"value":1},{"value":0},{"value":0},{"value":0},{"value":4294967295},{"value":0},{"value":0},{"value":4483104792},{"value":6098087512},{"value":112},{"value":0},{"value":18446744073709551580},{"value":8315656784},{"value":0},{"value":48282165376},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6672760328},"cpsr":{"value":2147487744},"fp":{"value":6098087808},"sp":{"value":6098087776},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777136},"far":{"value":0}},"frames":[{"imageOffset":2992,"symbol":"semaphore_wait_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":7688,"symbol":"caulk::semaphore::timed_wait(double)","symbolLocation":224,"imageIndex":15},{"imageOffset":7344,"symbol":"caulk::concurrent::details::worker_thread::run()","symbolLocation":32,"imageIndex":15},{"imageOffset":6480,"symbol":"void* caulk::thread_proxy<std::__1::tuple<caulk::thread::attributes, void (caulk::concurrent::details::worker_thread::*)(), std::__1::tuple<caulk::concurrent::details::worker_thread*>>>(void*)","symbolLocation":96,"imageIndex":15},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319222,"name":"caulk.messenger.shared:high","threadState":{"x":[{"value":14},{"value":72763},{"value":72763},{"value":21},{"value":4294967295},{"value":0},{"value":0},{"value":0},{"value":0},{"value":4294967295},{"value":1},{"value":48254337128},{"value":0},{"value":0},{"value":0},{"value":0},{"value":18446744073709551580},{"value":8315656784},{"value":0},{"value":48282165600},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6672760328},"cpsr":{"value":2147487744},"fp":{"value":6101528448},"sp":{"value":6101528416},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777136},"far":{"value":0}},"frames":[{"imageOffset":2992,"symbol":"semaphore_wait_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":7688,"symbol":"caulk::semaphore::timed_wait(double)","symbolLocation":224,"imageIndex":15},{"imageOffset":7344,"symbol":"caulk::concurrent::details::worker_thread::run()","symbolLocation":32,"imageIndex":15},{"imageOffset":6480,"symbol":"void* caulk::thread_proxy<std::__1::tuple<caulk::thread::attributes, void (caulk::concurrent::details::worker_thread::*)(), std::__1::tuple<caulk::concurrent::details::worker_thread*>>>(void*)","symbolLocation":96,"imageIndex":15},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319258,"name":"caulk::deferred_logger","threadState":{"x":[{"value":14},{"value":1},{"value":0},{"value":1},{"value":0},{"value":1},{"value":0},{"value":0},{"value":0},{"value":4294967295},{"value":0},{"value":0},{"value":4483104792},{"value":6102101688},{"value":65532},{"value":0},{"value":18446744073709551580},{"value":8315656784},{"value":0},{"value":48282167640},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6672760328},"cpsr":{"value":2147487744},"fp":{"value":6102101888},"sp":{"value":6102101856},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777136},"far":{"value":0}},"frames":[{"imageOffset":2992,"symbol":"semaphore_wait_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":7688,"symbol":"caulk::semaphore::timed_wait(double)","symbolLocation":224,"imageIndex":15},{"imageOffset":7344,"symbol":"caulk::concurrent::details::worker_thread::run()","symbolLocation":32,"imageIndex":15},{"imageOffset":6480,"symbol":"void* caulk::thread_proxy<std::__1::tuple<caulk::thread::attributes, void (caulk::concurrent::details::worker_thread::*)(), std::__1::tuple<caulk::concurrent::details::worker_thread*>>>(void*)","symbolLocation":96,"imageIndex":15},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319260,"name":"com.apple.audio.IOThread.client","threadState":{"x":[{"value":14},{"value":113667},{"value":0},{"value":0},{"value":0},{"value":4483170528},{"value":48282225688},{"value":1},{"value":1},{"value":4098985172987740161},{"value":2199023256064},{"value":2199023256066},{"value":48},{"value":2047},{"value":0},{"value":5524},{"value":18446744073709551579},{"value":8315656792},{"value":0},{"value":48275025208},{"value":48275025200},{"value":48275025232},{"value":1},{"value":227},{"value":226},{"value":0},{"value":6523853784},{"value":48275025200},{"value":48275024384}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6672879532},"cpsr":{"value":1610616832},"fp":{"value":6103248128},"sp":{"value":6103248112},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777148},"far":{"value":0}},"frames":[{"imageOffset":3004,"symbol":"semaphore_wait_signal_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":126892,"symbol":"caulk::mach::semaphore::wait_signal_or_error(caulk::mach::semaphore&)","symbolLocation":36,"imageIndex":15},{"imageOffset":2123504,"symbol":"HALC_ProxyIOContext::IOWorkLoop()","symbolLocation":5052,"imageIndex":16},{"imageOffset":2116748,"symbol":"invocation function for block in HALC_ProxyIOContext::HALC_ProxyIOContext(unsigned int, unsigned int)","symbolLocation":172,"imageIndex":16},{"imageOffset":4007696,"symbol":"HALC_IOThread::Entry(void*)","symbolLocation":88,"imageIndex":16},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319272,"name":"AudioSession - RootQueue","threadState":{"x":[{"value":14},{"value":5},{"value":0},{"value":68719460488},{"value":48282404416},{"value":6756611085},{"value":0},{"value":0},{"value":0},{"value":3},{"value":13835058055282163714},{"value":80000000},{"value":650988201824351},{"value":633393868294244},{"value":380928},{"value":26},{"value":18446744073709551578},{"value":8315656768},{"value":0},{"value":22392316025243},{"value":48281960704},{"value":1000000000},{"value":48281960568},{"value":6103822560},{"value":0},{"value":0},{"value":18446744071411073023},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6463446156},"cpsr":{"value":2147487744},"fp":{"value":6103822144},"sp":{"value":6103822112},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777160},"far":{"value":0}},"frames":[{"imageOffset":3016,"symbol":"semaphore_timedwait_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":224396,"symbol":"_dispatch_sema4_timedwait","symbolLocation":64,"imageIndex":17},{"imageOffset":16136,"symbol":"_dispatch_semaphore_wait_slow","symbolLocation":76,"imageIndex":17},{"imageOffset":81344,"symbol":"_dispatch_worker_thread","symbolLocation":324,"imageIndex":17},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319354,"name":"CVDisplayLink","threadState":{"x":[{"value":260},{"value":0},{"value":0},{"value":0},{"value":0},{"value":65704},{"value":0},{"value":15827083},{"value":2561},{"value":0},{"value":0},{"value":2},{"value":2},{"value":0},{"value":0},{"value":0},{"value":305},{"value":8315652424},{"value":0},{"value":48263104056},{"value":48263104120},{"value":1},{"value":15827083},{"value":0},{"value":0},{"value":2561},{"value":2816},{"value":22392200546699},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6465052936},"cpsr":{"value":2684358656},"fp":{"value":6102674864},"sp":{"value":6102674720},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464791800},"far":{"value":0}},"frames":[{"imageOffset":17656,"symbol":"__psynch_cvwait","symbolLocation":8,"imageIndex":13},{"imageOffset":28936,"symbol":"_pthread_cond_wait","symbolLocation":1028,"imageIndex":14},{"imageOffset":15164,"symbol":"CVDisplayLink::waitUntil(unsigned long long)","symbolLocation":336,"imageIndex":19},{"imageOffset":11300,"symbol":"CVDisplayLink::runIOThread()","symbolLocation":500,"imageIndex":19},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]},{"id":51319355,"name":"HIE: M_ d9ed38585cee7b8d 2026-02-18 21:58:32.922","threadState":{"x":[{"value":0},{"value":8589934595,"objc-selector":""},{"value":103079220499},{"value":569559908263691},{"value":15483357102080},{"value":569559908089856},{"value":44},{"value":0},{"value":6464987136,"symbolLocation":416,"symbol":"mach_voucher_extract_all_attr_recipes"},{"value":1},{"value":47924169112},{"value":7},{"value":48268346112},{"value":48268346192},{"value":8292861640,"symbolLocation":0,"symbol":"_NSConcreteMallocBlock"},{"value":8292861640,"symbolLocation":0,"symbol":"_NSConcreteMallocBlock"},{"value":18446744073709551569},{"value":8315657496},{"value":0},{"value":0},{"value":44},{"value":569559908089856},{"value":15483357102080},{"value":569559908263691},{"value":6104395024},{"value":103079220499},{"value":8589934595,"objc-selector":""},{"value":18446744073709550527},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":6464852008},"cpsr":{"value":2147487744},"fp":{"value":6104395008},"sp":{"value":6104394928},"esr":{"value":1442840704,"description":"(Syscall)"},"pc":{"value":6464777268},"far":{"value":0}},"frames":[{"imageOffset":3124,"symbol":"mach_msg2_trap","symbolLocation":8,"imageIndex":13},{"imageOffset":77864,"symbol":"mach_msg2_internal","symbolLocation":76,"imageIndex":13},{"imageOffset":198644,"symbol":"thread_suspend","symbolLocation":108,"imageIndex":13},{"imageOffset":222196,"symbol":"SOME_OTHER_THREAD_SWALLOWED_AT_LEAST_ONE_EXCEPTION","symbolLocation":20,"imageIndex":20},{"imageOffset":157600,"symbol":"__NSThread__start__","symbolLocation":732,"imageIndex":21},{"imageOffset":27656,"symbol":"_pthread_start","symbolLocation":136,"imageIndex":14},{"imageOffset":7080,"symbol":"thread_start","symbolLocation":8,"imageIndex":14}]}],
+  "usedImages" : [
+  {
+    "source" : "P",
+    "arch" : "arm64",
+    "base" : 4369350656,
+    "CFBundleShortVersionString" : "0.1.0",
+    "CFBundleIdentifier" : "com.thiagoxp95.kinshasaapp",
+    "size" : 98304,
+    "uuid" : "1479ce34-5b6b-31f2-a101-c75e51d999fa",
+    "path" : "\/Users\/USER\/*\/KinshasaApp.app\/Contents\/MacOS\/KinshasaApp",
+    "name" : "KinshasaApp",
+    "CFBundleVersion" : "1"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 4510810112,
+    "size" : 49152,
+    "uuid" : "d4baeab8-b553-3779-a0ff-d8848e7a22df",
+    "path" : "\/usr\/lib\/libobjc-trampolines.dylib",
+    "name" : "libobjc-trampolines.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 4700389376,
+    "CFBundleShortVersionString" : "342.3",
+    "CFBundleIdentifier" : "com.apple.AGXMetalG13X",
+    "size" : 7667712,
+    "uuid" : "e72567a6-9e47-382e-82bf-144fa719bba0",
+    "path" : "\/System\/Library\/Extensions\/AGXMetalG13X.bundle\/Contents\/MacOS\/AGXMetalG13X",
+    "name" : "AGXMetalG13X",
+    "CFBundleVersion" : "342.3"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 4488773632,
+    "CFBundleShortVersionString" : "1.14",
+    "CFBundleIdentifier" : "com.apple.audio.units.Components",
+    "size" : 1327104,
+    "uuid" : "0312381d-61ae-3ab9-9cea-b1e46a0c4e54",
+    "path" : "\/System\/Library\/Components\/CoreAudio.component\/Contents\/MacOS\/CoreAudio",
+    "name" : "CoreAudio",
+    "CFBundleVersion" : "1.14"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6536949760,
+    "CFBundleShortVersionString" : "6.9",
+    "CFBundleIdentifier" : "com.apple.AppKit",
+    "size" : 24310400,
+    "uuid" : "4e909aec-68bc-3fc9-a87a-de928e1e36e1",
+    "path" : "\/System\/Library\/Frameworks\/AppKit.framework\/Versions\/C\/AppKit",
+    "name" : "AppKit",
+    "CFBundleVersion" : "2685.30.107"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6630060032,
+    "CFBundleShortVersionString" : "1193.49.3",
+    "CFBundleIdentifier" : "com.apple.QuartzCore",
+    "size" : 4262880,
+    "uuid" : "0bc5d4e0-0414-3f32-8aed-629119615d8f",
+    "path" : "\/System\/Library\/Frameworks\/QuartzCore.framework\/Versions\/A\/QuartzCore",
+    "name" : "QuartzCore",
+    "CFBundleVersion" : "1193.49.3"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 10468192256,
+    "CFBundleShortVersionString" : "1",
+    "CFBundleIdentifier" : "com.apple.UpdateCycle",
+    "size" : 8704,
+    "uuid" : "b91f87ff-6896-3c6d-8ef2-1c776fce34be",
+    "path" : "\/System\/Library\/PrivateFrameworks\/UpdateCycle.framework\/Versions\/A\/UpdateCycle",
+    "name" : "UpdateCycle",
+    "CFBundleVersion" : "1"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6465310720,
+    "CFBundleShortVersionString" : "6.9",
+    "CFBundleIdentifier" : "com.apple.CoreFoundation",
+    "size" : 5540928,
+    "uuid" : "649000a2-3eb4-3cf5-970a-d3cb37b5780c",
+    "path" : "\/System\/Library\/Frameworks\/CoreFoundation.framework\/Versions\/A\/CoreFoundation",
+    "name" : "CoreFoundation",
+    "CFBundleVersion" : "4201"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6677700608,
+    "CFBundleShortVersionString" : "2.1.1",
+    "CFBundleIdentifier" : "com.apple.HIToolbox",
+    "size" : 3158656,
+    "uuid" : "fb92ce0c-1ee5-3f03-992c-df53ed9b3cb4",
+    "path" : "\/System\/Library\/Frameworks\/Carbon.framework\/Versions\/A\/Frameworks\/HIToolbox.framework\/Versions\/A\/HIToolbox",
+    "name" : "HIToolbox"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 7337349120,
+    "CFBundleShortVersionString" : "7.2.5.1.401",
+    "CFBundleIdentifier" : "com.apple.SwiftUI",
+    "size" : 24407328,
+    "uuid" : "f0703a94-2852-3e83-9379-1088351e37c9",
+    "path" : "\/System\/Library\/Frameworks\/SwiftUI.framework\/Versions\/A\/SwiftUI",
+    "name" : "SwiftUI",
+    "CFBundleVersion" : "7.2.5.1.401"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6461050880,
+    "size" : 651204,
+    "uuid" : "0975afba-c46b-364c-bd84-a75daa9e455a",
+    "path" : "\/usr\/lib\/dyld",
+    "name" : "dyld"
+  },
+  {
+    "size" : 0,
+    "source" : "A",
+    "base" : 0,
+    "uuid" : "00000000-0000-0000-0000-000000000000"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6465077248,
+    "size" : 33776,
+    "uuid" : "4dbaf982-1576-3ffc-86be-03a9d2c96be5",
+    "path" : "\/usr\/lib\/system\/libsystem_platform.dylib",
+    "name" : "libsystem_platform.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6464774144,
+    "size" : 246944,
+    "uuid" : "548c45c8-9733-3f0d-8ef4-c06df1df2ad0",
+    "path" : "\/usr\/lib\/system\/libsystem_kernel.dylib",
+    "name" : "libsystem_kernel.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6465024000,
+    "size" : 51900,
+    "uuid" : "527c4ba0-91a5-378b-b3e2-d38269ca5a66",
+    "path" : "\/usr\/lib\/system\/libsystem_pthread.dylib",
+    "name" : "libsystem_pthread.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6672752640,
+    "CFBundleShortVersionString" : "1.0",
+    "CFBundleIdentifier" : "com.apple.audio.caulk",
+    "size" : 167296,
+    "uuid" : "d4644b08-911d-30af-82e7-c404878abf47",
+    "path" : "\/System\/Library\/PrivateFrameworks\/caulk.framework\/Versions\/A\/caulk",
+    "name" : "caulk"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6516494336,
+    "CFBundleShortVersionString" : "5.0",
+    "CFBundleIdentifier" : "com.apple.audio.CoreAudio",
+    "size" : 8041856,
+    "uuid" : "f37b241b-2a83-3f86-bd94-329a18ba4715",
+    "path" : "\/System\/Library\/Frameworks\/CoreAudio.framework\/Versions\/A\/CoreAudio",
+    "name" : "CoreAudio",
+    "CFBundleVersion" : "5.0"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6463221760,
+    "size" : 290400,
+    "uuid" : "a4b349e8-dd6f-3b71-84d9-34f3b4acd849",
+    "path" : "\/usr\/lib\/system\/libdispatch.dylib",
+    "name" : "libdispatch.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6755926016,
+    "CFBundleShortVersionString" : "1.0",
+    "CFBundleIdentifier" : "com.apple.MediaExperience",
+    "size" : 796704,
+    "uuid" : "20e67caa-84cf-379a-98e4-b84267bf9982",
+    "path" : "\/System\/Library\/PrivateFrameworks\/MediaExperience.framework\/Versions\/A\/MediaExperience",
+    "name" : "MediaExperience",
+    "CFBundleVersion" : "1"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6639276032,
+    "CFBundleShortVersionString" : "1.8",
+    "CFBundleIdentifier" : "com.apple.CoreVideo",
+    "size" : 540672,
+    "uuid" : "3a2dcc01-a913-32cc-9fdf-3f8bb6eb1e46",
+    "path" : "\/System\/Library\/Frameworks\/CoreVideo.framework\/Versions\/A\/CoreVideo",
+    "name" : "CoreVideo",
+    "CFBundleVersion" : "726.2"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6589292544,
+    "CFBundleShortVersionString" : "1.22",
+    "CFBundleIdentifier" : "com.apple.HIServices",
+    "size" : 442752,
+    "uuid" : "92eb48f7-1411-3740-a32d-945d8ae71a4a",
+    "path" : "\/System\/Library\/Frameworks\/ApplicationServices.framework\/Versions\/A\/Frameworks\/HIServices.framework\/Versions\/A\/HIServices",
+    "name" : "HIServices"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6490812416,
+    "CFBundleShortVersionString" : "6.9",
+    "CFBundleIdentifier" : "com.apple.Foundation",
+    "size" : 16397536,
+    "uuid" : "6a518869-0a98-34cb-8a15-cc28f898255e",
+    "path" : "\/System\/Library\/Frameworks\/Foundation.framework\/Versions\/C\/Foundation",
+    "name" : "Foundation",
+    "CFBundleVersion" : "4201"
+  }
+],
+  "sharedCache" : {
+  "base" : 6459965440,
+  "size" : 5653544960,
+  "uuid" : "acb998b6-263c-3634-b0a8-ae8270a116c2"
+},
+  "vmSummary" : "ReadOnly portion of Libraries: Total=1.8G resident=0K(0%) swapped_out_or_unallocated=1.8G(100%)\nWritable regions: Total=166.0M written=1154K(1%) resident=578K(0%) swapped_out=576K(0%) unallocated=164.9M(99%)\n\n                                VIRTUAL   REGION \nREGION TYPE                        SIZE    COUNT (non-coalesced) \n===========                     =======  ======= \nAccelerate framework               128K        1 \nActivity Tracing                   256K        1 \nAttributeGraph Data               1024K        1 \nCG image                           416K        1 \nColorSync                           32K        2 \nCoreAnimation                     1648K       60 \nCoreGraphics                        48K        3 \nCoreUI image data                  384K        3 \nFoundation                          48K        2 \nKernel Alloc Once                   32K        1 \nMALLOC                           147.3M       31 \nMALLOC guard page                 3376K        4 \nSTACK GUARD                       56.2M       13 \nStack                             14.4M       13 \nVM_ALLOCATE                        768K       11 \n__AUTH                            5741K      634 \n__AUTH_CONST                      87.3M     1013 \n__CTF                               824        1 \n__DATA                            35.0M      963 \n__DATA_CONST                      32.6M     1022 \n__DATA_DIRTY                      8630K      874 \n__FONT_DATA                        2352        1 \n__INFO_FILTER                         8        1 \n__LINKEDIT                       592.1M        5 \n__OBJC_RO                         78.4M        1 \n__OBJC_RW                         2570K        1 \n__TEXT                             1.2G     1045 \n__TPRO_CONST                       128K        2 \nmapped file                      259.5M       37 \npage table in kernel               578K        1 \nshared memory                      992K       17 \n===========                     =======  ======= \nTOTAL                              2.5G     5765 \n",
+  "legacyInfo" : {
+  "threadTriggered" : {
+    "queue" : "com.apple.main-thread"
+  }
+},
+  "logWritingSignature" : "869c539037e48132d8e5761358f0f9e08970e08b",
+  "roots_installed" : 0,
+  "bug_type" : "309",
+  "trmStatus" : 1,
+  "trialInfo" : {
+  "rollouts" : [
+    {
+      "rolloutId" : "652eff3d1bce5442b8d753c9",
+      "factorPackIds" : [
+
+      ],
+      "deploymentId" : 240000009
+    },
+    {
+      "rolloutId" : "639124e81d92412bfb4880b3",
+      "factorPackIds" : [
+
+      ],
+      "deploymentId" : 240000012
+    }
+  ],
+  "experiments" : [
+
+  ]
+}
+}
+
