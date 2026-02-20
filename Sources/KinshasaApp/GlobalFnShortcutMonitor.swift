@@ -1,4 +1,5 @@
 import ApplicationServices
+import AppKit
 import Foundation
 
 final class GlobalFnShortcutMonitor {
@@ -23,6 +24,14 @@ final class GlobalFnShortcutMonitor {
     func setInvocationKeyCode(_ keyCode: Int64) {
         invocationKeyCode = keyCode
         isInvocationKeyPressed = false
+    }
+
+    func isInvocationKeyCurrentlyPressed() -> Bool {
+        if let keyDownFromModifiers = Self.keyStateFromModifierFlags(for: invocationKeyCode, flags: NSEvent.modifierFlags) {
+            return keyDownFromModifiers
+        }
+
+        return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(invocationKeyCode))
     }
 
     func start() -> StartResult {
@@ -104,10 +113,13 @@ final class GlobalFnShortcutMonitor {
             return
         }
 
-        // flagsChanged fires for modifier key transitions. Toggling state on each
-        // event keyed by physical keycode preserves left/right specificity.
-        isInvocationKeyPressed.toggle()
-        onEvent?(isInvocationKeyPressed ? .down : .up)
+        let keyDown = Self.keyStateFromModifierFlags(for: invocationKeyCode, flags: event.flags) ?? !isInvocationKeyPressed
+        guard keyDown != isInvocationKeyPressed else {
+            return
+        }
+
+        isInvocationKeyPressed = keyDown
+        onEvent?(keyDown ? .down : .up)
     }
 
     private func handleKeyEvent(_ event: CGEvent, isKeyDown: Bool) {
@@ -129,5 +141,43 @@ final class GlobalFnShortcutMonitor {
 
         isInvocationKeyPressed = isKeyDown
         onEvent?(isKeyDown ? .down : .up)
+    }
+
+    private static func keyStateFromModifierFlags(for keyCode: Int64, flags: CGEventFlags) -> Bool? {
+        switch keyCode {
+        case 55, 54:
+            return flags.contains(.maskCommand)
+        case 56, 60:
+            return flags.contains(.maskShift)
+        case 58, 61:
+            return flags.contains(.maskAlternate)
+        case 59, 62:
+            return flags.contains(.maskControl)
+        case 57:
+            return flags.contains(.maskAlphaShift)
+        case 63:
+            return flags.contains(.maskSecondaryFn)
+        default:
+            return nil
+        }
+    }
+
+    private static func keyStateFromModifierFlags(for keyCode: Int64, flags: NSEvent.ModifierFlags) -> Bool? {
+        switch keyCode {
+        case 55, 54:
+            return flags.contains(.command)
+        case 56, 60:
+            return flags.contains(.shift)
+        case 58, 61:
+            return flags.contains(.option)
+        case 59, 62:
+            return flags.contains(.control)
+        case 57:
+            return flags.contains(.capsLock)
+        case 63:
+            return flags.contains(.function)
+        default:
+            return nil
+        }
     }
 }

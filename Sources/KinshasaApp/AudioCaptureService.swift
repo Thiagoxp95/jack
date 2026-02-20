@@ -93,6 +93,7 @@ final class AudioCaptureService {
 
         let recorder = try AVAudioRecorder(url: outputURL, settings: settings)
         recorder.prepareToRecord()
+        recorder.isMeteringEnabled = true
 
         guard recorder.record() else {
             throw AudioCaptureError.failedToStart
@@ -128,5 +129,21 @@ final class AudioCaptureService {
         }
 
         return RecordingSnapshot(url: snapshotURL, duration: recorder.currentTime)
+    }
+
+    func currentInputLevelNormalized() -> Double {
+        guard let recorder, recorder.isRecording else {
+            return 0
+        }
+
+        recorder.updateMeters()
+        let averagePower = recorder.averagePower(forChannel: 0)
+        let peakPower = recorder.peakPower(forChannel: 0)
+
+        // Bias toward peaks so short syllables still drive animation.
+        let effectivePower = max(averagePower, peakPower - 6)
+        let normalizedDB = Double(min(max((effectivePower + 55) / 55, 0), 1))
+        let curved = pow(normalizedDB, 0.72)
+        return curved < 0.01 ? 0 : curved
     }
 }

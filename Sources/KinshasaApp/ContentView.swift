@@ -42,6 +42,104 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                GroupBox("Rive Indicator") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Use Rive animation while listening", isOn: $controller.riveIndicatorEnabled)
+
+                        LabeledContent("Listening Asset", value: controller.listeningRiveAssetPathText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            Button("Choose .riv File") {
+                                controller.chooseListeningRiveAsset()
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Clear") {
+                                controller.clearListeningRiveAsset()
+                            }
+                            .disabled(controller.listeningRiveAssetPathText == "Not set")
+                        }
+                        .font(.caption)
+
+                        Text("When enabled, recording state uses the selected .riv file instead of the listening rectangle.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Custom SVG / HTML Indicator") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Use custom SVG/HTML while listening", isOn: $controller.customSVGIndicatorEnabled)
+
+                        LabeledContent("Markup", value: controller.customSVGIndicatorSummaryText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            Button("Choose File") {
+                                controller.chooseCustomSVGIndicatorFile()
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Paste from Clipboard") {
+                                controller.pasteCustomSVGIndicatorMarkupFromClipboard()
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Clear") {
+                                controller.clearCustomSVGIndicatorMarkup()
+                            }
+                            .disabled(controller.customSVGIndicatorSummaryText == "No markup")
+                        }
+                        .font(.caption)
+
+                        TextEditor(text: $controller.customSVGIndicatorMarkup)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minHeight: 140, maxHeight: 220)
+                            .disabled(!controller.customSVGIndicatorEnabled)
+
+                        Text("Paste full HTML or raw SVG. Hover selectors are mapped to recording state automatically.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Floating Indicator") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Position", selection: $controller.floatingIndicatorPosition) {
+                            ForEach(FloatingIndicatorPosition.allCases) { position in
+                                Text(position.title).tag(position)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        HStack(spacing: 10) {
+                            Text("Size")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Slider(
+                                value: $controller.floatingIndicatorSizePercent,
+                                in: 18 ... 140,
+                                step: 5,
+                                onEditingChanged: controller.setFloatingIndicatorSizeEditing
+                            )
+                            Text(controller.floatingIndicatorSizeText)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 46, alignment: .trailing)
+                        }
+
+                        Text("While adjusting size, the floating indicator is shown live as a preview.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 GroupBox("Model Warmth") {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Keep model warm in background", isOn: $controller.keepModelWarmEnabled)

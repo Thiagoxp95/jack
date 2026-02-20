@@ -1,6 +1,7 @@
 import ApplicationServices
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 final class DictationController: ObservableObject {
@@ -15,6 +16,9 @@ final class DictationController: ObservableObject {
         didSet {
             interpreter.setMode(mode)
             UserDefaults.standard.set(mode.rawValue, forKey: DefaultsKey.mode)
+            if isRecording {
+                startHoldReleaseWatchdogIfNeeded()
+            }
             if !isRecording, !isTranscribing, !isPreparingModel {
                 if keyboardMonitoringGranted {
                     statusText = "Ready. Shortcut mode: \(mode.title)."
@@ -65,6 +69,47 @@ final class DictationController: ObservableObject {
             configureKeepModelWarmLoop()
         }
     }
+    @Published var riveIndicatorEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(riveIndicatorEnabled, forKey: DefaultsKey.riveIndicatorEnabled)
+            syncRiveIndicatorForCurrentSession()
+        }
+    }
+    @Published var listeningRiveAssetPath: String {
+        didSet {
+            UserDefaults.standard.set(listeningRiveAssetPath, forKey: DefaultsKey.listeningRiveAssetPath)
+            syncRiveIndicatorForCurrentSession()
+        }
+    }
+    @Published var customSVGIndicatorEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(customSVGIndicatorEnabled, forKey: DefaultsKey.customSVGIndicatorEnabled)
+            syncRiveIndicatorForCurrentSession()
+        }
+    }
+    @Published var customSVGIndicatorMarkup: String {
+        didSet {
+            UserDefaults.standard.set(customSVGIndicatorMarkup, forKey: DefaultsKey.customSVGIndicatorMarkup)
+            syncRiveIndicatorForCurrentSession()
+        }
+    }
+    @Published var floatingIndicatorPosition: FloatingIndicatorPosition {
+        didSet {
+            UserDefaults.standard.set(floatingIndicatorPosition.rawValue, forKey: DefaultsKey.floatingIndicatorPosition)
+            syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: true)
+        }
+    }
+    @Published var floatingIndicatorSizePercent: Double {
+        didSet {
+            let clamped = min(max(floatingIndicatorSizePercent, 18), 140)
+            if clamped != floatingIndicatorSizePercent {
+                floatingIndicatorSizePercent = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: DefaultsKey.floatingIndicatorSizePercent)
+            syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: isAdjustingIndicatorSize)
+        }
+    }
     @Published private(set) var keepModelWarmStatus: String
     @Published var lastShortcutEventAt: Date?
     @Published var lastTranscriptionLatency: TimeInterval?
@@ -83,20 +128,37 @@ final class DictationController: ObservableObject {
     private let parakeetModel: String
     private var bubbleHideTask: Task<Void, Never>?
     private var liveTranscriptionLoopTask: Task<Void, Never>?
+    private var riveReactiveLoopTask: Task<Void, Never>?
     private var keepModelWarmTask: Task<Void, Never>?
+    private var holdReleaseWatchdogTask: Task<Void, Never>?
+    private var indicatorPreviewHideTask: Task<Void, Never>?
     private var liveTranscriptionInFlight = false
     private var liveSnapshotInFlightDuration: TimeInterval?
     private var latestLiveTranscription: LiveTranscriptionResult?
     private var lastKeepModelWarmAt: Date?
+    private var smoothedRiveLevel: Double = 0
+    private var previousRiveLevel: Double = 0
+    private var riveObservedPeakLevel: Double = 0.25
+    private var lastRivePulseAt: Date?
+    private var holdReleaseMissingSince: Date?
+    private var isAdjustingIndicatorSize = false
     private var localKeyCaptureMonitor: Any?
     private var globalKeyCaptureMonitor: Any?
 
-    private let liveSnapshotMinDuration: TimeInterval = 0.85
-    private let liveSnapshotInterval: TimeInterval = 0.90
+    private let liveSnapshotMinDuration: TimeInterval = 0.75
+    private let liveSnapshotInterval: TimeInterval = 0.80
+    private let liveSnapshotMaxDuration: TimeInterval = 2.30
+    private let riveReactivePollInterval: TimeInterval = 0.05
+    private let riveReactivePulseThreshold: Double = 0.14
+    private let riveReactivePulseCooldown: TimeInterval = 0.40
     private let keepModelWarmInterval: TimeInterval = 45
-    private let liveReuseMaxAudioGap: TimeInterval = 0.28
+    private let liveReuseMaxAudioGap: TimeInterval = 0.30
     private let liveReuseMaxAge: TimeInterval = 1.30
     private let liveReuseWaitTimeout: TimeInterval = 0.24
+    private let liveImmediateReuseMaxGap: TimeInterval = 0.16
+    private let liveReuseMinCoverageRatio: Double = 0.82
+    private let holdReleaseWatchPollInterval: TimeInterval = 0.05
+    private let holdReleaseDebounce: TimeInterval = 0.12
     private let pipelineTimingEnabled = ProcessInfo.processInfo.environment["KINSHASA_TIMING"] == "1"
 
     private enum DefaultsKey {
@@ -106,6 +168,12 @@ final class DictationController: ObservableObject {
         static let duckingAmountPercent = "ducking_amount_percent"
         static let keepModelWarmEnabled = "keep_model_warm_enabled"
         static let keepModelWarmOnlyOnPower = "keep_model_warm_only_on_power"
+        static let riveIndicatorEnabled = "rive_indicator_enabled"
+        static let listeningRiveAssetPath = "listening_rive_asset_path"
+        static let customSVGIndicatorEnabled = "custom_svg_indicator_enabled"
+        static let customSVGIndicatorMarkup = "custom_svg_indicator_markup"
+        static let floatingIndicatorPosition = "floating_indicator_position"
+        static let floatingIndicatorSizePercent = "floating_indicator_size_percent"
     }
 
     init() {
@@ -123,8 +191,19 @@ final class DictationController: ObservableObject {
         duckingEnabled = defaults.object(forKey: DefaultsKey.duckingEnabled) as? Bool ?? false
         let storedDuckingAmount = defaults.object(forKey: DefaultsKey.duckingAmountPercent) as? Double ?? 40
         duckingAmountPercent = min(max(storedDuckingAmount, 0), 90)
-        keepModelWarmEnabled = defaults.object(forKey: DefaultsKey.keepModelWarmEnabled) as? Bool ?? false
-        keepModelWarmOnlyOnPower = defaults.object(forKey: DefaultsKey.keepModelWarmOnlyOnPower) as? Bool ?? true
+        keepModelWarmEnabled = true
+        keepModelWarmOnlyOnPower = false
+        UserDefaults.standard.set(true, forKey: DefaultsKey.keepModelWarmEnabled)
+        UserDefaults.standard.set(false, forKey: DefaultsKey.keepModelWarmOnlyOnPower)
+        let defaultRiveAssetPath = Self.defaultListeningRiveAssetPath()
+        listeningRiveAssetPath = defaults.string(forKey: DefaultsKey.listeningRiveAssetPath) ?? defaultRiveAssetPath
+        riveIndicatorEnabled = defaults.object(forKey: DefaultsKey.riveIndicatorEnabled) as? Bool ?? !defaultRiveAssetPath.isEmpty
+        customSVGIndicatorMarkup = defaults.string(forKey: DefaultsKey.customSVGIndicatorMarkup) ?? ""
+        customSVGIndicatorEnabled = defaults.object(forKey: DefaultsKey.customSVGIndicatorEnabled) as? Bool ?? false
+        let rawPosition = defaults.string(forKey: DefaultsKey.floatingIndicatorPosition) ?? FloatingIndicatorPosition.centerTop.rawValue
+        floatingIndicatorPosition = FloatingIndicatorPosition(rawValue: rawPosition) ?? .centerTop
+        let storedIndicatorSize = defaults.object(forKey: DefaultsKey.floatingIndicatorSizePercent) as? Double ?? 35
+        floatingIndicatorSizePercent = min(max(storedIndicatorSize, 18), 140)
         keepModelWarmStatus = "Off"
         interpreter = ShortcutInterpreter(mode: initialMode)
         statusText = "Preparing local speech model..."
@@ -141,6 +220,8 @@ final class DictationController: ObservableObject {
                 self?.handleShortcutEvent(event)
             }
         }
+
+        bubble.setPresentation(position: floatingIndicatorPosition, sizePercent: floatingIndicatorSizePercent)
     }
 
     func initialize() async {
@@ -197,6 +278,24 @@ final class DictationController: ObservableObject {
         "\(Int(duckingAmountPercent.rounded()))%"
     }
 
+    var listeningRiveAssetPathText: String {
+        let trimmed = listeningRiveAssetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Not set" : trimmed
+    }
+
+    var customSVGIndicatorSummaryText: String {
+        let trimmed = customSVGIndicatorMarkup.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "No markup"
+        }
+
+        return "\(trimmed.count) chars"
+    }
+
+    var floatingIndicatorSizeText: String {
+        "\(Int(floatingIndicatorSizePercent.rounded()))%"
+    }
+
     var keepModelWarmStatusText: String {
         guard keepModelWarmEnabled else {
             return "Off"
@@ -245,6 +344,73 @@ final class DictationController: ObservableObject {
         _ = startShortcutMonitor()
     }
 
+    func chooseListeningRiveAsset() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "riv")].compactMap { $0 }
+        panel.directoryURL = URL(fileURLWithPath: ("~/Downloads" as NSString).expandingTildeInPath, isDirectory: true)
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else {
+            return
+        }
+
+        listeningRiveAssetPath = selectedURL.path
+    }
+
+    func clearListeningRiveAsset() {
+        listeningRiveAssetPath = ""
+    }
+
+    func pasteCustomSVGIndicatorMarkupFromClipboard() {
+        let pasteboard = NSPasteboard.general
+        guard let rawString = pasteboard.string(forType: .string) else {
+            return
+        }
+
+        customSVGIndicatorMarkup = rawString
+    }
+
+    func chooseCustomSVGIndicatorFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "html"),
+            UTType(filenameExtension: "htm"),
+            UTType(filenameExtension: "svg"),
+            UTType.plainText,
+        ].compactMap { $0 }
+        panel.directoryURL = URL(fileURLWithPath: ("~/Downloads" as NSString).expandingTildeInPath, isDirectory: true)
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else {
+            return
+        }
+
+        guard let rawData = try? Data(contentsOf: selectedURL),
+              let rawString = String(data: rawData, encoding: .utf8)
+        else {
+            return
+        }
+
+        customSVGIndicatorMarkup = rawString
+    }
+
+    func clearCustomSVGIndicatorMarkup() {
+        customSVGIndicatorMarkup = ""
+    }
+
+    func setFloatingIndicatorSizeEditing(_ editing: Bool) {
+        isAdjustingIndicatorSize = editing
+        if editing {
+            showIndicatorPreview()
+        } else {
+            scheduleIndicatorPreviewHide(delay: 0.6)
+        }
+    }
+
     func openInputMonitoringSettings() {
         openSettingsURL("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
     }
@@ -262,8 +428,13 @@ final class DictationController: ObservableObject {
     }
 
     func applicationWillTerminate() {
+        riveReactiveLoopTask?.cancel()
+        riveReactiveLoopTask = nil
+        stopHoldReleaseWatchdog()
         keepModelWarmTask?.cancel()
         keepModelWarmTask = nil
+        indicatorPreviewHideTask?.cancel()
+        indicatorPreviewHideTask = nil
         duckingService.restoreIfNeeded()
     }
 
@@ -339,8 +510,10 @@ final class DictationController: ObservableObject {
             latestLiveTranscription = nil
             liveTranscriptionInFlight = false
             liveSnapshotInFlightDuration = nil
+            startHoldReleaseWatchdogIfNeeded()
             statusText = "Listening..."
             showBubble(message: "Listening...", isRecording: true)
+            startRiveReactiveLoopIfNeeded()
             applyDuckingIfNeeded()
             startLiveTranscriptionLoop(configuration: configuration)
         } catch {
@@ -366,9 +539,11 @@ final class DictationController: ObservableObject {
             isRecording = false
             isTranscribing = true
             stopLiveTranscriptionLoop()
+            stopHoldReleaseWatchdog()
+            stopRiveReactiveLoop(resetInputs: false)
             duckingService.restoreIfNeeded()
             statusText = "Transcribing..."
-            showBubble(message: "Transcribing...", isRecording: false)
+            showBubble(message: "Transcribing...", isRecording: false, isTranscribing: true)
 
             Task(priority: .userInitiated) {
                 let startedAt = Date()
@@ -378,6 +553,28 @@ final class DictationController: ObservableObject {
 
                 do {
                     let waitStartedAt = Date()
+                    if let reusedLive = reusableLiveTranscription(finalDuration: finalDuration),
+                       shouldImmediatelyReuseLiveTranscription(reusedLive, finalDuration: finalDuration)
+                    {
+                        let totalLatency = Date().timeIntervalSince(startedAt)
+                        let waitLatency = Date().timeIntervalSince(waitStartedAt)
+                        await MainActor.run {
+                            logPipelineTiming(
+                                String(
+                                    format: "stop->reuse total=%.3fs wait=%.3fs tail=%.3fs backend=%@",
+                                    totalLatency,
+                                    waitLatency,
+                                    finalDuration - reusedLive.snapshotDuration,
+                                    reusedLive.backend
+                                )
+                            )
+                            lastTranscriptionLatency = totalLatency
+                            lastTranscriptionBackend = "\(reusedLive.backend) (live reuse)"
+                            handleTranscriptionResult(reusedLive.text)
+                        }
+                        return
+                    }
+
                     let shouldWaitForLiveReuse = shouldWaitForReusableLiveTranscription(finalDuration: finalDuration)
 
                     if shouldWaitForLiveReuse,
@@ -427,6 +624,8 @@ final class DictationController: ObservableObject {
                 }
             }
         } catch {
+            stopHoldReleaseWatchdog()
+            stopRiveReactiveLoop(resetInputs: true)
             duckingService.restoreIfNeeded()
             handleError(error.localizedDescription)
         }
@@ -495,6 +694,8 @@ final class DictationController: ObservableObject {
 
     private func handleError(_ message: String) {
         if !isRecording {
+            stopHoldReleaseWatchdog()
+            stopRiveReactiveLoop(resetInputs: true)
             duckingService.restoreIfNeeded()
         }
         statusText = message
@@ -519,6 +720,175 @@ final class DictationController: ObservableObject {
         }
 
         applyDuckingIfNeeded()
+    }
+
+    private func startHoldReleaseWatchdogIfNeeded() {
+        stopHoldReleaseWatchdog()
+
+        guard mode == .hold else {
+            return
+        }
+
+        holdReleaseMissingSince = nil
+        let pollNanos = UInt64(holdReleaseWatchPollInterval * 1_000_000_000)
+
+        holdReleaseWatchdogTask = Task(priority: .userInitiated) { [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                self.tickHoldReleaseWatchdog()
+                guard !Task.isCancelled else {
+                    return
+                }
+                try? await Task.sleep(nanoseconds: pollNanos)
+            }
+        }
+    }
+
+    private func stopHoldReleaseWatchdog() {
+        holdReleaseWatchdogTask?.cancel()
+        holdReleaseWatchdogTask = nil
+        holdReleaseMissingSince = nil
+    }
+
+    private func tickHoldReleaseWatchdog() {
+        guard isRecording, mode == .hold else {
+            holdReleaseMissingSince = nil
+            return
+        }
+
+        let isPressed = shortcutMonitor.isInvocationKeyCurrentlyPressed()
+        if isPressed {
+            holdReleaseMissingSince = nil
+            return
+        }
+
+        if holdReleaseMissingSince == nil {
+            holdReleaseMissingSince = .now
+            return
+        }
+
+        guard let holdReleaseMissingSince,
+              Date().timeIntervalSince(holdReleaseMissingSince) >= holdReleaseDebounce
+        else {
+            return
+        }
+
+        stopRecordingAndTranscribe()
+    }
+
+    private func syncRiveIndicatorForCurrentSession() {
+        syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: false)
+        if isTranscribing {
+            showBubble(message: "Transcribing...", isRecording: false, isTranscribing: true)
+            return
+        }
+
+        guard isRecording else {
+            stopRiveReactiveLoop(resetInputs: true)
+            return
+        }
+
+        showBubble(message: "Listening...", isRecording: true)
+        startRiveReactiveLoopIfNeeded()
+    }
+
+    private func startRiveReactiveLoopIfNeeded() {
+        stopRiveReactiveLoop(resetInputs: false)
+
+        guard shouldRunReactiveIndicatorLoopDuringRecording() else {
+            return
+        }
+
+        smoothedRiveLevel = 0
+        previousRiveLevel = 0
+        riveObservedPeakLevel = 0.25
+        lastRivePulseAt = nil
+        if riveAssetPathIfEnabled(forRecordingState: true) != nil {
+            bubble.updateRiveReactiveInputs(listening: true, level: 0, shouldPulse: false)
+        }
+        if customSVGMarkupIfEnabled(forRecordingState: true) != nil {
+            bubble.updateHTMLReactiveInputs(listening: true, transcribing: false, level: 0, shouldPulse: false)
+        }
+
+        let pollNanos = UInt64(riveReactivePollInterval * 1_000_000_000)
+        riveReactiveLoopTask = Task(priority: .userInitiated) { [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                await self.tickRiveReactiveInputs()
+                guard !Task.isCancelled else {
+                    return
+                }
+                try? await Task.sleep(nanoseconds: pollNanos)
+            }
+        }
+    }
+
+    private func stopRiveReactiveLoop(resetInputs: Bool) {
+        riveReactiveLoopTask?.cancel()
+        riveReactiveLoopTask = nil
+        smoothedRiveLevel = 0
+        previousRiveLevel = 0
+        riveObservedPeakLevel = 0.25
+        lastRivePulseAt = nil
+
+        if resetInputs {
+            bubble.updateRiveReactiveInputs(listening: false, level: 0, shouldPulse: false)
+            bubble.updateHTMLReactiveInputs(listening: false, transcribing: false, level: 0, shouldPulse: false)
+        }
+    }
+
+    private func tickRiveReactiveInputs() async {
+        guard isRecording, shouldRunReactiveIndicatorLoopDuringRecording() else {
+            return
+        }
+
+        let rawLevel = audioCapture.currentInputLevelNormalized()
+        riveObservedPeakLevel = max(riveObservedPeakLevel * 0.996, rawLevel)
+        let leveled = min(max(rawLevel / max(riveObservedPeakLevel, 0.15), 0), 1)
+
+        let alpha = leveled > smoothedRiveLevel ? 0.46 : 0.20
+        smoothedRiveLevel += (leveled - smoothedRiveLevel) * alpha
+        let level = smoothedRiveLevel < 0.02 ? 0 : smoothedRiveLevel
+
+        let now = Date()
+        let crossedThreshold = previousRiveLevel <= riveReactivePulseThreshold && level > riveReactivePulseThreshold
+        let cooldownPassed = now.timeIntervalSince(lastRivePulseAt ?? .distantPast) >= riveReactivePulseCooldown
+        let shouldPulse = crossedThreshold && cooldownPassed
+        if shouldPulse {
+            lastRivePulseAt = now
+        }
+
+        previousRiveLevel = level
+        if riveAssetPathIfEnabled(forRecordingState: true) != nil {
+            bubble.updateRiveReactiveInputs(listening: true, level: level, shouldPulse: shouldPulse)
+        }
+        if customSVGMarkupIfEnabled(forRecordingState: true) != nil {
+            bubble.updateHTMLReactiveInputs(listening: true, transcribing: false, level: level, shouldPulse: shouldPulse)
+        }
+    }
+
+    private func syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: Bool) {
+        bubble.setPresentation(position: floatingIndicatorPosition, sizePercent: floatingIndicatorSizePercent)
+
+        if isRecording {
+            showBubble(message: "Listening...", isRecording: true)
+            return
+        }
+
+        if isTranscribing {
+            showBubble(message: "Transcribing...", isRecording: false, isTranscribing: true)
+            return
+        }
+
+        if previewIfIdle, !isTranscribing, !isPreparingModel {
+            showIndicatorPreview()
+        }
     }
 
     private func configureKeepModelWarmLoop() {
@@ -583,14 +953,102 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private func showBubble(message: String, isRecording: Bool) {
+    private func showIndicatorPreview() {
+        guard !isRecording, !isTranscribing, !isPreparingModel else {
+            return
+        }
+
+        indicatorPreviewHideTask?.cancel()
+        bubble.show(
+            message: "Indicator Preview",
+            isRecording: true,
+            isTranscribing: false,
+            riveAssetPath: preferredRiveAssetPath(),
+            htmlIndicatorMarkup: preferredCustomSVGMarkup()
+        )
+
+        if !isAdjustingIndicatorSize {
+            scheduleIndicatorPreviewHide(delay: 0.9)
+        }
+    }
+
+    private func scheduleIndicatorPreviewHide(delay: TimeInterval) {
+        indicatorPreviewHideTask?.cancel()
+        indicatorPreviewHideTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else {
+                return
+            }
+            await MainActor.run {
+                guard let self, !self.isRecording else {
+                    return
+                }
+                self.bubble.hide()
+            }
+        }
+    }
+
+    private func shouldRunReactiveIndicatorLoopDuringRecording() -> Bool {
+        let hasRiveReactive = riveAssetPathIfEnabled(forRecordingState: true) != nil
+        let hasCustomReactive = customSVGMarkupIfEnabled(forRecordingState: true) != nil
+        return hasRiveReactive || hasCustomReactive
+    }
+
+    private func preferredRiveAssetPath() -> String? {
+        guard riveIndicatorEnabled else {
+            return nil
+        }
+
+        let trimmed = listeningRiveAssetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func preferredCustomSVGMarkup() -> String? {
+        guard customSVGIndicatorEnabled else {
+            return nil
+        }
+
+        let trimmed = customSVGIndicatorMarkup.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func riveAssetPathIfEnabled(forRecordingState isRecording: Bool) -> String? {
+        guard riveIndicatorEnabled, isRecording else {
+            return nil
+        }
+
+        return preferredRiveAssetPath()
+    }
+
+    private func customSVGMarkupIfEnabled(forRecordingState isRecording: Bool) -> String? {
+        guard customSVGIndicatorEnabled, isRecording else {
+            return nil
+        }
+
+        return preferredCustomSVGMarkup()
+    }
+
+    private static func defaultListeningRiveAssetPath() -> String {
+        let downloadsCandidate = ("~/Downloads/5628-11215-wave-hear-and-talk.riv" as NSString).expandingTildeInPath
+        return FileManager.default.fileExists(atPath: downloadsCandidate) ? downloadsCandidate : ""
+    }
+
+    private func showBubble(message: String, isRecording: Bool, isTranscribing: Bool = false) {
+        indicatorPreviewHideTask?.cancel()
+        indicatorPreviewHideTask = nil
         bubbleHideTask?.cancel()
-        bubble.show(message: message, isRecording: isRecording)
+        bubble.show(
+            message: message,
+            isRecording: isRecording,
+            isTranscribing: isTranscribing,
+            riveAssetPath: riveAssetPathIfEnabled(forRecordingState: isRecording),
+            htmlIndicatorMarkup: (isRecording || isTranscribing) ? preferredCustomSVGMarkup() : nil
+        )
     }
 
     private func showTransientBubble(message: String, duration: TimeInterval = 0.95) {
         bubbleHideTask?.cancel()
-        bubble.show(message: message, isRecording: false)
+        bubble.show(message: message, isRecording: false, isTranscribing: false, riveAssetPath: nil, htmlIndicatorMarkup: nil)
 
         bubbleHideTask = Task { [weak self] in
             let nanos = UInt64(duration * 1_000_000_000)
@@ -702,7 +1160,13 @@ final class DictationController: ObservableObject {
             return
         }
 
-        guard audioCapture.currentRecordingDuration >= liveSnapshotMinDuration else {
+        let currentDuration = audioCapture.currentRecordingDuration
+        guard currentDuration >= liveSnapshotMinDuration else {
+            return
+        }
+
+        // Keep live previews cheap; long full-recording snapshots can block final transcription.
+        guard currentDuration <= liveSnapshotMaxDuration else {
             return
         }
 
@@ -717,7 +1181,7 @@ final class DictationController: ObservableObject {
         liveSnapshotInFlightDuration = snapshot.duration
         let transcriptionService = transcription
 
-        Task(priority: .userInitiated) { [weak self] in
+        Task(priority: .utility) { [weak self] in
             defer {
                 try? FileManager.default.removeItem(at: snapshot.url)
             }
@@ -766,15 +1230,27 @@ final class DictationController: ObservableObject {
 
         let missingTail = finalDuration - latestLiveTranscription.snapshotDuration
         let age = Date().timeIntervalSince(latestLiveTranscription.completedAt)
+        let coverageRatio = finalDuration > 0 ? latestLiveTranscription.snapshotDuration / finalDuration : 1
 
         guard missingTail >= 0,
               missingTail <= liveReuseMaxAudioGap,
-              age <= liveReuseMaxAge
+              age <= liveReuseMaxAge,
+              coverageRatio >= liveReuseMinCoverageRatio
         else {
             return nil
         }
 
         return latestLiveTranscription
+    }
+
+    private func shouldImmediatelyReuseLiveTranscription(_ live: LiveTranscriptionResult, finalDuration: TimeInterval) -> Bool {
+        // If another live request is still running, only reuse now when tail gap is tiny.
+        if !liveTranscriptionInFlight {
+            return true
+        }
+
+        let missingTail = finalDuration - live.snapshotDuration
+        return missingTail >= 0 && missingTail <= liveImmediateReuseMaxGap
     }
 
     private func waitForReusableLiveTranscription(finalDuration: TimeInterval, timeout: TimeInterval) async -> LiveTranscriptionResult? {

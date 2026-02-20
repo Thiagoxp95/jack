@@ -54,12 +54,20 @@ struct ParakeetTranscriptionService {
                 let recoveredText = try await Self.worker.transcribe(audioFileURL: audioFileURL, configuration: configuration)
                 return TranscriptionResult(text: recoveredText, backend: "Persistent Worker (recovered)")
             } catch {
-                let text = try await Task.detached(priority: .userInitiated) {
-                    try Self.transcribeBlocking(audioFileURL: audioFileURL, configuration: configuration)
-                }.value
-                return TranscriptionResult(text: text, backend: "CLI Fallback")
+                throw error
             }
         }
+    }
+
+    func transcribeUsingCLI(
+        audioFileURL: URL,
+        configuration: ParakeetConfiguration,
+        backendLabel: String = "CLI Fallback"
+    ) async throws -> TranscriptionResult {
+        let text = try await Task.detached(priority: .userInitiated) {
+            try Self.transcribeBlocking(audioFileURL: audioFileURL, configuration: configuration)
+        }.value
+        return TranscriptionResult(text: text, backend: backendLabel)
     }
 
     func keepWarm(configuration: ParakeetConfiguration) async throws {
@@ -363,6 +371,15 @@ private actor ParakeetWorker {
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+        let stderrTailBuffer = PipeTailBuffer()
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            stderrTailBuffer.append(data)
+        }
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
@@ -378,6 +395,7 @@ private actor ParakeetWorker {
             stdin: stdinPipe.fileHandleForWriting,
             stdout: stdoutPipe.fileHandleForReading,
             stderr: stderrPipe.fileHandleForReading,
+            stderrTailBuffer: stderrTailBuffer,
             configuration: configuration
         )
 
@@ -387,7 +405,7 @@ private actor ParakeetWorker {
             case "ready":
                 return state
             case "fatal", "error":
-                let errorText = readyMessage.message ?? readPipeTail(state.stderr)
+                let errorText = readyMessage.message ?? readPipeTail(state)
                 stopWorker(state: state)
                 throw ParakeetTranscriptionError.workerProtocol("Worker failed to initialize. \(errorText)")
             default:
@@ -406,6 +424,8 @@ private actor ParakeetWorker {
     }
 
     private func stopWorker(state: WorkerState) {
+        state.stderr.readabilityHandler = nil
+
         if state.process.isRunning {
             let shutdownRequest = WorkerRequest(id: 0, command: "shutdown", audioPath: "")
             if let data = try? encoder.encode(shutdownRequest) {
@@ -465,7 +485,7 @@ private actor ParakeetWorker {
 
         while true {
             guard let chunk = try handle.read(upToCount: 1), !chunk.isEmpty else {
-                let stderrTail = workerState.map { readPipeTail($0.stderr) } ?? "No stderr."
+                let stderrTail = workerState.map { readPipeTail($0) } ?? "No stderr."
                 stopWorkerIfNeeded()
                 throw ParakeetTranscriptionError.workerProtocol("Worker exited unexpectedly. \(stderrTail)")
             }
@@ -480,17 +500,8 @@ private actor ParakeetWorker {
         return String(data: buffer, encoding: .utf8) ?? ""
     }
 
-    private func readPipeTail(_ handle: FileHandle) -> String {
-        guard let data = try? handle.readToEnd(), let text = String(data: data, encoding: .utf8) else {
-            return "No stderr."
-        }
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return "No stderr."
-        }
-
-        return "stderr: \(trimmed)"
+    private func readPipeTail(_ state: WorkerState) -> String {
+        state.stderrTailBuffer.description
     }
 }
 
@@ -499,6 +510,7 @@ private struct WorkerState {
     let stdin: FileHandle
     let stdout: FileHandle
     let stderr: FileHandle
+    let stderrTailBuffer: PipeTailBuffer
     let configuration: ParakeetConfiguration
 
     func matches(configuration: ParakeetConfiguration) -> Bool {
@@ -509,6 +521,41 @@ private struct WorkerState {
 
     private func normalized(_ path: String) -> String {
         (path as NSString).expandingTildeInPath.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private final class PipeTailBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private let maxBytes: Int
+
+    init(maxBytes: Int = 32 * 1024) {
+        self.maxBytes = max(1, maxBytes)
+    }
+
+    func append(_ data: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        buffer.append(data)
+        if buffer.count > maxBytes {
+            buffer.removeFirst(buffer.count - maxBytes)
+        }
+    }
+
+    var description: String {
+        lock.lock()
+        let snapshot = buffer
+        lock.unlock()
+
+        guard let text = String(data: snapshot, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty
+        else {
+            return "No stderr."
+        }
+
+        return "stderr: \(text)"
     }
 }
 

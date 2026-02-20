@@ -6,9 +6,15 @@ let package = Package(
     platforms: [
         .macOS(.v14),
     ],
+    dependencies: [
+        .package(url: "https://github.com/rive-app/rive-ios.git", from: "6.7.0"),
+    ],
     targets: [
         .executableTarget(
             name: "KinshasaApp",
+            dependencies: [
+                .product(name: "RiveRuntime", package: "rive-ios"),
+            ],
             path: "Sources/KinshasaApp",
             resources: [
                 .process("Resources"),

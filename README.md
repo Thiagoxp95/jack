@@ -7,6 +7,7 @@ SwiftPM-based macOS app with global voice-to-text dictation powered by local Par
 - Configurable global invocation key (capture any physical key, including side-specific modifiers like Left Command vs Right Command).
 - Shortcut modes: `Toggle`, `Hold`, `Double Tap`.
 - Floating bubble while listening/transcribing.
+- Optional Rive `.riv` listening indicator overlay.
 - Records from default microphone.
 - Optional output ducking (lower speaker volume while recording).
 - Optional background model keep-warm (with plug-in-only mode).
