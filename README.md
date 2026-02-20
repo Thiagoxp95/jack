@@ -53,6 +53,10 @@ swift test
 
 - The app auto-installs local `parakeet-mlx` and model files in user data directories.
 - `PARAKEET_MODEL` can be used for development overrides.
+- Worker memory guardrails are enabled by default (soft recycle at `8192 MB`, hard recycle at `10240 MB`).
+- Optional tuning:
+  - `KINSHASA_WORKER_RECYCLE_RSS_MB` (soft recycle threshold in MB)
+  - `KINSHASA_WORKER_HARD_RSS_MB` (hard recycle threshold in MB)
 - Packaged builds use a workspace-unique bundle identifier (`com.actionfy.app.v2.ws...`) to avoid macOS permission/relaunch collisions across multiple clones.
 
 ## Project Layout

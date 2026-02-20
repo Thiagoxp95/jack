@@ -54,7 +54,7 @@ struct ParakeetTranscriptionService {
                 let recoveredText = try await Self.worker.transcribe(audioFileURL: audioFileURL, configuration: configuration)
                 return TranscriptionResult(text: recoveredText, backend: "Persistent Worker (recovered)")
             } catch {
-                throw error
+                return try await transcribeUsingCLI(audioFileURL: audioFileURL, configuration: configuration)
             }
         }
     }
@@ -225,8 +225,18 @@ struct ParakeetTranscriptionService {
 private actor ParakeetWorker {
     private var workerState: WorkerState?
     private var nextRequestID = 1
+    private var recycleScheduled = false
+    private var lastRecycleAt = Date.distantPast
+    private var lastRSSCheckAt = Date.distantPast
+    private var lastRSSCheckPID: Int32 = 0
+    private var lastRSSCheckValue: UInt64?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let recycleRSSBytes = ParakeetWorker.envMegabytes(named: "KINSHASA_WORKER_RECYCLE_RSS_MB", defaultMB: 8_192)
+    private let hardRSSBytes = ParakeetWorker.envMegabytes(named: "KINSHASA_WORKER_HARD_RSS_MB", defaultMB: 10_240)
+    private let recycleCooldown: TimeInterval = 8
+    private let rssCheckMinInterval: TimeInterval = 0.75
+    private let timingEnabled = ProcessInfo.processInfo.environment["KINSHASA_TIMING"] == "1"
 
     func prepare(configuration: ParakeetConfiguration) throws {
         _ = try ensureWorker(configuration: configuration)
@@ -248,6 +258,7 @@ private actor ParakeetWorker {
                 guard message.id == requestID else {
                     continue
                 }
+                scheduleRecycleIfNeeded(configuration: configuration, reason: "post-transcribe")
                 return (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             case "error":
                 guard message.id == nil || message.id == requestID else {
@@ -286,6 +297,7 @@ private actor ParakeetWorker {
                 guard message.id == requestID else {
                     continue
                 }
+                scheduleRecycleIfNeeded(configuration: configuration, reason: "post-warmup")
                 return
             case "error":
                 guard message.id == nil || message.id == requestID else {
@@ -314,6 +326,19 @@ private actor ParakeetWorker {
     }
 
     private func ensureWorker(configuration: ParakeetConfiguration) throws -> WorkerState {
+        if let workerState,
+           workerState.matches(configuration: configuration),
+           workerState.process.isRunning
+        {
+            if shouldHardRecycle(workerState) {
+                logTiming("worker recycle=hard rss=\(formatBytes(residentMemoryBytes(forPID: workerState.process.processIdentifier) ?? 0))")
+                stopWorkerIfNeeded()
+            } else {
+                scheduleRecycleIfNeeded(configuration: configuration, reason: "pre-request")
+                return workerState
+            }
+        }
+
         if let workerState,
            workerState.matches(configuration: configuration),
            workerState.process.isRunning
@@ -421,6 +446,146 @@ private actor ParakeetWorker {
 
         stopWorker(state: state)
         workerState = nil
+        lastRSSCheckPID = 0
+        lastRSSCheckValue = nil
+        lastRSSCheckAt = .distantPast
+    }
+
+    private func shouldHardRecycle(_ state: WorkerState) -> Bool {
+        guard let rss = residentMemoryBytes(forPID: state.process.processIdentifier),
+              rss >= hardRSSBytes
+        else {
+            return false
+        }
+
+        return Date().timeIntervalSince(lastRecycleAt) >= recycleCooldown
+    }
+
+    private func scheduleRecycleIfNeeded(configuration: ParakeetConfiguration, reason: String) {
+        guard !recycleScheduled,
+              Date().timeIntervalSince(lastRecycleAt) >= recycleCooldown,
+              let state = workerState,
+              state.matches(configuration: configuration),
+              state.process.isRunning,
+              let rss = residentMemoryBytes(forPID: state.process.processIdentifier),
+              rss >= recycleRSSBytes
+        else {
+            return
+        }
+
+        recycleScheduled = true
+        let copiedConfiguration = configuration
+        let observedRSS = rss
+        Task(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            self.performScheduledRecycle(configuration: copiedConfiguration, reason: reason, observedRSS: observedRSS)
+        }
+    }
+
+    private func performScheduledRecycle(configuration: ParakeetConfiguration, reason: String, observedRSS: UInt64) {
+        recycleScheduled = false
+
+        guard Date().timeIntervalSince(lastRecycleAt) >= recycleCooldown,
+              let state = workerState,
+              state.matches(configuration: configuration),
+              state.process.isRunning,
+              let currentRSS = residentMemoryBytes(forPID: state.process.processIdentifier),
+              currentRSS >= recycleRSSBytes
+        else {
+            return
+        }
+
+        logTiming(
+            "worker recycle=soft reason=\(reason) rss_observed=\(formatBytes(observedRSS)) rss_current=\(formatBytes(currentRSS))"
+        )
+
+        do {
+            try reset(configuration: configuration)
+            lastRecycleAt = Date()
+        } catch {
+            logTiming("worker recycle failed reason=\(reason) error=\(error.localizedDescription)")
+        }
+    }
+
+    private func residentMemoryBytes(forPID pid: Int32) -> UInt64? {
+        guard pid > 0 else {
+            return nil
+        }
+
+        let now = Date()
+        if lastRSSCheckPID == pid,
+           now.timeIntervalSince(lastRSSCheckAt) < rssCheckMinInterval
+        {
+            return lastRSSCheckValue
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-o", "rss=", "-p", "\(pid)"]
+
+        let stdoutPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            lastRSSCheckPID = pid
+            lastRSSCheckValue = nil
+            lastRSSCheckAt = now
+            return nil
+        }
+
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty
+        else {
+            lastRSSCheckPID = pid
+            lastRSSCheckValue = nil
+            lastRSSCheckAt = now
+            return nil
+        }
+
+        guard let rssKB = text.split(separator: " ").compactMap({ UInt64($0) }).first else {
+            lastRSSCheckPID = pid
+            lastRSSCheckValue = nil
+            lastRSSCheckAt = now
+            return nil
+        }
+
+        let rssBytes = rssKB * 1024
+        lastRSSCheckPID = pid
+        lastRSSCheckValue = rssBytes
+        lastRSSCheckAt = now
+        return rssBytes
+    }
+
+    private static func envMegabytes(named key: String, defaultMB: UInt64) -> UInt64 {
+        guard let raw = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let parsed = UInt64(raw),
+              parsed > 0
+        else {
+            return defaultMB * 1_048_576
+        }
+
+        return parsed * 1_048_576
+    }
+
+    private func formatBytes(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
+    }
+
+    private func logTiming(_ message: String) {
+        guard timingEnabled else {
+            return
+        }
+        NSLog("[PipelineTiming] \(message)")
     }
 
     private func stopWorker(state: WorkerState) {

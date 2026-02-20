@@ -228,24 +228,24 @@ private final class HTMLIndicatorContentView: NSView, WKNavigationDelegate {
         <script id="kinshasa-runtime-script">
         window.__kinshasaState = {
           lastClickAt: 0,
-          lastTranscribing: null
+          lastTranscribing: null,
+          levelEMA: 0,
+          lastTickAt: 0,
+          clickBudget: 0,
+          lastDrivenLevel: 0,
+          autoClickEnabled: null
         };
         window.__kinshasaDispatchClick = function() {
           try {
             const target = document.querySelector('.scene-container') || document.querySelector('svg') || document.body;
-            if (!target) return;
-            if (typeof PointerEvent === 'function') {
-              const pDown = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, pointerType: 'mouse', isPrimary: true });
-              const pUp = new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, pointerType: 'mouse', isPrimary: true });
-              target.dispatchEvent(pDown);
-              target.dispatchEvent(pUp);
-            }
-            const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-            const up = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
             const click = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-            target.dispatchEvent(down);
-            target.dispatchEvent(up);
-            target.dispatchEvent(click);
+            if (target) {
+              target.dispatchEvent(click);
+            }
+            document.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            if (typeof window.dispatchEvent === 'function') {
+              window.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            }
           } catch (_) {}
         };
         window.__kinshasaApplyTranscribingClass = function(transcribing) {
@@ -282,14 +282,125 @@ private final class HTMLIndicatorContentView: NSView, WKNavigationDelegate {
             }
             const clampedLevel = Math.max(0, Math.min(1, Number(level) || 0));
             document.documentElement.style.setProperty('--mic-level', String(clampedLevel));
-            if (listening) {
-              const now = Date.now();
-              const interval = Math.max(70, 360 - Math.round(clampedLevel * 300));
-              const shouldAutoClick = pulseActive || (clampedLevel > 0.04 && (now - window.__kinshasaState.lastClickAt) >= interval);
-              if (shouldAutoClick) {
-                window.__kinshasaDispatchClick();
-                window.__kinshasaState.lastClickAt = now;
+            const state = window.__kinshasaState;
+            if (state.autoClickEnabled === null) {
+              const hasOrbWrapper = !!(document.getElementById('siri-orb') || document.querySelector('.orb-wrapper'));
+              const scriptText = Array.from(document.querySelectorAll('script'))
+                .map((s) => s.textContent || '')
+                .join('\\n');
+              const hasSelfMicScript = /getUserMedia|AudioContext|webkitAudioContext/.test(scriptText);
+              state.autoClickEnabled = !(hasOrbWrapper || hasSelfMicScript);
+            }
+            state.levelEMA += (clampedLevel - state.levelEMA) * 0.18;
+            const drivenLevel = Math.max(clampedLevel, state.levelEMA * 0.9);
+            const risingEdge = Math.max(0, drivenLevel - (state.lastDrivenLevel || 0));
+            state.lastDrivenLevel = drivenLevel;
+            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            if (!state.lastTickAt || !Number.isFinite(state.lastTickAt)) {
+              state.lastTickAt = now;
+            }
+            const deltaMs = Math.max(0, Math.min(200, now - state.lastTickAt));
+            state.lastTickAt = now;
+            const deltaSeconds = deltaMs / 1000;
+            const strobe = (listening && drivenLevel > 0.3) ? (Math.sin(now * 0.03) * drivenLevel * 0.4) : 0;
+            const brightness = Math.max(0.6, 0.6 + (drivenLevel * 2.0) + strobe);
+            const pulseSpeed = listening ? Math.max(0.4, 2.5 - (drivenLevel * 2.1)) : (transcribing ? 0.8 : 2.5);
+            const auraBaseShadow = 15 + (drivenLevel * 35);
+            const auraPeakShadow = 35 + (drivenLevel * 85);
+            const auraBaseOpacity = 0.1 + (drivenLevel * 0.5);
+            const auraPeakOpacity = Math.min(1, 0.35 + (drivenLevel * 0.65));
+
+            document.documentElement.style.setProperty('--core-brightness', brightness.toFixed(4));
+            document.documentElement.style.setProperty('--pulse-speed', pulseSpeed.toFixed(4) + 's');
+            document.documentElement.style.setProperty('--pulse-delay', (pulseSpeed / 2).toFixed(4) + 's');
+            document.documentElement.style.setProperty('--aura-base-shadow', auraBaseShadow.toFixed(2) + 'px');
+            document.documentElement.style.setProperty('--aura-peak-shadow', auraPeakShadow.toFixed(2) + 'px');
+            document.documentElement.style.setProperty('--aura-base-opacity', auraBaseOpacity.toFixed(4));
+            document.documentElement.style.setProperty('--aura-peak-opacity', auraPeakOpacity.toFixed(4));
+
+            const orb = document.getElementById('siri-orb') || document.querySelector('.orb-wrapper');
+            const svg = document.querySelector('.siri-svg');
+            const status = document.getElementById('status-text');
+            const classicContainer = document.getElementById('mic-container') || document.querySelector('.container');
+            const glowReactor = document.getElementById('glow-reactor');
+
+            // Compatibility mode for orb templates that try to own getUserMedia in-page.
+            if (orb) {
+              const orbShouldBeActive = listening || transcribing;
+              orb.classList.toggle('active', orbShouldBeActive);
+              if (listening) {
+                const dynamicScale = 1.3 + (drivenLevel * 0.42);
+                orb.style.transform = 'scale(' + dynamicScale.toFixed(4) + ')';
+              } else if (transcribing) {
+                orb.style.transform = 'scale(1.18)';
+              } else {
+                orb.style.transform = '';
               }
+            }
+            if (svg) {
+              if (listening) {
+                const brightness = 1 + (drivenLevel * 0.72);
+                svg.style.filter = 'brightness(' + brightness.toFixed(4) + ')';
+              } else if (transcribing) {
+                svg.style.filter = 'brightness(1.18)';
+              } else {
+                svg.style.filter = '';
+              }
+            }
+            if (classicContainer) {
+              if (listening) {
+                const classicScale = 1 + (drivenLevel * 0.10);
+                classicContainer.style.transform = 'scale(' + classicScale.toFixed(4) + ')';
+                classicContainer.style.transition = 'transform 0.05s ease-out';
+              } else if (transcribing) {
+                classicContainer.style.transform = 'scale(1.03)';
+                classicContainer.style.transition = 'transform 0.18s ease-out';
+              } else {
+                classicContainer.style.transform = '';
+                classicContainer.style.transition = '';
+              }
+            }
+            if (glowReactor) {
+              glowReactor.style.filter = 'brightness(' + brightness.toFixed(4) + ')';
+            }
+            if (status) {
+              if (listening) {
+                status.textContent = 'Listening...';
+              } else if (transcribing) {
+                status.textContent = 'Transcribing...';
+              } else {
+                status.textContent = 'Ready';
+              }
+            }
+
+            if (listening) {
+              let targetClicksPerSecond = 0;
+              if (drivenLevel > 0.03) {
+                targetClicksPerSecond = Math.pow(drivenLevel, 1.6) * 52;
+                targetClicksPerSecond += risingEdge * 24;
+              }
+              if (pulseActive && drivenLevel > 0.05) {
+                state.clickBudget += 0.8;
+              }
+              targetClicksPerSecond = Math.min(48, targetClicksPerSecond);
+              document.documentElement.style.setProperty('--mic-click-rate', targetClicksPerSecond.toFixed(2));
+
+              if (state.autoClickEnabled) {
+                state.clickBudget += targetClicksPerSecond * deltaSeconds;
+                state.clickBudget = Math.min(state.clickBudget, 12);
+                const maxBurst = pulseActive ? 6 : 4;
+                let fired = 0;
+                while (state.clickBudget >= 1 && fired < maxBurst) {
+                  window.__kinshasaDispatchClick();
+                  state.lastClickAt = Date.now();
+                  state.clickBudget -= 1;
+                  fired += 1;
+                }
+              }
+            } else {
+              state.levelEMA = 0;
+              state.clickBudget = 0;
+              state.lastDrivenLevel = 0;
             }
           } catch (_) {}
         };
@@ -397,11 +508,12 @@ private final class HTMLIndicatorContentView: NSView, WKNavigationDelegate {
     }
 
     private static func prepareHTMLDocument(from rawMarkup: String) -> String {
-        let lowercased = rawMarkup.lowercased()
+        let sanitizedMarkup = stripInPageMicScriptsIfNeeded(rawMarkup)
+        let lowercased = sanitizedMarkup.lowercased()
         var document: String
 
         if lowercased.contains("<html") {
-            document = rawMarkup
+            document = sanitizedMarkup
         } else {
             document = """
             <!DOCTYPE html>
@@ -412,7 +524,7 @@ private final class HTMLIndicatorContentView: NSView, WKNavigationDelegate {
             </head>
             <body>
               <div class="scene-container">
-                \(rawMarkup)
+                \(sanitizedMarkup)
               </div>
             </body>
             </html>
@@ -426,6 +538,26 @@ private final class HTMLIndicatorContentView: NSView, WKNavigationDelegate {
         return document
     }
 
+    static func preferredBaseSize(from rawMarkup: String) -> NSSize? {
+        let styleSource = extractStyleBlocks(from: rawMarkup)
+        let source = styleSource.isEmpty ? rawMarkup : styleSource
+
+        let widths = pixelValues(for: "width", in: source).filter { $0 >= 140 && $0 <= 1200 }
+        let heights = pixelValues(for: "height", in: source).filter { $0 >= 140 && $0 <= 1200 }
+
+        if let width = widths.max(), let height = heights.max() {
+            return NSSize(width: width, height: height)
+        }
+
+        if let viewBoxSize = svgViewBoxSize(from: rawMarkup) {
+            let clampedWidth = min(max(viewBoxSize.width, 140), 1200)
+            let clampedHeight = min(max(viewBoxSize.height, 140), 1200)
+            return NSSize(width: clampedWidth, height: clampedHeight)
+        }
+
+        return nil
+    }
+
     private static func inject(_ snippet: String, into document: String, beforeClosingTag closingTag: String) -> String {
         guard let range = document.range(of: closingTag, options: [.caseInsensitive, .backwards]) else {
             return document + "\n" + snippet
@@ -434,6 +566,96 @@ private final class HTMLIndicatorContentView: NSView, WKNavigationDelegate {
         var mutated = document
         mutated.insert(contentsOf: "\n\(snippet)\n", at: range.lowerBound)
         return mutated
+    }
+
+    private static func stripInPageMicScriptsIfNeeded(_ markup: String) -> String {
+        let lower = markup.lowercased()
+        guard lower.contains("getusermedia")
+            || lower.contains("audiocontext")
+            || lower.contains("webkitaudiocontext")
+        else {
+            return markup
+        }
+
+        return markup.replacingOccurrences(
+            of: "<script\\b[^>]*>[\\s\\S]*?<\\/script>",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
+    private static func extractStyleBlocks(from markup: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "<style\\b[^>]*>([\\s\\S]*?)<\\/style>", options: [.caseInsensitive]) else {
+            return ""
+        }
+
+        let nsRange = NSRange(markup.startIndex..., in: markup)
+        let matches = regex.matches(in: markup, options: [], range: nsRange)
+        guard !matches.isEmpty else {
+            return ""
+        }
+
+        var chunks: [String] = []
+        chunks.reserveCapacity(matches.count)
+        for match in matches {
+            guard match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: markup)
+            else {
+                continue
+            }
+            chunks.append(String(markup[range]))
+        }
+
+        return chunks.joined(separator: "\n")
+    }
+
+    private static func pixelValues(for property: String, in source: String) -> [CGFloat] {
+        let pattern = "\\b\(NSRegularExpression.escapedPattern(for: property))\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)px"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+
+        let nsRange = NSRange(source.startIndex..., in: source)
+        let matches = regex.matches(in: source, options: [], range: nsRange)
+        var values: [CGFloat] = []
+        values.reserveCapacity(matches.count)
+
+        for match in matches {
+            guard match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: source),
+                  let value = Double(source[range])
+            else {
+                continue
+            }
+            values.append(CGFloat(value))
+        }
+
+        return values
+    }
+
+    private static func svgViewBoxSize(from markup: String) -> NSSize? {
+        guard let regex = try? NSRegularExpression(pattern: "viewBox\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]", options: [.caseInsensitive]) else {
+            return nil
+        }
+
+        let nsRange = NSRange(markup.startIndex..., in: markup)
+        guard let match = regex.firstMatch(in: markup, options: [], range: nsRange),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: markup)
+        else {
+            return nil
+        }
+
+        let raw = markup[range]
+        let parts = raw
+            .split { $0 == " " || $0 == "," || $0 == "\t" || $0 == "\n" || $0 == "\r" }
+            .compactMap { Double($0) }
+
+        guard parts.count >= 4 else {
+            return nil
+        }
+
+        return NSSize(width: CGFloat(parts[2]), height: CGFloat(parts[3]))
     }
 }
 
@@ -453,8 +675,13 @@ final class FloatingBubbleController {
     private var riveContentView: RiveIndicatorContentView?
     private var htmlPanel: NSPanel?
     private var htmlContentView: HTMLIndicatorContentView?
+    private var activeHTMLBasePanelSize: NSSize
     private var indicatorPosition: FloatingIndicatorPosition = .centerTop
     private var indicatorScale: CGFloat = 1.0
+
+    init() {
+        activeHTMLBasePanelSize = baseHTMLPanelSize
+    }
 
     func setPresentation(position: FloatingIndicatorPosition, sizePercent: Double) {
         indicatorPosition = position
@@ -525,6 +752,7 @@ final class FloatingBubbleController {
     }
 
     private func showHTMLIndicator(markup: String, listening: Bool, transcribing: Bool) -> Bool {
+        activeHTMLBasePanelSize = HTMLIndicatorContentView.preferredBaseSize(from: markup) ?? baseHTMLPanelSize
         let panel = ensureHTMLPanel()
         guard htmlContentView?.loadMarkup(markup, listening: listening, transcribing: transcribing) == true else {
             return false
@@ -610,7 +838,7 @@ final class FloatingBubbleController {
     }
 
     private func htmlPanelSize() -> NSSize {
-        scaled(baseHTMLPanelSize)
+        scaled(activeHTMLBasePanelSize)
     }
 
     private func scaled(_ base: NSSize) -> NSSize {

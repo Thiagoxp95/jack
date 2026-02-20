@@ -13,6 +13,7 @@ Response:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import sys
 import tempfile
@@ -53,10 +54,34 @@ def run_startup_warmup(model, dtype, warmup_audio_path: Path) -> None:
     _ = model.transcribe(warmup_audio_path, dtype=dtype)
 
 
+def compact_runtime_memory() -> None:
+    try:
+        gc.collect()
+    except Exception:
+        pass
+
+    try:
+        clear_cache = getattr(mx, "clear_cache", None)
+        if callable(clear_cache):
+            clear_cache()
+    except Exception:
+        pass
+
+    try:
+        metal = getattr(mx, "metal", None)
+        if metal is not None:
+            metal_clear_cache = getattr(metal, "clear_cache", None)
+            if callable(metal_clear_cache):
+                metal_clear_cache()
+    except Exception:
+        pass
+
+
 def main() -> int:
     args = parse_args()
     dtype = mx.float32 if args.fp32 else mx.bfloat16
     warmup_audio_path = None
+    handled_requests = 0
 
     try:
         model = from_pretrained(args.model, dtype=dtype, cache_dir=args.cache_dir)
@@ -92,6 +117,9 @@ def main() -> int:
                     if warmup_audio_path is None:
                         raise RuntimeError("Warmup audio is unavailable.")
                     _ = model.transcribe(warmup_audio_path, dtype=dtype)
+                    handled_requests += 1
+                    if handled_requests % 8 == 0:
+                        compact_runtime_memory()
                     emit({"type": "warmed", "id": request_id})
                 except Exception as exc:
                     emit({"type": "error", "id": request_id, "message": str(exc)})
@@ -109,6 +137,9 @@ def main() -> int:
             try:
                 result = model.transcribe(Path(audio_path), dtype=dtype)
                 text = (result.text or "").strip()
+                handled_requests += 1
+                if handled_requests % 8 == 0:
+                    compact_runtime_memory()
                 emit({"type": "result", "id": request_id, "text": text})
             except Exception as exc:
                 emit({"type": "error", "id": request_id, "message": str(exc)})

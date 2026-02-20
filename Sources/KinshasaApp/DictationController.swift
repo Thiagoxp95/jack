@@ -191,10 +191,8 @@ final class DictationController: ObservableObject {
         duckingEnabled = defaults.object(forKey: DefaultsKey.duckingEnabled) as? Bool ?? false
         let storedDuckingAmount = defaults.object(forKey: DefaultsKey.duckingAmountPercent) as? Double ?? 40
         duckingAmountPercent = min(max(storedDuckingAmount, 0), 90)
-        keepModelWarmEnabled = true
-        keepModelWarmOnlyOnPower = false
-        UserDefaults.standard.set(true, forKey: DefaultsKey.keepModelWarmEnabled)
-        UserDefaults.standard.set(false, forKey: DefaultsKey.keepModelWarmOnlyOnPower)
+        keepModelWarmEnabled = defaults.object(forKey: DefaultsKey.keepModelWarmEnabled) as? Bool ?? false
+        keepModelWarmOnlyOnPower = defaults.object(forKey: DefaultsKey.keepModelWarmOnlyOnPower) as? Bool ?? true
         let defaultRiveAssetPath = Self.defaultListeningRiveAssetPath()
         listeningRiveAssetPath = defaults.string(forKey: DefaultsKey.listeningRiveAssetPath) ?? defaultRiveAssetPath
         riveIndicatorEnabled = defaults.object(forKey: DefaultsKey.riveIndicatorEnabled) as? Bool ?? !defaultRiveAssetPath.isEmpty
@@ -685,7 +683,7 @@ final class DictationController: ObservableObject {
         )
         if didPaste {
             statusText = "Transcribed and pasted."
-            showTransientBubble(message: "Pasted")
+            bubble.hide()
         } else {
             statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
             showTransientBubble(message: "Copied")
