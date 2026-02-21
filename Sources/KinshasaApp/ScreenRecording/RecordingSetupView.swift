@@ -267,6 +267,7 @@ struct RecordingSetupView: View {
 
             Button {
                 isStarting = true
+                onClose()  // Close setup window IMMEDIATELY, before countdown begins
                 Task {
                     do {
                         try await controller.startRecording()
@@ -274,7 +275,6 @@ struct RecordingSetupView: View {
                         // Error is logged in controller
                     }
                     isStarting = false
-                    onClose()
                 }
             } label: {
                 if isStarting {

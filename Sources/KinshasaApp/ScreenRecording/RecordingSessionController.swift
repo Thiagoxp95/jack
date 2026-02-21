@@ -64,6 +64,12 @@ final class RecordingSessionController {
     private let webcamService = WebcamCaptureService()
     private let micService = MicrophoneCaptureService()
 
+    // MARK: - UI Controllers (private)
+
+    private let countdownOverlay = CountdownOverlayController()
+    private let recordingBubble = RecordingBubbleController()
+    private let webcamOverlay = WebcamOverlayController()
+
     // MARK: - Timer State
 
     private var timerTask: Task<Void, Never>?
@@ -120,8 +126,14 @@ final class RecordingSessionController {
     }
 
     func cancelSetup() {
+        let wasCountdown = state == .countdown
         state = .idle
         webcamService.stop()
+        if wasCountdown {
+            // Countdown overlay will stop naturally since state changed
+            recordingBubble.hide()
+            webcamOverlay.hide()
+        }
     }
 
     // MARK: - Recording Lifecycle
@@ -155,8 +167,8 @@ final class RecordingSessionController {
         state = .countdown
         Self.logger.info("Countdown started")
 
-        // 3-second countdown
-        try await Task.sleep(nanoseconds: 3_000_000_000)
+        // Show countdown overlay (waits ~3.2 seconds for animation)
+        await countdownOverlay.show()
 
         guard state == .countdown else {
             // User may have cancelled during countdown
@@ -233,6 +245,7 @@ final class RecordingSessionController {
         if enableWebcam, hasCameraPermission {
             do {
                 try webcamService.start()
+                webcamOverlay.show(service: webcamService, position: webcamPosition, size: webcamSize)
             } catch {
                 Self.logger.error("Failed to start webcam: \(error)")
             }
@@ -243,6 +256,9 @@ final class RecordingSessionController {
         recordingStartDate = Date()
         elapsedTime = 0
         startElapsedTimer()
+
+        // Show recording bubble
+        recordingBubble.show(controller: self)
 
         Self.logger.info("Recording started for session \(sessionID.uuidString)")
     }
@@ -272,6 +288,10 @@ final class RecordingSessionController {
         guard state == .recording || state == .paused else { return }
 
         stopElapsedTimer()
+
+        // Hide UI overlays
+        recordingBubble.hide()
+        webcamOverlay.hide()
 
         // Stop screen capture
         if let screenSvc = screenService {
@@ -309,6 +329,10 @@ final class RecordingSessionController {
     }
 
     func finishEditing() {
+        // Ensure UI overlays are dismissed
+        recordingBubble.hide()
+        webcamOverlay.hide()
+
         // Clean up temp files
         if let session = currentSession {
             let fm = FileManager.default
