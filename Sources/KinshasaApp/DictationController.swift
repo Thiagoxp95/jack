@@ -30,7 +30,9 @@ final class DictationController: ObservableObject {
     }
 
     @Published private(set) var invocationKeyCode: Int64
+    @Published private(set) var voiceNoteSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
+    @Published var isCapturingVoiceNoteSwitchKey = false
     @Published var statusText: String
     @Published var lastTranscript: String
     @Published var isRecording = false
@@ -39,6 +41,8 @@ final class DictationController: ObservableObject {
     @Published var accessibilityGranted = AXIsProcessTrusted()
     @Published var keyboardMonitoringGranted = CGPreflightListenEventAccess()
     @Published var microphoneGranted = false
+    @Published private(set) var hasCompletedOnboarding: Bool
+    @Published var shouldShowOnboardingWizard: Bool
     @Published var duckingEnabled: Bool {
         didSet {
             UserDefaults.standard.set(duckingEnabled, forKey: DefaultsKey.duckingEnabled)
@@ -93,6 +97,12 @@ final class DictationController: ObservableObject {
             syncRiveIndicatorForCurrentSession()
         }
     }
+    @Published var builtInWaveIndicatorEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(builtInWaveIndicatorEnabled, forKey: DefaultsKey.builtInWaveIndicatorEnabled)
+            syncRiveIndicatorForCurrentSession()
+        }
+    }
     @Published var floatingIndicatorPosition: FloatingIndicatorPosition {
         didSet {
             UserDefaults.standard.set(floatingIndicatorPosition.rawValue, forKey: DefaultsKey.floatingIndicatorPosition)
@@ -114,6 +124,8 @@ final class DictationController: ObservableObject {
     @Published var lastShortcutEventAt: Date?
     @Published var lastTranscriptionLatency: TimeInterval?
     @Published var lastTranscriptionBackend: String?
+    @Published var appMode: AppMode = .dictation
+    @Published private(set) var recordingOutputMode: RecordingOutputMode = .paste
 
     private var initialized = false
     private var interpreter: ShortcutInterpreter
@@ -121,6 +133,7 @@ final class DictationController: ObservableObject {
     private let audioCapture = AudioCaptureService()
     private let transcription = ParakeetTranscriptionService()
     private let pasteService = PasteService()
+    private let noteService = NoteService()
     private let duckingService = SystemAudioDuckingService()
     private let bubble = FloatingBubbleController()
     private let bootstrapper = LocalParakeetBootstrapper()
@@ -144,10 +157,11 @@ final class DictationController: ObservableObject {
     private var isAdjustingIndicatorSize = false
     private var localKeyCaptureMonitor: Any?
     private var globalKeyCaptureMonitor: Any?
+    private var keyCaptureTarget: KeyCaptureTarget?
 
     private let liveSnapshotMinDuration: TimeInterval = 0.75
     private let liveSnapshotInterval: TimeInterval = 0.80
-    private let liveSnapshotMaxDuration: TimeInterval = 2.30
+    private let liveStreamingWindowDuration: TimeInterval = 1.65
     private let riveReactivePollInterval: TimeInterval = 0.05
     private let riveReactivePulseThreshold: Double = 0.14
     private let riveReactivePulseCooldown: TimeInterval = 0.40
@@ -157,6 +171,11 @@ final class DictationController: ObservableObject {
     private let liveReuseWaitTimeout: TimeInterval = 0.24
     private let liveImmediateReuseMaxGap: TimeInterval = 0.16
     private let liveReuseMinCoverageRatio: Double = 0.82
+    private let liveTailPatchMaxAudioGap: TimeInterval = 1.10
+    private let liveTailPatchMaxAge: TimeInterval = 1.90
+    private let liveTailPatchMinCoverageRatio: Double = 0.55
+    private let liveTailPatchWaitTimeout: TimeInterval = 0.42
+    private let liveTailPatchOverlap: TimeInterval = 0.22
     private let holdReleaseWatchPollInterval: TimeInterval = 0.05
     private let holdReleaseDebounce: TimeInterval = 0.12
     private let pipelineTimingEnabled = ProcessInfo.processInfo.environment["KINSHASA_TIMING"] == "1"
@@ -164,6 +183,8 @@ final class DictationController: ObservableObject {
     private enum DefaultsKey {
         static let mode = "shortcut_mode"
         static let invocationKeyCode = "shortcut_invocation_key_code"
+        static let voiceNoteSwitchKeyCode = "voice_note_switch_key_code"
+        static let onboardingCompleted = "onboarding_completed"
         static let duckingEnabled = "ducking_enabled"
         static let duckingAmountPercent = "ducking_amount_percent"
         static let keepModelWarmEnabled = "keep_model_warm_enabled"
@@ -172,12 +193,39 @@ final class DictationController: ObservableObject {
         static let listeningRiveAssetPath = "listening_rive_asset_path"
         static let customSVGIndicatorEnabled = "custom_svg_indicator_enabled"
         static let customSVGIndicatorMarkup = "custom_svg_indicator_markup"
+        static let builtInWaveIndicatorEnabled = "built_in_wave_indicator_enabled"
         static let floatingIndicatorPosition = "floating_indicator_position"
         static let floatingIndicatorSizePercent = "floating_indicator_size_percent"
     }
 
+    private enum KeyCaptureTarget {
+        case invocation
+        case voiceNoteSwitch
+    }
+
+    nonisolated static func inferOnboardingCompletion(
+        defaults: UserDefaults,
+        accessibilityGranted: Bool,
+        keyboardMonitoringGranted: Bool,
+        microphoneGranted: Bool
+    ) -> Bool {
+        if let stored = defaults.object(forKey: DefaultsKey.onboardingCompleted) as? Bool {
+            return stored
+        }
+
+        let hasLegacyConfig = defaults.object(forKey: DefaultsKey.mode) != nil
+            || defaults.object(forKey: DefaultsKey.invocationKeyCode) != nil
+            || defaults.object(forKey: DefaultsKey.voiceNoteSwitchKeyCode) != nil
+        let hasAllRequiredPermissions = accessibilityGranted && keyboardMonitoringGranted && microphoneGranted
+        return hasLegacyConfig || hasAllRequiredPermissions
+    }
+
     init() {
         let defaults = UserDefaults.standard
+        let initialAccessibilityGranted = AXIsProcessTrusted()
+        let initialKeyboardMonitoringGranted = CGPreflightListenEventAccess()
+        let initialMicrophoneGranted = audioCapture.microphonePermissionGranted
+
         let initialMode = ShortcutMode(rawValue: defaults.string(forKey: DefaultsKey.mode) ?? "") ?? .toggle
         let initialInvocationKeyCode: Int64
         if let stored = defaults.object(forKey: DefaultsKey.invocationKeyCode) as? Int {
@@ -185,9 +233,16 @@ final class DictationController: ObservableObject {
         } else {
             initialInvocationKeyCode = InvocationKey.defaultKeyCode
         }
+        let initialVoiceNoteSwitchKeyCode: Int64
+        if let stored = defaults.object(forKey: DefaultsKey.voiceNoteSwitchKeyCode) as? Int {
+            initialVoiceNoteSwitchKeyCode = Int64(stored)
+        } else {
+            initialVoiceNoteSwitchKeyCode = 0 // A
+        }
 
         mode = initialMode
         invocationKeyCode = initialInvocationKeyCode
+        voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
         duckingEnabled = defaults.object(forKey: DefaultsKey.duckingEnabled) as? Bool ?? false
         let storedDuckingAmount = defaults.object(forKey: DefaultsKey.duckingAmountPercent) as? Double ?? 40
         duckingAmountPercent = min(max(storedDuckingAmount, 0), 90)
@@ -198,24 +253,46 @@ final class DictationController: ObservableObject {
         riveIndicatorEnabled = defaults.object(forKey: DefaultsKey.riveIndicatorEnabled) as? Bool ?? !defaultRiveAssetPath.isEmpty
         customSVGIndicatorMarkup = defaults.string(forKey: DefaultsKey.customSVGIndicatorMarkup) ?? ""
         customSVGIndicatorEnabled = defaults.object(forKey: DefaultsKey.customSVGIndicatorEnabled) as? Bool ?? false
+        builtInWaveIndicatorEnabled = defaults.object(forKey: DefaultsKey.builtInWaveIndicatorEnabled) as? Bool ?? false
         let rawPosition = defaults.string(forKey: DefaultsKey.floatingIndicatorPosition) ?? FloatingIndicatorPosition.centerTop.rawValue
         floatingIndicatorPosition = FloatingIndicatorPosition(rawValue: rawPosition) ?? .centerTop
         let storedIndicatorSize = defaults.object(forKey: DefaultsKey.floatingIndicatorSizePercent) as? Double ?? 35
         floatingIndicatorSizePercent = min(max(storedIndicatorSize, 18), 140)
+        let inferredOnboardingCompleted = Self.inferOnboardingCompletion(
+            defaults: defaults,
+            accessibilityGranted: initialAccessibilityGranted,
+            keyboardMonitoringGranted: initialKeyboardMonitoringGranted,
+            microphoneGranted: initialMicrophoneGranted
+        )
+        hasCompletedOnboarding = inferredOnboardingCompleted
+        shouldShowOnboardingWizard = !inferredOnboardingCompleted
         keepModelWarmStatus = "Off"
         interpreter = ShortcutInterpreter(mode: initialMode)
-        statusText = "Preparing local speech model..."
+        statusText = "Preparing CoreML speech model..."
         lastTranscript = ""
 
-        parakeetModel = ProcessInfo.processInfo.environment["PARAKEET_MODEL"]
-            ?? "mlx-community/parakeet-tdt-0.6b-v2"
+        parakeetModel = ProcessInfo.processInfo.environment["KINSHASA_COREML_MODEL"]
+            ?? ProcessInfo.processInfo.environment["PARAKEET_MODEL"]
+            ?? "FluidInference/parakeet-tdt-0.6b-v2-coreml"
 
-        microphoneGranted = audioCapture.microphonePermissionGranted
+        accessibilityGranted = initialAccessibilityGranted
+        keyboardMonitoringGranted = initialKeyboardMonitoringGranted
+        microphoneGranted = initialMicrophoneGranted
         shortcutMonitor.setInvocationKeyCode(initialInvocationKeyCode)
+        shortcutMonitor.setVoiceNoteSwitchKeyCode(initialVoiceNoteSwitchKeyCode)
+
+        if defaults.object(forKey: DefaultsKey.onboardingCompleted) == nil, inferredOnboardingCompleted {
+            defaults.set(true, forKey: DefaultsKey.onboardingCompleted)
+        }
 
         shortcutMonitor.onEvent = { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleShortcutEvent(event)
+            }
+        }
+        shortcutMonitor.onVoiceNoteSwitchKeyPressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.switchRecordingOutputToVoiceNote()
             }
         }
 
@@ -228,7 +305,7 @@ final class DictationController: ObservableObject {
         }
 
         initialized = true
-        let shortcutStarted = await refreshPermissions(prompt: true)
+        let shortcutStarted = await refreshPermissions(prompt: false)
         configureKeepModelWarmLoop()
 
         Task {
@@ -241,6 +318,7 @@ final class DictationController: ObservableObject {
         accessibilityGranted = requestAccessibilityPermission(prompt: prompt)
         keyboardMonitoringGranted = requestKeyboardMonitoringPermission(prompt: prompt)
         microphoneGranted = await audioCapture.requestMicrophonePermissionIfNeeded(prompt: prompt)
+        markOnboardingCompleteIfReady()
         return startShortcutMonitor()
     }
 
@@ -266,6 +344,36 @@ final class DictationController: ObservableObject {
 
     var invocationKeyDisplayName: String {
         InvocationKey.displayName(for: invocationKeyCode)
+    }
+
+    var allRequiredPermissionsGranted: Bool {
+        accessibilityGranted && keyboardMonitoringGranted && microphoneGranted
+    }
+
+    var voiceNoteSwitchKeyDisplayName: String {
+        InvocationKey.displayName(for: voiceNoteSwitchKeyCode)
+    }
+
+    func showOnboardingWizard() {
+        shouldShowOnboardingWizard = true
+    }
+
+    func dismissOnboardingWizard() {
+        shouldShowOnboardingWizard = false
+    }
+
+    func completeOnboardingWizard() {
+        hasCompletedOnboarding = true
+        shouldShowOnboardingWizard = false
+        UserDefaults.standard.set(true, forKey: DefaultsKey.onboardingCompleted)
+    }
+
+    var notesDirectoryPathText: String {
+        noteService.notesDirectoryPath()
+    }
+
+    var recordingOutputModeText: String {
+        recordingOutputMode.title
     }
 
     var activeModelText: String {
@@ -318,11 +426,13 @@ final class DictationController: ObservableObject {
     }
 
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey else {
             return
         }
 
+        keyCaptureTarget = .invocation
         isCapturingInvocationKey = true
+        isCapturingVoiceNoteSwitchKey = false
         statusText = "Press the key to use globally (left/right modifiers supported)."
         installInvocationKeyCaptureMonitors()
     }
@@ -333,13 +443,60 @@ final class DictationController: ObservableObject {
         }
 
         isCapturingInvocationKey = false
+        keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
         statusText = "Invocation key capture canceled."
+    }
+
+    func startVoiceNoteSwitchKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey else {
+            return
+        }
+
+        keyCaptureTarget = .voiceNoteSwitch
+        isCapturingInvocationKey = false
+        isCapturingVoiceNoteSwitchKey = true
+        statusText = "Press the key to switch to Voice Note mode while recording."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelVoiceNoteSwitchKeyCapture() {
+        guard isCapturingVoiceNoteSwitchKey else {
+            return
+        }
+
+        isCapturingVoiceNoteSwitchKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Voice Note key capture canceled."
     }
 
     func requestKeyboardPrompt() {
         keyboardMonitoringGranted = requestKeyboardMonitoringPermission(prompt: true)
         _ = startShortcutMonitor()
+    }
+
+    func requestVoicePermissionsPrompt() {
+        Task {
+            accessibilityGranted = requestAccessibilityPermission(prompt: true)
+            keyboardMonitoringGranted = requestKeyboardMonitoringPermission(prompt: true)
+            microphoneGranted = await audioCapture.requestMicrophonePermissionIfNeeded(prompt: true)
+            markOnboardingCompleteIfReady()
+            _ = startShortcutMonitor()
+            if !isRecording, !isTranscribing, !isPreparingModel {
+                statusText = "Voice permissions updated."
+            }
+        }
+    }
+
+    func recheckVoicePermissions() {
+        Task {
+            accessibilityGranted = requestAccessibilityPermission(prompt: false)
+            keyboardMonitoringGranted = requestKeyboardMonitoringPermission(prompt: false)
+            microphoneGranted = await audioCapture.requestMicrophonePermissionIfNeeded(prompt: false)
+            markOnboardingCompleteIfReady()
+            _ = startShortcutMonitor()
+        }
     }
 
     func chooseListeningRiveAsset() {
@@ -429,6 +586,7 @@ final class DictationController: ObservableObject {
         riveReactiveLoopTask?.cancel()
         riveReactiveLoopTask = nil
         stopHoldReleaseWatchdog()
+        shortcutMonitor.setVoiceNoteSwitchArmed(false)
         keepModelWarmTask?.cancel()
         keepModelWarmTask = nil
         indicatorPreviewHideTask?.cancel()
@@ -454,7 +612,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey else {
             return
         }
 
@@ -482,7 +640,47 @@ final class DictationController: ObservableObject {
         }
     }
 
+    private func switchRecordingOutputToVoiceNote() {
+        guard isRecording, !isTranscribing else {
+            return
+        }
+
+        guard recordingOutputMode != .voiceNote else {
+            return
+        }
+
+        recordingOutputMode = .voiceNote
+        statusText = listeningStatusText(isLive: false)
+        showBubble(message: listeningBubbleMessage(), isRecording: true)
+    }
+
+    private func listeningBubbleMessage() -> String {
+        switch recordingOutputMode {
+        case .paste:
+            return "Listening..."
+        case .voiceNote:
+            return "Listening (Note Mode)..."
+        }
+    }
+
+    private func listeningStatusText(isLive: Bool) -> String {
+        switch (recordingOutputMode, isLive) {
+        case (.paste, false):
+            return "Listening..."
+        case (.paste, true):
+            return "Listening... (live)"
+        case (.voiceNote, false):
+            return "Listening... (note mode)"
+        case (.voiceNote, true):
+            return "Listening... (live, note mode)"
+        }
+    }
+
     private func beginRecording() async {
+        guard appMode == .dictation else {
+            return
+        }
+
         guard !isRecording, !isTranscribing else {
             return
         }
@@ -505,16 +703,20 @@ final class DictationController: ObservableObject {
         do {
             try audioCapture.startRecording()
             isRecording = true
+            recordingOutputMode = .paste
+            shortcutMonitor.setVoiceNoteSwitchArmed(true)
             latestLiveTranscription = nil
             liveTranscriptionInFlight = false
             liveSnapshotInFlightDuration = nil
             startHoldReleaseWatchdogIfNeeded()
-            statusText = "Listening..."
-            showBubble(message: "Listening...", isRecording: true)
+            statusText = listeningStatusText(isLive: false)
+            showBubble(message: listeningBubbleMessage(), isRecording: true)
             startRiveReactiveLoopIfNeeded()
             applyDuckingIfNeeded()
             startLiveTranscriptionLoop(configuration: configuration)
         } catch {
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            recordingOutputMode = .paste
             handleError(error.localizedDescription)
         }
     }
@@ -536,6 +738,7 @@ final class DictationController: ObservableObject {
 
             isRecording = false
             isTranscribing = true
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: false)
@@ -597,6 +800,54 @@ final class DictationController: ObservableObject {
                         return
                     }
 
+                    let shouldWaitForTailPatch = shouldWaitForTailPatchLiveTranscription(finalDuration: finalDuration)
+                    let tailPatchLive: LiveTranscriptionResult?
+                    if let immediateTailPatch = tailPatchLiveTranscription(finalDuration: finalDuration) {
+                        tailPatchLive = immediateTailPatch
+                    } else if shouldWaitForTailPatch {
+                        tailPatchLive = await waitForTailPatchLiveTranscription(
+                            finalDuration: finalDuration,
+                            timeout: liveTailPatchWaitTimeout
+                        )
+                    } else {
+                        tailPatchLive = nil
+                    }
+
+                    if let tailPatchLive {
+                        let tailStartSeconds = max(0, tailPatchLive.snapshotDuration - liveTailPatchOverlap)
+                        do {
+                            let tailResult = try await transcription.transcribe(
+                                audioFileURL: recordedFile,
+                                configuration: configuration,
+                                startSeconds: tailStartSeconds,
+                                backendLabel: "CoreML Streaming (tail patch)"
+                            )
+                            let stitchedText = mergeLiveAndTail(base: tailPatchLive.text, tail: tailResult.text)
+                            let totalLatency = Date().timeIntervalSince(startedAt)
+                            let waitLatency = Date().timeIntervalSince(waitStartedAt)
+                            await MainActor.run {
+                                logPipelineTiming(
+                                    String(
+                                        format: "stop->tail-patch total=%.3fs wait=%.3fs tail=%.3fs start=%.3fs backend=%@",
+                                        totalLatency,
+                                        waitLatency,
+                                        max(0, finalDuration - tailPatchLive.snapshotDuration),
+                                        tailStartSeconds,
+                                        tailResult.backend
+                                    )
+                                )
+                                lastTranscriptionLatency = totalLatency
+                                lastTranscriptionBackend = "\(tailResult.backend) + live reuse"
+                                handleTranscriptionResult(stitchedText)
+                            }
+                            return
+                        } catch {
+                            await MainActor.run {
+                                logPipelineTiming("stop->tail-patch failed fallback=full error=\(error.localizedDescription)")
+                            }
+                        }
+                    }
+
                     let waitLatency = Date().timeIntervalSince(waitStartedAt)
                     let result = try await transcription.transcribe(audioFileURL: recordedFile, configuration: configuration)
 
@@ -622,6 +873,8 @@ final class DictationController: ObservableObject {
                 }
             }
         } catch {
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            recordingOutputMode = .paste
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
             duckingService.restoreIfNeeded()
@@ -635,7 +888,7 @@ final class DictationController: ObservableObject {
         }
 
         isPreparingModel = true
-        statusText = "Preparing local speech model (first run may take a minute)..."
+        statusText = "Preparing local CoreML speech model (first run may take a minute)..."
 
         defer {
             isPreparingModel = false
@@ -653,7 +906,7 @@ final class DictationController: ObservableObject {
 
             return true
         } catch {
-            handleError("Could not prepare local speech model. \(error.localizedDescription)")
+            handleError("Could not prepare local CoreML speech model. \(error.localizedDescription)")
             return false
         }
     }
@@ -663,6 +916,7 @@ final class DictationController: ObservableObject {
 
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else {
+            recordingOutputMode = .paste
             statusText = "No speech detected."
             showTransientBubble(message: "No speech detected")
             return
@@ -670,34 +924,59 @@ final class DictationController: ObservableObject {
 
         lastTranscript = cleaned
 
-        let pasteStartedAt = Date()
-        let didPaste = pasteService.copyAndPaste(cleaned)
-        let pasteLatency = Date().timeIntervalSince(pasteStartedAt)
-        logPipelineTiming(
-            String(
-                format: "paste latency=%.3fs chars=%d success=%@",
-                pasteLatency,
-                cleaned.count,
-                didPaste ? "yes" : "no"
+        switch recordingOutputMode {
+        case .paste:
+            let pasteStartedAt = Date()
+            let didPaste = pasteService.copyAndPaste(cleaned)
+            let pasteLatency = Date().timeIntervalSince(pasteStartedAt)
+            logPipelineTiming(
+                String(
+                    format: "paste latency=%.3fs chars=%d success=%@",
+                    pasteLatency,
+                    cleaned.count,
+                    didPaste ? "yes" : "no"
+                )
             )
-        )
-        if didPaste {
-            statusText = "Transcribed and pasted."
-            bubble.hide()
-        } else {
-            statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
-            showTransientBubble(message: "Copied")
+
+            if didPaste {
+                statusText = "Transcribed and pasted."
+                bubble.hide()
+            } else {
+                statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
+                showTransientBubble(message: "Copied")
+            }
+        case .voiceNote:
+            do {
+                let fileURL = try noteService.appendVoiceNote(cleaned)
+                statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
+                showTransientBubble(message: "Saved to note")
+            } catch {
+                handleError("Could not save voice note. \(error.localizedDescription)")
+            }
         }
+
+        recordingOutputMode = .paste
     }
 
     private func handleError(_ message: String) {
         if !isRecording {
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            recordingOutputMode = .paste
             duckingService.restoreIfNeeded()
         }
         statusText = message
         showTransientBubble(message: "Error", duration: 1.6)
+    }
+
+    private func markOnboardingCompleteIfReady() {
+        guard !hasCompletedOnboarding, allRequiredPermissionsGranted else {
+            return
+        }
+
+        hasCompletedOnboarding = true
+        UserDefaults.standard.set(true, forKey: DefaultsKey.onboardingCompleted)
     }
 
     private func applyDuckingIfNeeded() {
@@ -789,7 +1068,7 @@ final class DictationController: ObservableObject {
             return
         }
 
-        showBubble(message: "Listening...", isRecording: true)
+        showBubble(message: listeningBubbleMessage(), isRecording: true)
         startRiveReactiveLoopIfNeeded()
     }
 
@@ -810,6 +1089,7 @@ final class DictationController: ObservableObject {
         if customSVGMarkupIfEnabled(forRecordingState: true) != nil {
             bubble.updateHTMLReactiveInputs(listening: true, transcribing: false, level: 0, shouldPulse: false)
         }
+        bubble.updateWaveReactiveInputs(listening: true, transcribing: false, level: 0, shouldPulse: false)
 
         let pollNanos = UInt64(riveReactivePollInterval * 1_000_000_000)
         riveReactiveLoopTask = Task(priority: .userInitiated) { [weak self] in
@@ -838,6 +1118,7 @@ final class DictationController: ObservableObject {
         if resetInputs {
             bubble.updateRiveReactiveInputs(listening: false, level: 0, shouldPulse: false)
             bubble.updateHTMLReactiveInputs(listening: false, transcribing: false, level: 0, shouldPulse: false)
+            bubble.updateWaveReactiveInputs(listening: false, transcribing: false, level: 0, shouldPulse: false)
         }
     }
 
@@ -869,13 +1150,14 @@ final class DictationController: ObservableObject {
         if customSVGMarkupIfEnabled(forRecordingState: true) != nil {
             bubble.updateHTMLReactiveInputs(listening: true, transcribing: false, level: level, shouldPulse: shouldPulse)
         }
+        bubble.updateWaveReactiveInputs(listening: true, transcribing: false, level: level, shouldPulse: shouldPulse)
     }
 
     private func syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: Bool) {
         bubble.setPresentation(position: floatingIndicatorPosition, sizePercent: floatingIndicatorSizePercent)
 
         if isRecording {
-            showBubble(message: "Listening...", isRecording: true)
+            showBubble(message: listeningBubbleMessage(), isRecording: true)
             return
         }
 
@@ -962,7 +1244,8 @@ final class DictationController: ObservableObject {
             isRecording: true,
             isTranscribing: false,
             riveAssetPath: preferredRiveAssetPath(),
-            htmlIndicatorMarkup: preferredCustomSVGMarkup()
+            htmlIndicatorMarkup: preferredCustomSVGMarkup(),
+            useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
         )
 
         if !isAdjustingIndicatorSize {
@@ -987,9 +1270,7 @@ final class DictationController: ObservableObject {
     }
 
     private func shouldRunReactiveIndicatorLoopDuringRecording() -> Bool {
-        let hasRiveReactive = riveAssetPathIfEnabled(forRecordingState: true) != nil
-        let hasCustomReactive = customSVGMarkupIfEnabled(forRecordingState: true) != nil
-        return hasRiveReactive || hasCustomReactive
+        true
     }
 
     private func preferredRiveAssetPath() -> String? {
@@ -1040,13 +1321,21 @@ final class DictationController: ObservableObject {
             isRecording: isRecording,
             isTranscribing: isTranscribing,
             riveAssetPath: riveAssetPathIfEnabled(forRecordingState: isRecording),
-            htmlIndicatorMarkup: (isRecording || isTranscribing) ? preferredCustomSVGMarkup() : nil
+            htmlIndicatorMarkup: (isRecording || isTranscribing) ? preferredCustomSVGMarkup() : nil,
+            useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
         )
     }
 
     private func showTransientBubble(message: String, duration: TimeInterval = 0.95) {
         bubbleHideTask?.cancel()
-        bubble.show(message: message, isRecording: false, isTranscribing: false, riveAssetPath: nil, htmlIndicatorMarkup: nil)
+        bubble.show(
+            message: message,
+            isRecording: false,
+            isTranscribing: false,
+            riveAssetPath: nil,
+            htmlIndicatorMarkup: nil,
+            useBuiltInWaveIndicator: false
+        )
 
         bubbleHideTask = Task { [weak self] in
             let nanos = UInt64(duration * 1_000_000_000)
@@ -1076,7 +1365,13 @@ final class DictationController: ObservableObject {
         guard let url = URL(string: rawURL) else {
             return
         }
-        NSWorkspace.shared.open(url)
+        if NSWorkspace.shared.open(url) {
+            return
+        }
+
+        if let settingsURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.systempreferences") {
+            NSWorkspace.shared.open(settingsURL)
+        }
     }
 
     private func installInvocationKeyCaptureMonitors() {
@@ -1108,7 +1403,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleInvocationCaptureEvent(_ event: NSEvent) {
-        guard isCapturingInvocationKey else {
+        guard let keyCaptureTarget else {
             return
         }
 
@@ -1117,17 +1412,35 @@ final class DictationController: ObservableObject {
         }
 
         let capturedKeyCode = Int64(event.keyCode)
-        setInvocationKeyCode(capturedKeyCode)
+        switch keyCaptureTarget {
+        case .invocation:
+            setInvocationKeyCode(capturedKeyCode)
+            statusText = "Invocation key set to \(invocationKeyDisplayName)."
+        case .voiceNoteSwitch:
+            guard capturedKeyCode != invocationKeyCode else {
+                statusText = "Voice Note key must be different from invocation key."
+                return
+            }
+            setVoiceNoteSwitchKeyCode(capturedKeyCode)
+            statusText = "Voice Note key set to \(voiceNoteSwitchKeyDisplayName)."
+        }
 
         isCapturingInvocationKey = false
+        isCapturingVoiceNoteSwitchKey = false
+        self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
-        statusText = "Invocation key set to \(invocationKeyDisplayName)."
     }
 
     private func setInvocationKeyCode(_ keyCode: Int64) {
         invocationKeyCode = keyCode
         UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.invocationKeyCode)
         shortcutMonitor.setInvocationKeyCode(keyCode)
+    }
+
+    private func setVoiceNoteSwitchKeyCode(_ keyCode: Int64) {
+        voiceNoteSwitchKeyCode = keyCode
+        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.voiceNoteSwitchKeyCode)
+        shortcutMonitor.setVoiceNoteSwitchKeyCode(keyCode)
     }
 
     private func startLiveTranscriptionLoop(configuration: ParakeetConfiguration) {
@@ -1163,11 +1476,6 @@ final class DictationController: ObservableObject {
             return
         }
 
-        // Keep live previews cheap; long full-recording snapshots can block final transcription.
-        guard currentDuration <= liveSnapshotMaxDuration else {
-            return
-        }
-
         let snapshot: AudioCaptureService.RecordingSnapshot
         do {
             snapshot = try audioCapture.makeRecordingSnapshot()
@@ -1175,6 +1483,7 @@ final class DictationController: ObservableObject {
             return
         }
 
+        let liveChunkStartSeconds = max(0, snapshot.duration - liveStreamingWindowDuration)
         liveTranscriptionInFlight = true
         liveSnapshotInFlightDuration = snapshot.duration
         let transcriptionService = transcription
@@ -1185,7 +1494,12 @@ final class DictationController: ObservableObject {
             }
 
             do {
-                let result = try await transcriptionService.transcribe(audioFileURL: snapshot.url, configuration: configuration)
+                let result = try await transcriptionService.transcribe(
+                    audioFileURL: snapshot.url,
+                    configuration: configuration,
+                    startSeconds: liveChunkStartSeconds,
+                    backendLabel: "CoreML Streaming (live chunk)"
+                )
                 await MainActor.run {
                     guard let self else {
                         return
@@ -1199,17 +1513,27 @@ final class DictationController: ObservableObject {
                         return
                     }
 
+                    let mergedText: String
+                    if liveChunkStartSeconds > 0,
+                       let previous = self.latestLiveTranscription,
+                       previous.snapshotDuration < snapshot.duration
+                    {
+                        mergedText = self.mergeLiveAndTail(base: previous.text, tail: cleaned)
+                    } else {
+                        mergedText = cleaned
+                    }
+
                     self.latestLiveTranscription = LiveTranscriptionResult(
-                        text: cleaned,
+                        text: mergedText,
                         backend: result.backend,
                         snapshotDuration: snapshot.duration,
                         completedAt: .now
                     )
 
                     if self.isRecording {
-                        self.lastTranscript = cleaned
+                        self.lastTranscript = mergedText
                         self.lastTranscriptionBackend = "\(result.backend) (live)"
-                        self.statusText = "Listening... (live)"
+                        self.statusText = self.listeningStatusText(isLive: true)
                     }
                 }
             } catch {
@@ -1278,6 +1602,112 @@ final class DictationController: ObservableObject {
 
         let missingTail = finalDuration - snapshotDuration
         return missingTail >= 0 && missingTail <= liveReuseMaxAudioGap
+    }
+
+    private func tailPatchLiveTranscription(finalDuration: TimeInterval) -> LiveTranscriptionResult? {
+        guard let latestLiveTranscription else {
+            return nil
+        }
+
+        let missingTail = finalDuration - latestLiveTranscription.snapshotDuration
+        let age = Date().timeIntervalSince(latestLiveTranscription.completedAt)
+        let coverageRatio = finalDuration > 0 ? latestLiveTranscription.snapshotDuration / finalDuration : 1
+
+        guard missingTail > liveReuseMaxAudioGap,
+              missingTail <= liveTailPatchMaxAudioGap,
+              age <= liveTailPatchMaxAge,
+              coverageRatio >= liveTailPatchMinCoverageRatio
+        else {
+            return nil
+        }
+
+        return latestLiveTranscription
+    }
+
+    private func shouldWaitForTailPatchLiveTranscription(finalDuration: TimeInterval) -> Bool {
+        guard liveTranscriptionInFlight,
+              let snapshotDuration = liveSnapshotInFlightDuration
+        else {
+            return false
+        }
+
+        let missingTail = finalDuration - snapshotDuration
+        return missingTail > liveReuseMaxAudioGap && missingTail <= liveTailPatchMaxAudioGap
+    }
+
+    private func waitForTailPatchLiveTranscription(finalDuration: TimeInterval, timeout: TimeInterval) async -> LiveTranscriptionResult? {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if let live = tailPatchLiveTranscription(finalDuration: finalDuration) {
+                return live
+            }
+
+            guard liveTranscriptionInFlight else {
+                break
+            }
+
+            try? await Task.sleep(nanoseconds: 80_000_000)
+        }
+
+        return tailPatchLiveTranscription(finalDuration: finalDuration)
+    }
+
+    private func mergeLiveAndTail(base: String, tail: String) -> String {
+        let left = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let right = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !left.isEmpty else {
+            return right
+        }
+        guard !right.isEmpty else {
+            return left
+        }
+
+        let leftTokens = left.split(whereSeparator: \.isWhitespace).map(String.init)
+        let rightTokens = right.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !leftTokens.isEmpty, !rightTokens.isEmpty else {
+            return "\(left) \(right)"
+        }
+
+        let overlap = overlapTokenCount(baseTokens: leftTokens, tailTokens: rightTokens)
+        if overlap == 0 {
+            return "\(left) \(right)"
+        }
+
+        let mergedTail = rightTokens.dropFirst(overlap).joined(separator: " ")
+        return mergedTail.isEmpty ? left : "\(left) \(mergedTail)"
+    }
+
+    private func overlapTokenCount(baseTokens: [String], tailTokens: [String]) -> Int {
+        let maxOverlap = min(10, baseTokens.count, tailTokens.count)
+        guard maxOverlap > 0 else {
+            return 0
+        }
+
+        for size in stride(from: maxOverlap, through: 1, by: -1) {
+            var matched = true
+            for index in 0..<size {
+                let lhsIndex = baseTokens.count - size + index
+                if normalizedMergeToken(baseTokens[lhsIndex]) != normalizedMergeToken(tailTokens[index]) {
+                    matched = false
+                    break
+                }
+            }
+
+            if matched {
+                return size
+            }
+        }
+
+        return 0
+    }
+
+    private func normalizedMergeToken(_ token: String) -> String {
+        let normalized = token
+            .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.symbols))
+            .lowercased()
+        return normalized.isEmpty ? token.lowercased() : normalized
     }
 
     private func logPipelineTiming(_ message: String) {

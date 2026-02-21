@@ -2,295 +2,62 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var controller: DictationController
+    @Bindable var recordingController: RecordingSessionController
+    @State private var selectedSection: SettingsSection = .overview
+    private let setupWindow = SetupWindowController()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Voice to Text")
-                    .font(.title2.weight(.semibold))
-
-                Text("Press \(controller.invocationKeyDisplayName) to dictate globally. Grant Input Monitoring, Accessibility, and Microphone on first run.")
-                    .foregroundStyle(.secondary)
-
-                Picker("Shortcut Mode", selection: $controller.mode) {
-                    ForEach(ShortcutMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $selectedSection) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(section)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Actionfy")
+            .safeAreaInset(edge: .bottom) {
+                Button("Open Setup Wizard") {
+                    controller.showOnboardingWizard()
                 }
-                .pickerStyle(.segmented)
-
-                GroupBox("Audio Ducking") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Lower system output volume while recording", isOn: $controller.duckingEnabled)
-
-                        HStack(spacing: 10) {
-                            Text("Lower By")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Slider(value: $controller.duckingAmountPercent, in: 0 ... 90, step: 5)
-                                .disabled(!controller.duckingEnabled)
-                            Text(controller.duckingAmountText)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 42, alignment: .trailing)
-                        }
-
-                        Text("Volume is restored automatically when recording stops.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(.borderedProminent)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    sectionView(selectedSection)
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.visible)
+        }
+        .sheet(isPresented: $controller.shouldShowOnboardingWizard) {
+            OnboardingWizardView(controller: controller)
+        }
+    }
 
-                GroupBox("Rive Indicator") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Use Rive animation while listening", isOn: $controller.riveIndicatorEnabled)
+    @ViewBuilder
+    private func sectionView(_ section: SettingsSection) -> some View {
+        switch section {
+        case .overview:
+            overviewSection
+        case .shortcuts:
+            shortcutsSection
+        case .indicators:
+            indicatorsSection
+        case .audioModel:
+            audioModelSection
+        case .screenRecording:
+            screenRecordingSection
+        case .advanced:
+            advancedSection
+        }
+    }
 
-                        LabeledContent("Listening Asset", value: controller.listeningRiveAssetPathText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 10) {
-                            Button("Choose .riv File") {
-                                controller.chooseListeningRiveAsset()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Clear") {
-                                controller.clearListeningRiveAsset()
-                            }
-                            .disabled(controller.listeningRiveAssetPathText == "Not set")
-                        }
-                        .font(.caption)
-
-                        Text("When enabled, recording state uses the selected .riv file instead of the listening rectangle.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Custom SVG / HTML Indicator") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Use custom SVG/HTML while listening", isOn: $controller.customSVGIndicatorEnabled)
-
-                        LabeledContent("Markup", value: controller.customSVGIndicatorSummaryText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 10) {
-                            Button("Choose File") {
-                                controller.chooseCustomSVGIndicatorFile()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Paste from Clipboard") {
-                                controller.pasteCustomSVGIndicatorMarkupFromClipboard()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Clear") {
-                                controller.clearCustomSVGIndicatorMarkup()
-                            }
-                            .disabled(controller.customSVGIndicatorSummaryText == "No markup")
-                        }
-                        .font(.caption)
-
-                        TextEditor(text: $controller.customSVGIndicatorMarkup)
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(minHeight: 140, maxHeight: 220)
-                            .disabled(!controller.customSVGIndicatorEnabled)
-
-                        Text("Paste full HTML or raw SVG. Hover selectors are mapped to recording state automatically.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Floating Indicator") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Picker("Position", selection: $controller.floatingIndicatorPosition) {
-                            ForEach(FloatingIndicatorPosition.allCases) { position in
-                                Text(position.title).tag(position)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        HStack(spacing: 10) {
-                            Text("Size")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Slider(
-                                value: $controller.floatingIndicatorSizePercent,
-                                in: 18 ... 140,
-                                step: 5,
-                                onEditingChanged: controller.setFloatingIndicatorSizeEditing
-                            )
-                            Text(controller.floatingIndicatorSizeText)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 46, alignment: .trailing)
-                        }
-
-                        Text("While adjusting size, the floating indicator is shown live as a preview.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Model Warmth") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Keep model warm in background", isOn: $controller.keepModelWarmEnabled)
-
-                        Toggle("Only while plugged in", isOn: $controller.keepModelWarmOnlyOnPower)
-                            .disabled(!controller.keepModelWarmEnabled)
-
-                        LabeledContent("Warm Status", value: controller.keepModelWarmStatusText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text("Runs a lightweight warmup about every 45 seconds while idle.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Invocation Key") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        LabeledContent("Current Key", value: controller.invocationKeyDisplayName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        LabeledContent("Active Model", value: controller.activeModelText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        LabeledContent("Last Transcription", value: controller.lastLatencyText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        LabeledContent("Backend", value: controller.lastBackendText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 10) {
-                            Button(controller.isCapturingInvocationKey ? "Listening for key..." : "Change Invocation Key") {
-                                controller.startInvocationKeyCapture()
-                            }
-                            .disabled(controller.isCapturingInvocationKey)
-
-                            if controller.isCapturingInvocationKey {
-                                Button("Cancel") {
-                                    controller.cancelInvocationKeyCapture()
-                                }
-                            }
-                        }
-
-                        if controller.isCapturingInvocationKey {
-                            Text("Press any physical key now. Left and right modifier keys are distinct.")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Permissions & Shortcut Health") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        permissionRow(
-                            title: "Keyboard (Input Monitoring)",
-                            granted: controller.keyboardMonitoringGranted,
-                            detail: "Required for global invocation shortcut"
-                        )
-
-                        permissionRow(
-                            title: "Accessibility",
-                            granted: controller.accessibilityGranted,
-                            detail: "Required for auto-paste into focused app"
-                        )
-
-                        permissionRow(
-                            title: "Microphone",
-                            granted: controller.microphoneGranted,
-                            detail: "Required for recording your voice"
-                        )
-
-                        LabeledContent("Shortcut Signal", value: controller.lastShortcutSignalText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        LabeledContent("Current App", value: controller.currentAppIdentityText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text(controller.currentAppPathText)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .lineLimit(2)
-
-                        if controller.isPreparingModel {
-                            ProgressView("Preparing local model...")
-                                .controlSize(.small)
-                        }
-
-                        HStack(spacing: 10) {
-                            Button("Request Keyboard Prompt") {
-                                controller.requestKeyboardPrompt()
-                            }
-
-                            Button("Prompt Permissions") {
-                                Task {
-                                    await controller.refreshPermissions(prompt: true)
-                                }
-                            }
-
-                            Button("Re-check Permissions") {
-                                Task {
-                                    await controller.refreshPermissions(prompt: false)
-                                }
-                            }
-                        }
-
-                        HStack(spacing: 10) {
-                            Button("Reveal This App in Finder") {
-                                controller.revealCurrentAppInFinder()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Open Input Monitoring") {
-                                controller.openInputMonitoringSettings()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Open Accessibility") {
-                                controller.openAccessibilitySettings()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Open Microphone") {
-                                controller.openMicrophoneSettings()
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .font(.caption)
-
-                        Text("After granting Input Monitoring, quit and reopen the app.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        if !controller.keyboardMonitoringGranted {
-                            Text("If no pop-up appears: Open Input Monitoring -> click + -> add the exact app shown above -> reopen app -> Re-check Permissions.")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
+    private var overviewSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Live Controls", subtitle: "Start, stop, and monitor dictation quickly.") {
                 HStack(spacing: 10) {
                     Button("Start Listening") {
                         controller.startFromUI()
@@ -308,23 +75,329 @@ struct ContentView: View {
                     .disabled(controller.isTranscribing || controller.isPreparingModel)
                 }
 
-                LabeledContent("Status", value: controller.statusText)
+                if controller.isPreparingModel {
+                    ProgressView("Preparing local model...")
+                        .controlSize(.small)
+                }
 
-                GroupBox("Last Transcript") {
-                    ScrollView {
-                        Text(controller.lastTranscript.isEmpty ? "No transcript yet." : controller.lastTranscript)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                            .padding(.vertical, 4)
+                LabeledContent("Current Key", value: controller.invocationKeyDisplayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Current Output", value: controller.recordingOutputModeText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            settingsCard(title: "Voice To Text Permissions", subtitle: "Input Monitoring, Accessibility, and Microphone for dictation.") {
+                permissionRow(
+                    title: "Input Monitoring",
+                    granted: controller.keyboardMonitoringGranted,
+                    detail: "Global invocation shortcut"
+                )
+
+                permissionRow(
+                    title: "Accessibility",
+                    granted: controller.accessibilityGranted,
+                    detail: "Paste transcript into focused app"
+                )
+
+                permissionRow(
+                    title: "Microphone",
+                    granted: controller.microphoneGranted,
+                    detail: "Voice capture input"
+                )
+
+                HStack(spacing: 10) {
+                    Button("Request Voice Permissions") {
+                        controller.requestVoicePermissionsPrompt()
                     }
-                    .frame(minHeight: 120)
-                    .padding(.top, 6)
+
+                    Button("Re-check Voice") {
+                        controller.recheckVoicePermissions()
+                    }
+                }
+
+                if !controller.allRequiredPermissionsGranted {
+                    Text("Some voice permissions are still missing.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                HStack(spacing: 10) {
+                    Button("Open Input Monitoring") {
+                        controller.openInputMonitoringSettings()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Open Accessibility") {
+                        controller.openAccessibilitySettings()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Open Microphone") {
+                        controller.openMicrophoneSettings()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .font(.caption)
+            }
+
+            settingsCard(title: "Last Transcript", subtitle: "Latest captured text.") {
+                Text(controller.lastTranscript.isEmpty ? "No transcript yet." : controller.lastTranscript)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var shortcutsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Shortcut Mode", subtitle: "Choose how the invocation key behaves.") {
+                Picker("Shortcut Mode", selection: $controller.mode) {
+                    ForEach(ShortcutMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            settingsCard(title: "Invocation Key", subtitle: "Main global trigger for dictation.") {
+                LabeledContent("Current Key", value: controller.invocationKeyDisplayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button(controller.isCapturingInvocationKey ? "Listening for key..." : "Change Invocation Key") {
+                        controller.startInvocationKeyCapture()
+                    }
+                    .disabled(controller.isCapturingInvocationKey || controller.isCapturingVoiceNoteSwitchKey)
+
+                    if controller.isCapturingInvocationKey {
+                        Button("Cancel") {
+                            controller.cancelInvocationKeyCapture()
+                        }
+                    }
+                }
+
+                if controller.isCapturingInvocationKey {
+                    Text("Press any physical key now. Left and right modifier keys are distinct.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+
+            settingsCard(title: "Output Destination", subtitle: "Control where transcriptions go.") {
+                LabeledContent("Default", value: "Paste")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Current Recording", value: controller.recordingOutputModeText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Voice Note Switch Key", value: controller.voiceNoteSwitchKeyDisplayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button(controller.isCapturingVoiceNoteSwitchKey ? "Listening for key..." : "Change Voice Note Key") {
+                        controller.startVoiceNoteSwitchKeyCapture()
+                    }
+                    .disabled(controller.isCapturingVoiceNoteSwitchKey || controller.isCapturingInvocationKey)
+
+                    if controller.isCapturingVoiceNoteSwitchKey {
+                        Button("Cancel") {
+                            controller.cancelVoiceNoteSwitchKeyCapture()
+                        }
+                    }
+                }
+
+                if controller.isCapturingVoiceNoteSwitchKey {
+                    Text("Press one key. During recording, pressing this key switches output to Voice Note for the current session only.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("While recording, press this key to switch from Paste to Voice Note. The key press is consumed and not typed in the focused app.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(controller.notesDirectoryPathText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+            }
         }
-        .scrollIndicators(.visible)
+    }
+
+    private var indicatorsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Unified Notch Indicator", subtitle: "Single visual style used everywhere.") {
+                Text("Actionfy now uses one fixed indicator style: a notch-expansion overlay centered at the top of the screen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Legacy indicator modes (Rive, SVG/HTML, built-in wave, and floating placement/size customization) have been removed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var audioModelSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Audio Ducking", subtitle: "Lower output volume while recording.") {
+                Toggle("Lower system output volume while recording", isOn: $controller.duckingEnabled)
+
+                HStack(spacing: 10) {
+                    Text("Lower By")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(value: $controller.duckingAmountPercent, in: 0 ... 90, step: 5)
+                        .disabled(!controller.duckingEnabled)
+                    Text(controller.duckingAmountText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 42, alignment: .trailing)
+                }
+
+                Text("Volume is restored automatically when recording stops.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            settingsCard(title: "Model Warmth", subtitle: "Keep speech model responsive.") {
+                Toggle("Keep model warm in background", isOn: $controller.keepModelWarmEnabled)
+
+                Toggle("Only while plugged in", isOn: $controller.keepModelWarmOnlyOnPower)
+                    .disabled(!controller.keepModelWarmEnabled)
+
+                LabeledContent("Warm Status", value: controller.keepModelWarmStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Runs a lightweight warmup about every 45 seconds while idle.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var screenRecordingSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !recordingController.hasScreenPermission {
+                settingsCard(title: "Screen Permission", subtitle: "Screen Recording access is required.") {
+                    Text("Grant Screen Recording permission in System Settings to capture your screen.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+
+                    Button("Open Screen Recording Settings") {
+                        controller.openAccessibilitySettings()
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+
+                    Button("Re-check") {
+                        Task { await recordingController.refreshPermissions() }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                }
+            }
+
+            settingsCard(title: "Start Recording", subtitle: "Capture your screen, audio, and camera.") {
+                Button("Start Recording") {
+                    setupWindow.show(controller: recordingController)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+            }
+
+            settingsCard(title: "Default FPS", subtitle: "Frame rate used for new recordings.") {
+                Picker("FPS", selection: $recordingController.fps) {
+                    ForEach(RecordingFPS.allCases) { fpsOption in
+                        Text(fpsOption.label).tag(fpsOption)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private var advancedSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Diagnostics", subtitle: "Detailed runtime information.") {
+                LabeledContent("Active Model", value: controller.activeModelText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Last Transcription", value: controller.lastLatencyText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Backend", value: controller.lastBackendText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Shortcut Signal", value: controller.lastShortcutSignalText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Current App", value: controller.currentAppIdentityText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(controller.currentAppPathText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+
+                HStack(spacing: 10) {
+                    Button("Reveal This App in Finder") {
+                        controller.revealCurrentAppInFinder()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Open Setup Wizard") {
+                        controller.showOnboardingWizard()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private func settingsCard<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private func permissionRow(title: String, granted: Bool, detail: String) -> some View {
@@ -347,6 +420,70 @@ struct ContentView: View {
                 Text(detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private extension ContentView {
+    enum SettingsSection: String, CaseIterable, Identifiable {
+        case overview
+        case shortcuts
+        case indicators
+        case audioModel
+        case screenRecording
+        case advanced
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .overview:
+                return "Overview"
+            case .shortcuts:
+                return "Shortcuts"
+            case .indicators:
+                return "Indicators"
+            case .audioModel:
+                return "Audio & Model"
+            case .screenRecording:
+                return "Screen Recording"
+            case .advanced:
+                return "Advanced"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .overview:
+                return "Core controls and current health at a glance."
+            case .shortcuts:
+                return "Configure invocation behavior and output routing."
+            case .indicators:
+                return "Single notch-expansion indicator."
+            case .audioModel:
+                return "Recording volume behavior and model warm-up settings."
+            case .screenRecording:
+                return "Capture and edit recordings."
+            case .advanced:
+                return "Detailed runtime diagnostics and identity information."
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .overview:
+                return "rectangle.grid.1x2"
+            case .shortcuts:
+                return "command"
+            case .indicators:
+                return "rectangle.topthird.inset.filled"
+            case .audioModel:
+                return "waveform"
+            case .screenRecording:
+                return "record.circle"
+            case .advanced:
+                return "wrench.and.screwdriver"
             }
         }
     }
