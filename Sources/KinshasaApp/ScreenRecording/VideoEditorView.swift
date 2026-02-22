@@ -18,7 +18,7 @@ struct VideoEditorView: View {
             Divider()
 
             // Main content
-            HSplitView {
+            HStack(spacing: 0) {
                 // Left: Video preview + timeline
                 VStack(spacing: 0) {
                     videoPreview
@@ -29,11 +29,16 @@ struct VideoEditorView: View {
                     timelinePanel
                         .frame(minHeight: 200)
                 }
-                .frame(minWidth: 600)
+                .frame(maxWidth: .infinity)
+
+                Divider()
 
                 // Right: Effects + Audio panel
                 ScrollView {
                     VStack(spacing: 16) {
+                        if editor.hasWebcamRecording {
+                            webcamPanel
+                        }
                         cursorEffectsPanel
                         audioTracksPanel
                     }
@@ -90,19 +95,27 @@ struct VideoEditorView: View {
 
     @ViewBuilder
     private var videoPreview: some View {
-        ZStack {
-            // Placeholder black rectangle (MetalPreviewView integration in Task 17)
-            MetalPreviewView(session: editor.session, editor: editor)
-                .background(Color.black)
+        GeometryReader { geometry in
+            ZStack {
+                MetalPreviewView(session: editor.session, editor: editor)
+                    .background(Color.black)
+                    .overlay {
+                        // Custom cursor overlay
+                        CursorOverlayView(editor: editor)
+                    }
 
-            // Play/Pause overlay
-            if !editor.isPlaying {
-                Button(action: editor.togglePlayPause) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 64))
-                        .foregroundColor(.white.opacity(0.8))
+                // Webcam overlay
+                WebcamEditorOverlay(editor: editor, viewSize: geometry.size)
+
+                // Play/Pause overlay
+                if !editor.isPlaying {
+                    Button(action: editor.togglePlayPause) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 64))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -223,9 +236,24 @@ struct VideoEditorView: View {
                     .offset(x: timeToX(editor.currentTime, width: width))
             }
             .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    if editor.isPlaying {
+                        editor.pause()
+                    }
+                    let ratio = max(0, min(1, location.x / width))
+                    editor.currentTime = ratio * editor.duration
+                case .ended:
+                    break
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        if editor.isPlaying {
+                            editor.pause()
+                        }
                         let ratio = max(0, min(1, value.location.x / width))
                         editor.currentTime = ratio * editor.duration
                     }
@@ -272,17 +300,74 @@ struct VideoEditorView: View {
         .padding(.horizontal, 8)
     }
 
+    // MARK: - Webcam Panel
+
+    @ViewBuilder
+    private var webcamPanel: some View {
+        DisclosureGroup("Webcam") {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Show Webcam", isOn: $editor.webcamEnabled)
+                    .font(.caption)
+
+                if editor.webcamEnabled {
+                    // Webcam scale slider
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Size: \(String(format: "%.0f%%", editor.webcamScale * 100))")
+                            .font(.caption)
+                        Slider(value: $editor.webcamScale, in: 0.5...2.0, step: 0.1)
+                    }
+
+                    Text("Drag the webcam circle in the preview to reposition.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(.top, 4)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+
     // MARK: - Cursor Effects Panel
 
     @ViewBuilder
     private var cursorEffectsPanel: some View {
         DisclosureGroup("Cursor Effects") {
             VStack(alignment: .leading, spacing: 12) {
+                // Cursor style picker
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Cursor Color")
+                        .font(.caption)
+                    HStack(spacing: 6) {
+                        ForEach(CursorStyle.allCases) { style in
+                            Button {
+                                editor.cursorStyle = style
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(hex: style.fillHex))
+                                        .frame(width: 24, height: 24)
+                                    Circle()
+                                        .stroke(
+                                            editor.cursorStyle == style
+                                                ? Color.accentColor
+                                                : Color(hex: style.strokeHex).opacity(0.5),
+                                            lineWidth: editor.cursorStyle == style ? 2.5 : 1
+                                        )
+                                        .frame(width: 24, height: 24)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .help(style.label)
+                        }
+                    }
+                }
+
                 // Cursor scale slider
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Cursor Scale: \(String(format: "%.1fx", editor.cursorScale))")
                         .font(.caption)
-                    Slider(value: $editor.cursorScale, in: 1...3, step: 0.1)
+                    Slider(value: $editor.cursorScale, in: 1...5, step: 0.5)
                 }
 
                 // Click highlight toggle
