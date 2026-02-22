@@ -107,4 +107,88 @@ final class GestureZoomDetectorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(keyframe.endTime, 4.0)
         XCTAssertLessThanOrEqual(keyframe.endTime, 5.0)
     }
+
+    // MARK: - Merging
+
+    func testNearbyGesturesMergeIntoOneRegion() {
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+
+        // First jiggle at t=1.0
+        for i in 0..<8 {
+            let t = 1.0 + Double(i) * 0.05
+            let x = i % 2 == 0 ? 500.0 : 600.0
+            events.append(CursorEvent(t: t, x: x, y: 300.0))
+        }
+
+        // Quiet gap
+        events.append(CursorEvent(t: 2.0, x: 500.0, y: 300.0))
+
+        // Second jiggle at t=2.5
+        for i in 0..<8 {
+            let t = 2.5 + Double(i) * 0.05
+            let x = i % 2 == 0 ? 500.0 : 600.0
+            events.append(CursorEvent(t: t, x: x, y: 300.0))
+        }
+
+        events.append(CursorEvent(t: 20.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertEqual(result.count, 1, "Nearby jiggles should merge into one zoom region")
+    }
+
+    func testDistantGesturesRemainSeparate() {
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+
+        // First jiggle at t=1.0
+        for i in 0..<8 {
+            let t = 1.0 + Double(i) * 0.05
+            let x = i % 2 == 0 ? 500.0 : 600.0
+            events.append(CursorEvent(t: t, x: x, y: 300.0))
+        }
+
+        // Long quiet period
+        events.append(CursorEvent(t: 8.0, x: 500.0, y: 300.0))
+
+        // Second jiggle at t=15.0
+        for i in 0..<8 {
+            let t = 15.0 + Double(i) * 0.05
+            let x = i % 2 == 0 ? 500.0 : 600.0
+            events.append(CursorEvent(t: t, x: x, y: 300.0))
+        }
+
+        events.append(CursorEvent(t: 30.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertEqual(result.count, 2, "Distant jiggles should remain separate zoom regions")
+    }
+
+    // MARK: - Edge Cases
+
+    func testTooFewEventsReturnsEmpty() {
+        let events = [
+            CursorEvent(t: 0.0, x: 100.0, y: 100.0),
+            CursorEvent(t: 0.5, x: 200.0, y: 100.0),
+        ]
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testZoomEndTimeExtendsPastRecording() {
+        // Jiggle near the very end of recording
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+        for i in 0..<8 {
+            let t = 9.6 + Double(i) * 0.05
+            let x = i % 2 == 0 ? 500.0 : 600.0
+            events.append(CursorEvent(t: t, x: x, y: 300.0))
+        }
+        events.append(CursorEvent(t: 10.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertEqual(result.count, 1)
+        // Tail extends past recording — the editor/renderer will clamp to video duration
+        XCTAssertGreaterThan(result.first?.endTime ?? 0, 10.0)
+    }
 }
