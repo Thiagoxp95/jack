@@ -99,15 +99,24 @@ struct VideoEditorView: View {
     @ViewBuilder
     private var videoPreview: some View {
         GeometryReader { geometry in
+            let time = editor.isPlaying ? editor.smoothTime : editor.currentTime
+            let zoomLevel = MetalVideoRenderer.interpolateZoom(
+                at: time,
+                keyframes: editor.zoomKeyframes,
+                rampDuration: MetalVideoRenderer.cinematicRampDuration
+            )
+            let anchor = previewZoomAnchor(at: time, viewSize: geometry.size)
+
             ZStack {
+                // Zoomable content: video + cursor (zoomed together)
                 MetalPreviewView(session: editor.session, editor: editor)
                     .background(Color.black)
                     .overlay {
-                        // Custom cursor overlay
                         CursorOverlayView(editor: editor)
                     }
+                    .scaleEffect(zoomLevel, anchor: anchor)
 
-                // Webcam overlay
+                // Webcam overlay (not zoomed — it's a separate camera feed)
                 WebcamEditorOverlay(editor: editor, viewSize: geometry.size)
 
                 // Play/Pause overlay
@@ -120,7 +129,58 @@ struct VideoEditorView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .clipped()
         }
+    }
+
+    /// Computes the zoom anchor point in view coordinates, centered on the cursor
+    /// and clamped so the viewport never reveals outside the video frame.
+    private func previewZoomAnchor(at time: TimeInterval, viewSize: CGSize) -> UnitPoint {
+        let screenSize = editor.session.screenSize
+        guard screenSize.width > 0, screenSize.height > 0,
+              let pos = editor.cursorPosition(at: time) else {
+            return .center
+        }
+
+        // Map cursor from screen coords to view coords (accounting for letterboxing)
+        let videoAspect = screenSize.width / screenSize.height
+        let viewAspect = viewSize.width / viewSize.height
+
+        let renderSize: CGSize
+        let offset: CGPoint
+
+        if videoAspect > viewAspect {
+            let renderWidth = viewSize.width
+            let renderHeight = renderWidth / videoAspect
+            renderSize = CGSize(width: renderWidth, height: renderHeight)
+            offset = CGPoint(x: 0, y: (viewSize.height - renderHeight) / 2)
+        } else {
+            let renderHeight = viewSize.height
+            let renderWidth = renderHeight * videoAspect
+            renderSize = CGSize(width: renderWidth, height: renderHeight)
+            offset = CGPoint(x: (viewSize.width - renderWidth) / 2, y: 0)
+        }
+
+        let viewX = (pos.x / screenSize.width) * renderSize.width + offset.x
+        let viewY = (pos.y / screenSize.height) * renderSize.height + offset.y
+
+        // Normalize to UnitPoint (0-1 relative to view)
+        var normX = viewX / viewSize.width
+        var normY = viewY / viewSize.height
+
+        // Clamp anchor so zoom viewport stays within frame
+        let zoomLevel = MetalVideoRenderer.interpolateZoom(
+            at: time,
+            keyframes: editor.zoomKeyframes,
+            rampDuration: MetalVideoRenderer.cinematicRampDuration
+        )
+        if zoomLevel > 1.0 {
+            let halfView = 0.5 / zoomLevel
+            normX = max(halfView, min(1.0 - halfView, normX))
+            normY = max(halfView, min(1.0 - halfView, normY))
+        }
+
+        return UnitPoint(x: normX, y: normY)
     }
 
     // MARK: - Timeline Panel
