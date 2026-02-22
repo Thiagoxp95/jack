@@ -206,6 +206,18 @@ actor ExportService {
         }
         writer.startSession(atSourceTime: .zero)
 
+        // Start audio processing concurrently to avoid AVAssetWriter interleaving deadlock.
+        // The writer expects interleaved audio+video data. If we only feed video first,
+        // the writer's buffer fills up and it refuses more video until audio catches up.
+        var audioCompletionTasks: [Task<Void, Never>] = []
+        for audioInput in audioInputs {
+            let task = Self.startAudioProcessing(
+                writerInput: audioInput.input,
+                readerOutput: audioInput.readerOutput
+            )
+            audioCompletionTasks.append(task)
+        }
+
         // Process video frames
         var previousCursorPos = CGPoint(x: -100, y: -100)
 
@@ -328,15 +340,13 @@ actor ExportService {
             pixelBufferAdaptor.append(outputPixelBuffer, withPresentationTime: presentationTime)
         }
 
-        // Process audio tracks
-        for audioInput in audioInputs {
-            await processAudioInput(audioInput.input, readerOutput: audioInput.readerOutput)
-        }
-
-        // Finalize
+        // Finalize video
         videoInput.markAsFinished()
-        for audioInput in audioInputs {
-            audioInput.input.markAsFinished()
+
+        // Wait for concurrent audio processing to complete
+        // (audio inputs mark themselves as finished in their callbacks)
+        for task in audioCompletionTasks {
+            await task.value
         }
 
         await writer.finishWriting()
@@ -532,23 +542,41 @@ actor ExportService {
 
     // MARK: - Audio Processing
 
-    private func processAudioInput(
-        _ writerInput: AVAssetWriterInput,
-        readerOutput: AVAssetReaderTrackOutput
-    ) async {
-        // AVAssetWriterInput and AVAssetReaderTrackOutput are not Sendable but are
-        // safe to use from the serial dispatch queue below. Silence the warnings.
-        nonisolated(unsafe) let writerInput = writerInput
-        nonisolated(unsafe) let readerOutput = readerOutput
+    /// Wraps a non-Sendable value for safe transfer across concurrency boundaries.
+    /// Safety: the wrapped value must only be accessed from a single context after transfer.
+    private final class SendableBox<T>: @unchecked Sendable {
+        let value: T
+        init(_ value: T) { self.value = value }
+    }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            writerInput.requestMediaDataWhenReady(on: DispatchQueue(label: "com.kinshasa.export.audio")) {
-                while writerInput.isReadyForMoreMediaData {
-                    if let sampleBuffer = readerOutput.copyNextSampleBuffer() {
-                        writerInput.append(sampleBuffer)
-                    } else {
-                        continuation.resume()
-                        return
+    /// Starts audio processing on a detached task with its own serial DispatchQueue.
+    /// Must be `nonisolated static` so the closure doesn't capture the actor.
+    private nonisolated static func startAudioProcessing(
+        writerInput: AVAssetWriterInput,
+        readerOutput: AVAssetReaderTrackOutput
+    ) -> Task<Void, Never> {
+        let writerBox = SendableBox(writerInput)
+        let readerBox = SendableBox(readerOutput)
+
+        return Task {
+            let writerInput = writerBox.value
+            let readerOutput = readerBox.value
+
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                nonisolated(unsafe) var finished = false
+                let queue = DispatchQueue(label: "com.kinshasa.export.audio.\(UUID().uuidString)")
+                writerInput.requestMediaDataWhenReady(on: queue) {
+                    while writerInput.isReadyForMoreMediaData {
+                        if let sampleBuffer = readerOutput.copyNextSampleBuffer() {
+                            writerInput.append(sampleBuffer)
+                        } else {
+                            if !finished {
+                                finished = true
+                                writerInput.markAsFinished()
+                                continuation.resume()
+                            }
+                            return
+                        }
                     }
                 }
             }
