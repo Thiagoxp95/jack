@@ -164,6 +164,60 @@ final class GestureZoomDetectorTests: XCTestCase {
         XCTAssertEqual(result.count, 2, "Distant jiggles should remain separate zoom regions")
     }
 
+    // MARK: - False Positive Rejection
+
+    func testSmallAmplitudeJiggleDoesNotTrigger() {
+        // Rapid back-and-forth but only ~20px wide — too small, not a deliberate highlight
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+        for i in 0..<12 {
+            let t = 1.0 + Double(i) * 0.04
+            let x = i % 2 == 0 ? 500.0 : 520.0  // only 20px spread
+            events.append(CursorEvent(t: t, x: x, y: 300.0))
+        }
+        events.append(CursorEvent(t: 10.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertTrue(result.isEmpty, "Small amplitude jiggle (<50px) should not trigger zoom")
+    }
+
+    func testSmallRadiusCircleDoesNotTrigger() {
+        // Full circle but only ~15px radius — too tight, not a deliberate highlight
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+
+        let centerX = 500.0
+        let centerY = 300.0
+        let radius = 15.0  // ~3mm on screen, too small
+        let numPoints = 30
+        for i in 0..<numPoints {
+            let t = 1.0 + Double(i) * (0.8 / Double(numPoints))
+            let angle = (Double(i) / Double(numPoints)) * 2.0 * .pi
+            let x = centerX + radius * cos(angle)
+            let y = centerY + radius * sin(angle)
+            events.append(CursorEvent(t: t, x: x, y: y))
+        }
+        events.append(CursorEvent(t: 10.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertTrue(result.isEmpty, "Small radius circle (<25px) should not trigger zoom")
+    }
+
+    func testVerticalJiggleDoesNotTrigger() {
+        // Rapid up-down movement — we only detect left-right scratching
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+        for i in 0..<12 {
+            let t = 1.0 + Double(i) * 0.04
+            let y = i % 2 == 0 ? 200.0 : 400.0  // big vertical swing
+            events.append(CursorEvent(t: t, x: 500.0, y: y))  // X stays constant
+        }
+        events.append(CursorEvent(t: 10.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertTrue(result.isEmpty, "Vertical-only movement should not trigger zoom")
+    }
+
     // MARK: - Edge Cases
 
     func testTooFewEventsReturnsEmpty() {

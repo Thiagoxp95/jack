@@ -13,13 +13,19 @@ struct GestureZoomDetector {
     static let jiggleReversalThreshold: Int = 3
 
     /// Ignore velocity changes smaller than this (pixels per event gap).
-    static let velocityDeadzone: Double = 2.0
+    static let velocityDeadzone: Double = 5.0
+
+    /// Minimum horizontal spread (max X - min X) in pixels to qualify as a jiggle (~2cm on screen).
+    static let jiggleMinAmplitude: Double = 50.0
 
     /// Time window for angular displacement analysis (seconds).
     static let circleWindow: Double = 1.0
 
     /// Minimum cumulative angle (radians) to trigger circle detection (~270 degrees).
     static let circleAngleThreshold: Double = 4.712
+
+    /// Minimum average distance from centroid in pixels to qualify as a circle (~1cm radius = 2cm diameter).
+    static let circleMinRadius: Double = 25.0
 
     /// How long the cursor must be still to end a gesture region (seconds).
     static let settleTimeout: Double = 0.3
@@ -85,6 +91,15 @@ struct GestureZoomDetector {
 
         guard index - start >= 2 else { return false }
 
+        // Check minimum horizontal spread (~2cm on screen)
+        var minX = events[start].x
+        var maxX = events[start].x
+        for j in (start + 1)...index {
+            minX = min(minX, events[j].x)
+            maxX = max(maxX, events[j].x)
+        }
+        guard maxX - minX >= jiggleMinAmplitude else { return false }
+
         var reversals = 0
         var lastSign: Int = 0
 
@@ -131,6 +146,30 @@ struct GestureZoomDetector {
         }
         centroidX /= Double(windowCount)
         centroidY /= Double(windowCount)
+
+        // Check minimum radius (~1cm radius = 2cm diameter circle)
+        var totalDist: Double = 0
+        var minX = events[start].x, maxX = events[start].x
+        var minY = events[start].y, maxY = events[start].y
+        for j in start...index {
+            let dx = events[j].x - centroidX
+            let dy = events[j].y - centroidY
+            totalDist += (dx * dx + dy * dy).squareRoot()
+            minX = min(minX, events[j].x)
+            maxX = max(maxX, events[j].x)
+            minY = min(minY, events[j].y)
+            maxY = max(maxY, events[j].y)
+        }
+        let avgRadius = totalDist / Double(windowCount)
+        guard avgRadius >= circleMinRadius else { return false }
+
+        // Reject linear oscillations — a circle/oval needs spread in both axes.
+        // Minor axis must be at least 30% of major axis.
+        let spreadX = maxX - minX
+        let spreadY = maxY - minY
+        let majorSpread = max(spreadX, spreadY)
+        let minorSpread = min(spreadX, spreadY)
+        guard majorSpread > 0, minorSpread / majorSpread >= 0.3 else { return false }
 
         // Accumulate angular displacement
         var totalAngle: Double = 0
