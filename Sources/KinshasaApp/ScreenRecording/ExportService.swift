@@ -213,7 +213,9 @@ actor ExportService {
         for audioInput in audioInputs {
             let task = Self.startAudioProcessing(
                 writerInput: audioInput.input,
-                readerOutput: audioInput.readerOutput
+                readerOutput: audioInput.readerOutput,
+                reader: audioInput.reader,
+                asset: audioInput.asset
             )
             audioCompletionTasks.append(task)
         }
@@ -552,14 +554,20 @@ actor ExportService {
         init(_ value: T) { self.value = value }
     }
 
-    /// Starts audio processing on a detached task with its own serial DispatchQueue.
+    /// Starts audio processing on a concurrent task with its own serial DispatchQueue.
     /// Must be `nonisolated static` so the closure doesn't capture the actor.
+    /// The `reader` and `asset` parameters are retained by the task closure to prevent
+    /// ARC from deallocating them while the callback is still reading samples.
     private nonisolated static func startAudioProcessing(
         writerInput: AVAssetWriterInput,
-        readerOutput: AVAssetReaderTrackOutput
+        readerOutput: AVAssetReaderTrackOutput,
+        reader: AVAssetReader,
+        asset: AVURLAsset
     ) -> Task<Void, Never> {
         let writerBox = SendableBox(writerInput)
         let readerBox = SendableBox(readerOutput)
+        let readerOwner = SendableBox(reader)
+        let assetOwner = SendableBox(asset)
 
         return Task {
             let writerInput = writerBox.value
@@ -583,6 +591,9 @@ actor ExportService {
                     }
                 }
             }
+
+            // Keep reader and asset alive until processing completes
+            withExtendedLifetime((readerOwner, assetOwner)) {}
         }
     }
 
