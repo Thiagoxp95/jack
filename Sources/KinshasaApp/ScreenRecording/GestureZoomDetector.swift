@@ -6,15 +6,17 @@ struct GestureZoomDetector {
 
     // MARK: - Constants
 
-    /// Time window for counting X-direction reversals (seconds).
-    static let scratchWindow: Double = 0.4
+    /// Time window for counting committed direction reversals (seconds).
+    static let scratchWindow: Double = 0.6
 
-    /// Minimum X-direction sign changes within the window to trigger.
-    /// A real scratch easily produces 6+ reversals in 0.4s.
-    static let scratchReversalThreshold: Int = 5
+    /// Minimum committed reversals within the window to trigger.
+    /// A real scratch at ~5 Hz produces 3-4 committed reversals in 0.6s.
+    static let scratchReversalThreshold: Int = 3
 
-    /// Ignore X-deltas smaller than this between consecutive events (pixels).
-    static let velocityDeadzone: Double = 3.0
+    /// Minimum accumulated X displacement in one direction before it counts
+    /// as a committed move (pixels). This filters out tiny cursor jitter
+    /// while allowing ~20px scratch strokes to register.
+    static let commitThreshold: Double = 8.0
 
     /// How long the cursor must be still to end a gesture region (seconds).
     static let settleTimeout: Double = 0.3
@@ -67,7 +69,15 @@ struct GestureZoomDetector {
     // MARK: - Scratch Detector
 
     /// Check if the cursor is doing a rapid horizontal scratch at the given index.
-    /// Requires 5+ X-direction reversals within a 0.4s trailing window.
+    ///
+    /// Instead of counting per-event sign changes (which fails with real CGEvent
+    /// tap data where each event is ~1px), this tracks *accumulated* displacement.
+    /// A reversal only counts when the cursor has committed `commitThreshold`
+    /// pixels in the opposite direction from its last committed move.
+    ///
+    /// This means:
+    /// - Normal 2-3px cursor jitter between clicks → 0 committed reversals
+    /// - A 20px left-right scratch at 5 Hz → 3-4 committed reversals in 0.6s
     private static func isScratch(events: [CursorEvent], at index: Int) -> Bool {
         let currentTime = events[index].t
         let windowStart = currentTime - scratchWindow
@@ -78,27 +88,30 @@ struct GestureZoomDetector {
             start -= 1
         }
 
-        // Need enough events to count reversals
         guard index - start >= 4 else { return false }
 
-        var reversals = 0
-        var lastSign: Int = 0
+        var committedReversals = 0
+        var accumulatedDx: Double = 0      // running displacement since last commit
+        var lastCommittedSign: Int = 0     // direction of last committed move
 
         for j in (start + 1)...index {
             let dx = events[j].x - events[j - 1].x
-            let dt = events[j].t - events[j - 1].t
-            guard dt > 0 else { continue }
+            accumulatedDx += dx
 
-            if abs(dx) < velocityDeadzone { continue }
+            // Check if we've committed enough displacement in one direction
+            if abs(accumulatedDx) >= commitThreshold {
+                let currentSign = accumulatedDx > 0 ? 1 : -1
 
-            let sign = dx > 0 ? 1 : -1
-            if lastSign != 0 && sign != lastSign {
-                reversals += 1
+                if lastCommittedSign != 0 && currentSign != lastCommittedSign {
+                    committedReversals += 1
+                }
+
+                lastCommittedSign = currentSign
+                accumulatedDx = 0
             }
-            lastSign = sign
         }
 
-        return reversals >= scratchReversalThreshold
+        return committedReversals >= scratchReversalThreshold
     }
 
     // MARK: - Region Building
