@@ -5,7 +5,7 @@ import SwiftUI
 struct VideoEditorView: View {
     @Bindable var editor: VideoEditorController
     var onDone: () -> Void
-    var onExport: () -> Void
+    @State private var showExportSheet = false
     @State private var lastScrubTime: Date = .distantPast
     @State private var zoomDragStart: CGFloat?
     @State private var zoomDragEnd: CGFloat?
@@ -55,6 +55,12 @@ struct VideoEditorView: View {
         .background(Color.black)
         .preferredColorScheme(.dark)
         .keyboardShortcut(shortcuts: editorShortcuts)
+        .sheet(isPresented: $showExportSheet) {
+            ExportDialogView(
+                editor: editor,
+                onDismiss: { showExportSheet = false }
+            )
+        }
     }
 
     // MARK: - Toolbar
@@ -87,7 +93,7 @@ struct VideoEditorView: View {
 
             Spacer()
 
-            Button("Export", action: onExport)
+            Button("Export") { showExportSheet = true }
                 .buttonStyle(.borderedProminent)
 
             Button("Done", action: onDone)
@@ -165,9 +171,15 @@ struct VideoEditorView: View {
         let viewX = (pos.x / screenSize.width) * renderSize.width + offset.x
         let viewY = (pos.y / screenSize.height) * renderSize.height + offset.y
 
-        // Normalize to UnitPoint (0-1 relative to view)
-        let normX = viewX / viewSize.width
-        let normY = viewY / viewSize.height
+        // Shift anchor from cursor tip to cursor body center so the full
+        // arrow shape is visible at edges. The cursor arrow extends right
+        // and down from the tip by (14*scale, 20*scale).
+        let bodyX = viewX + 7.0 * editor.cursorScale
+        let bodyY = viewY + 10.0 * editor.cursorScale
+
+        // Normalize to UnitPoint (0-1 relative to view), clamped to bounds
+        let normX = max(0, min(1, bodyX / viewSize.width))
+        let normY = max(0, min(1, bodyY / viewSize.height))
 
         return UnitPoint(x: normX, y: normY)
     }
