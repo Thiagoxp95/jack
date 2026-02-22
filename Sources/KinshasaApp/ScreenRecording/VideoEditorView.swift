@@ -133,8 +133,9 @@ struct VideoEditorView: View {
         }
     }
 
-    /// Computes the zoom anchor point in view coordinates, centered on the cursor
-    /// and clamped so the viewport never reveals outside the video frame.
+    /// Computes the zoom anchor point in view coordinates, centered on the cursor.
+    /// The cursor is always the anchor so it's always visible in the zoomed viewport.
+    /// .clipped() on the parent prevents overflow — no clamping needed.
     private func previewZoomAnchor(at time: TimeInterval, viewSize: CGSize) -> UnitPoint {
         let screenSize = editor.session.screenSize
         guard screenSize.width > 0, screenSize.height > 0,
@@ -165,20 +166,8 @@ struct VideoEditorView: View {
         let viewY = (pos.y / screenSize.height) * renderSize.height + offset.y
 
         // Normalize to UnitPoint (0-1 relative to view)
-        var normX = viewX / viewSize.width
-        var normY = viewY / viewSize.height
-
-        // Clamp anchor so zoom viewport stays within frame
-        let zoomLevel = MetalVideoRenderer.interpolateZoom(
-            at: time,
-            keyframes: editor.zoomKeyframes,
-            rampDuration: MetalVideoRenderer.cinematicRampDuration
-        )
-        if zoomLevel > 1.0 {
-            let halfView = 0.5 / zoomLevel
-            normX = max(halfView, min(1.0 - halfView, normX))
-            normY = max(halfView, min(1.0 - halfView, normY))
-        }
+        let normX = viewX / viewSize.width
+        let normY = viewY / viewSize.height
 
         return UnitPoint(x: normX, y: normY)
     }
