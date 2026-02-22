@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
-import os
 
 // MARK: - ExportPhase
 
@@ -47,6 +46,7 @@ struct ExportDialogView: View {
         }
         .padding(24)
         .frame(width: 400)
+        .interactiveDismissDisabled(phase == .exporting)
     }
 
     // MARK: - Settings Phase
