@@ -80,6 +80,7 @@ actor ExportService {
                 cuts: editor.cuts,
                 zoomKeyframes: editor.zoomKeyframes,
                 cursorScale: editor.cursorScale,
+                cursorStyle: editor.cursorStyle,
                 clickHighlightEnabled: editor.clickHighlightEnabled,
                 clickHighlightOpacity: editor.clickHighlightOpacity,
                 cursorSmoothingEnabled: editor.cursorSmoothingEnabled,
@@ -87,6 +88,10 @@ actor ExportService {
                 systemVolume: editor.systemVolume,
                 micMuted: editor.micMuted,
                 systemMuted: editor.systemMuted,
+                webcamEnabled: editor.webcamEnabled,
+                webcamScale: editor.webcamScale,
+                webcamPositionX: editor.webcamPositionX,
+                webcamPositionY: editor.webcamPositionY,
                 inPoint: editor.inPoint,
                 outPoint: editor.outPoint
             )
@@ -234,7 +239,7 @@ actor ExportService {
             let zoomLevel = MetalVideoRenderer.interpolateZoom(
                 at: timeSeconds,
                 keyframes: editorState.zoomKeyframes,
-                rampDuration: 0.3
+                rampDuration: MetalVideoRenderer.cinematicRampDuration
             )
 
             // Compute cursor position
