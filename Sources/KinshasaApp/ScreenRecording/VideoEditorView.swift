@@ -6,6 +6,7 @@ struct VideoEditorView: View {
     @Bindable var editor: VideoEditorController
     var onDone: () -> Void
     var onExport: () -> Void
+    @State private var lastScrubTime: Date = .distantPast
 
     var body: some View {
         VStack(spacing: 0) {
@@ -239,6 +240,11 @@ struct VideoEditorView: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
+                    guard width > 0 else { return }
+                    let now = Date()
+                    guard now.timeIntervalSince(lastScrubTime) >= 1.0 / 30.0 else { return }
+                    lastScrubTime = now
+
                     if editor.isPlaying {
                         editor.pause()
                     }
@@ -251,6 +257,7 @@ struct VideoEditorView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        guard width > 0 else { return }
                         if editor.isPlaying {
                             editor.pause()
                         }
