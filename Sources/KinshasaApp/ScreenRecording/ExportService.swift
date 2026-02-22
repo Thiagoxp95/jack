@@ -274,13 +274,16 @@ actor ExportService {
                 }
             }
 
-            // Zoom center follows cursor when zoomed, otherwise center
+            // Zoom center follows cursor when zoomed, with edge clamping
             let zoomCenter: CGPoint
             if zoomLevel > 1.0, let pos = cursorPosition {
-                // Normalize cursor position to 0-1 range relative to source dimensions
+                let rawCenterX = pos.x / naturalSize.width
+                let rawCenterY = pos.y / naturalSize.height
+                let invZoom = 1.0 / zoomLevel
+                let halfView = invZoom * 0.5
                 zoomCenter = CGPoint(
-                    x: pos.x / naturalSize.width,
-                    y: pos.y / naturalSize.height
+                    x: max(halfView, min(1.0 - halfView, rawCenterX)),
+                    y: max(halfView, min(1.0 - halfView, rawCenterY))
                 )
             } else {
                 zoomCenter = CGPoint(x: 0.5, y: 0.5)
