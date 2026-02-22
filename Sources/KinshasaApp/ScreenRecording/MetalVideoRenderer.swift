@@ -258,13 +258,16 @@ final class MetalVideoRenderer {
     }
 
     /// Ease-out cubic: 1 - (1 - t)^3
-    static func cinematicEaseOut(_ t: Double) -> Double {
+    /// Fast start, gentle deceleration. Used for zoom-in transitions.
+    private static func cinematicEaseOut(_ t: Double) -> Double {
         let clamped = max(0.0, min(1.0, t))
-        return 1.0 - pow(1.0 - clamped, 3)
+        let inv = 1.0 - clamped
+        return 1.0 - inv * inv * inv
     }
 
     /// Ease-in cubic: t^3
-    static func cinematicEaseIn(_ t: Double) -> Double {
+    /// Gentle start, accelerating. Used for zoom-out transitions.
+    private static func cinematicEaseIn(_ t: Double) -> Double {
         let clamped = max(0.0, min(1.0, t))
         return clamped * clamped * clamped
     }

@@ -145,6 +145,14 @@ final class ZoomInterpolationTests: XCTestCase {
         XCTAssertEqual(result, 1.0 + (2.0 - 1.0) * 0.875, accuracy: 0.001)
     }
 
+    // Test: midpoint of zoom-out ramp uses ease-in cubic (t^3)
+    func testInterpolateZoomRampOutMidpointUsesEaseInCubic() {
+        let keyframes = [ZoomKeyframe(startTime: 0.0, endTime: 5.0, zoomLevel: 2.0)]
+        // At t=4.7, remaining=0.3, t_ramp=0.3/0.6=0.5, ease-in cubic at 0.5 = 0.125
+        let result = MetalVideoRenderer.interpolateZoom(at: 4.7, keyframes: keyframes, rampDuration: 0.6)
+        XCTAssertEqual(result, 1.0 + (2.0 - 1.0) * 0.125, accuracy: 0.001)
+    }
+
     // Test: short keyframe clamps ramp to half duration
     func testInterpolateZoomShortKeyframeClamps() {
         let keyframes = [ZoomKeyframe(startTime: 0.0, endTime: 0.8, zoomLevel: 2.0)]
