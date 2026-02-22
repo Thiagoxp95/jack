@@ -592,7 +592,7 @@ private struct ScrollWheelModifier: ViewModifier {
     let handler: (Double, CGPoint) -> Void
 
     func body(content: Content) -> some View {
-        content.overlay(ScrollWheelView(handler: handler))
+        content.background(ScrollWheelView(handler: handler))
     }
 }
 
@@ -612,10 +612,32 @@ private struct ScrollWheelView: NSViewRepresentable {
 
 private class ScrollWheelNSView: NSView {
     var handler: ((Double, CGPoint) -> Void)?
+    private var monitor: Any?
 
-    override func scrollWheel(with event: NSEvent) {
-        let location = convert(event.locationInWindow, from: nil)
-        handler?(Double(event.deltaY), CGPoint(x: location.x, y: location.y))
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil // Never intercept mouse clicks or drags
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, let handler = self.handler else { return event }
+                let location = self.convert(event.locationInWindow, from: nil)
+                if self.bounds.contains(location) {
+                    handler(Double(event.deltaY), CGPoint(x: location.x, y: location.y))
+                }
+                return event
+            }
+        }
+    }
+
+    override func removeFromSuperview() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        super.removeFromSuperview()
     }
 }
 
