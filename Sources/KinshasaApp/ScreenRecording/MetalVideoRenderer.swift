@@ -214,8 +214,12 @@ final class MetalVideoRenderer {
 
     // MARK: - Static Helpers
 
-    /// Interpolates zoom level at a given time using cubic bezier easing
-    /// for smooth transitions between zoom keyframes.
+    /// Default cinematic ramp duration in seconds.
+    static let cinematicRampDuration: Double = 0.6
+
+    /// Interpolates zoom level at a given time using cinematic asymmetric easing.
+    /// Zoom-in uses ease-out cubic (fast start, gentle landing).
+    /// Zoom-out uses ease-in cubic (gentle start, accelerating exit).
     ///
     /// - Parameters:
     ///   - time: Current time in seconds.
@@ -227,7 +231,6 @@ final class MetalVideoRenderer {
         keyframes: [ZoomKeyframe],
         rampDuration: Double
     ) -> Double {
-        // Find the active keyframe for this time.
         guard let keyframe = keyframes.first(where: {
             time >= $0.startTime && time <= $0.endTime
         }) else {
@@ -242,19 +245,28 @@ final class MetalVideoRenderer {
         let remaining = keyframe.endTime - time
 
         if elapsed < ramp {
-            // Ease-in phase.
             let t = elapsed / ramp
-            let eased = cubicBezierEase(t)
+            let eased = cinematicEaseOut(t)
             return 1.0 + (keyframe.zoomLevel - 1.0) * eased
         } else if remaining < ramp {
-            // Ease-out phase.
             let t = remaining / ramp
-            let eased = cubicBezierEase(t)
+            let eased = cinematicEaseIn(t)
             return 1.0 + (keyframe.zoomLevel - 1.0) * eased
         } else {
-            // Plateau.
             return keyframe.zoomLevel
         }
+    }
+
+    /// Ease-out cubic: 1 - (1 - t)^3
+    static func cinematicEaseOut(_ t: Double) -> Double {
+        let clamped = max(0.0, min(1.0, t))
+        return 1.0 - pow(1.0 - clamped, 3)
+    }
+
+    /// Ease-in cubic: t^3
+    static func cinematicEaseIn(_ t: Double) -> Double {
+        let clamped = max(0.0, min(1.0, t))
+        return clamped * clamped * clamped
     }
 
     /// Applies exponential smoothing to cursor position for fluid movement.
@@ -274,9 +286,4 @@ final class MetalVideoRenderer {
         return CGPoint(x: x, y: y)
     }
 
-    /// Approximates CSS "ease" curve: 3t^2 - 2t^3.
-    private static func cubicBezierEase(_ t: Double) -> Double {
-        let clamped = max(0.0, min(1.0, t))
-        return 3.0 * clamped * clamped - 2.0 * clamped * clamped * clamped
-    }
 }
