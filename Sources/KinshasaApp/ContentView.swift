@@ -42,6 +42,8 @@ struct ContentView: View {
         switch section {
         case .overview:
             overviewSection
+        case .notes:
+            notesSection
         case .shortcuts:
             shortcutsSection
         case .indicators:
@@ -149,6 +151,91 @@ struct ContentView: View {
                     .textSelection(.enabled)
                     .padding(.vertical, 4)
             }
+        }
+    }
+
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            let notes = controller.loadAllNotes()
+
+            if notes.isEmpty {
+                settingsCard(title: "No Notes Yet", subtitle: "Voice notes will appear here.") {
+                    Text("Press the voice note switch key during recording to save a note.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(controller.notesDirectoryPathText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                }
+            } else {
+                // Group notes by day
+                let grouped = Dictionary(grouping: notes) { $0.dayStamp }
+                let sortedDays = grouped.keys.sorted(by: >)
+
+                ForEach(sortedDays, id: \.self) { day in
+                    let dayNotes = grouped[day] ?? []
+                    let displayDate = formatDayHeader(day)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(displayDate)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(dayNotes) { note in
+                            noteCard(note)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func noteCard(_ note: VoiceNote) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "mic.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(note.timestamp)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            Text(note.text)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func formatDayHeader(_ dayStamp: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: dayStamp) else { return dayStamp }
+
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Today"
+        } else if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        } else {
+            let display = DateFormatter()
+            display.dateStyle = .medium
+            return display.string(from: date)
         }
     }
 
@@ -308,21 +395,68 @@ struct ContentView: View {
                 }
             }
 
-            settingsCard(title: "Start Recording", subtitle: "Capture your screen, audio, and camera.") {
-                Button("Start Recording") {
-                    setupWindow.show(controller: recordingController)
+            switch recordingController.state {
+            case .recording, .paused:
+                settingsCard(title: "Recording In Progress", subtitle: "Use the floating bubble to pause or stop.") {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(recordingController.state == .paused ? Color.yellow : Color.red)
+                            .frame(width: 10, height: 10)
+                        Text(recordingController.formattedElapsedTime)
+                            .font(.system(size: 18, weight: .medium, design: .monospaced))
+                        Text(recordingController.state == .paused ? "Paused" : "Recording")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Stop Recording") {
+                        Task { await recordingController.stopRecording() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+
+            case .editing:
+                settingsCard(title: "Editing Recording", subtitle: "Duration: \(recordingController.formattedElapsedTime)") {
+                    Text("The video editor is open in a separate window.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button("Discard Recording") {
+                        recordingController.finishEditing()
+                    }
+                    .buttonStyle(.bordered)
+                    .foregroundStyle(.red)
+                }
+
+            case .countdown:
+                settingsCard(title: "Starting...", subtitle: "Recording begins after countdown.") {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+            default:
+                settingsCard(title: "Start Recording", subtitle: "Capture your screen, audio, and camera.") {
+                    Button("Start Recording") {
+                        Task {
+                            await recordingController.openSetup()
+                            setupWindow.show(controller: recordingController)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
             }
 
-            settingsCard(title: "Default FPS", subtitle: "Frame rate used for new recordings.") {
-                Picker("FPS", selection: $recordingController.fps) {
-                    ForEach(RecordingFPS.allCases) { fpsOption in
-                        Text(fpsOption.label).tag(fpsOption)
+            if recordingController.state == .idle || recordingController.state == .setup {
+                settingsCard(title: "Default FPS", subtitle: "Frame rate used for new recordings.") {
+                    Picker("FPS", selection: $recordingController.fps) {
+                        ForEach(RecordingFPS.allCases) { fpsOption in
+                            Text(fpsOption.label).tag(fpsOption)
+                        }
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
         }
     }
@@ -428,6 +562,7 @@ struct ContentView: View {
 private extension ContentView {
     enum SettingsSection: String, CaseIterable, Identifiable {
         case overview
+        case notes
         case shortcuts
         case indicators
         case audioModel
@@ -440,6 +575,8 @@ private extension ContentView {
             switch self {
             case .overview:
                 return "Overview"
+            case .notes:
+                return "Notes"
             case .shortcuts:
                 return "Shortcuts"
             case .indicators:
@@ -457,6 +594,8 @@ private extension ContentView {
             switch self {
             case .overview:
                 return "Core controls and current health at a glance."
+            case .notes:
+                return "Voice notes captured during recordings."
             case .shortcuts:
                 return "Configure invocation behavior and output routing."
             case .indicators:
@@ -474,6 +613,8 @@ private extension ContentView {
             switch self {
             case .overview:
                 return "rectangle.grid.1x2"
+            case .notes:
+                return "note.text"
             case .shortcuts:
                 return "command"
             case .indicators:

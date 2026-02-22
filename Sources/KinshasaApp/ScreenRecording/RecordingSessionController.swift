@@ -42,7 +42,6 @@ final class RecordingSessionController {
     private(set) var availableDisplays: [SCDisplay] = []
     private(set) var availableWindows: [SCWindow] = []
     private(set) var hasScreenPermission = false
-    private(set) var hasCameraPermission = false
 
     // MARK: - User-Editable Setup Config
 
@@ -52,23 +51,24 @@ final class RecordingSessionController {
     var selectedRegion: CGRect?
     var recordMicrophone: Bool = true
     var recordSystemAudio: Bool = true
-    var enableWebcam: Bool = false
-    var webcamPosition: WebcamPosition = .bottomLeft
-    var webcamSize: WebcamSize = .medium
+    var recordWebcam: Bool = true
+    var webcamDiameter: CGFloat = WebcamDefaults.defaultDiameter
     var fps: RecordingFPS = .sixty
+    private(set) var isWebcamVisible = false
 
     // MARK: - Services (private)
 
     private var screenService: ScreenRecordingService?
     private var cursorService: CursorTrackingService?
-    private let webcamService = WebcamCaptureService()
     private let micService = MicrophoneCaptureService()
+    private var webcamService: WebcamCaptureService?
+    private var webcamOverlay: WebcamOverlayController?
 
     // MARK: - UI Controllers (private)
 
     private let countdownOverlay = CountdownOverlayController()
     private let recordingBubble = RecordingBubbleController()
-    private let webcamOverlay = WebcamOverlayController()
+    private let editorWindow = EditorWindowController()
 
     // MARK: - Timer State
 
@@ -103,7 +103,6 @@ final class RecordingSessionController {
 
     func refreshPermissions() async {
         hasScreenPermission = await ScreenRecordingService.hasPermission()
-        hasCameraPermission = await WebcamCaptureService.requestPermission()
     }
 
     func refreshAvailableSources() async {
@@ -128,11 +127,9 @@ final class RecordingSessionController {
     func cancelSetup() {
         let wasCountdown = state == .countdown
         state = .idle
-        webcamService.stop()
+        countdownOverlay.cleanup()
         if wasCountdown {
-            // Countdown overlay will stop naturally since state changed
             recordingBubble.hide()
-            webcamOverlay.hide()
         }
     }
 
@@ -142,6 +139,8 @@ final class RecordingSessionController {
         guard state == .setup || state == .idle else {
             throw RecordingSessionError.invalidState("Cannot start recording from state: \(state)")
         }
+
+        Self.logger.fault("[REC-01] startRecording: creating session directory")
 
         // Create session directory
         let sessionID = UUID()
@@ -155,7 +154,7 @@ final class RecordingSessionController {
         }
 
         // Create session
-        let session = RecordingSession(
+        var session = RecordingSession(
             id: sessionID,
             sessionDirectory: sessionDir,
             captureSourceType: sourceType,
@@ -165,15 +164,20 @@ final class RecordingSessionController {
 
         // Transition to countdown
         state = .countdown
-        Self.logger.info("Countdown started")
+        Self.logger.fault("[REC-02] startRecording: showing countdown")
 
-        // Show countdown overlay (waits ~3.2 seconds for animation)
+        // Show countdown overlay (waits for animation to complete, window is hidden but alive)
         await countdownOverlay.show()
 
+        Self.logger.fault("[REC-03] startRecording: countdown done, window hidden")
+
         guard state == .countdown else {
-            // User may have cancelled during countdown
+            Self.logger.fault("[REC-XX] startRecording: cancelled during countdown")
+            countdownOverlay.cleanup()
             return
         }
+
+        Self.logger.fault("[REC-04] startRecording: creating ScreenRecordingService")
 
         // Start screen recording service
         let screenSvc = ScreenRecordingService(
@@ -183,12 +187,11 @@ final class RecordingSessionController {
         )
         screenService = screenSvc
 
-        // Determine capture source.
-        // SCDisplay / SCWindow are not formally Sendable, but they are
-        // immutable value-like objects from ScreenCaptureKit. We use
-        // nonisolated(unsafe) to safely pass them across isolation boundaries.
-        nonisolated(unsafe) let captureDisplay: SCDisplay?
-        nonisolated(unsafe) let captureWindow: SCWindow?
+        Self.logger.fault("[REC-05] startRecording: determining capture source (\(self.sourceType.rawValue))")
+
+        // Determine capture source
+        let captureDisplay: SCDisplay?
+        let captureWindow: SCWindow?
 
         switch sourceType {
         case .screen:
@@ -216,40 +219,51 @@ final class RecordingSessionController {
         }
 
         let captureRegion = sourceType == .region ? selectedRegion : nil
-        let captureSystemAudio = recordSystemAudio
-        nonisolated(unsafe) let noWindows: [SCWindow] = []
+
+        // Store screen dimensions for cursor coordinate mapping
+        if let region = captureRegion {
+            session.screenSize = CGSize(width: region.width, height: region.height)
+        } else if let display = captureDisplay {
+            session.screenSize = CGSize(width: CGFloat(display.width), height: CGFloat(display.height))
+        } else if let window = captureWindow {
+            session.screenSize = CGSize(width: window.frame.width, height: window.frame.height)
+        }
+        currentSession = session
+
+        Self.logger.fault("[REC-06] startRecording: calling startCapture")
 
         try await screenSvc.startCapture(
             display: captureDisplay,
             window: captureWindow,
             region: captureRegion,
-            captureSystemAudio: captureSystemAudio,
-            excludedWindows: noWindows
+            captureSystemAudio: recordSystemAudio
         )
+
+        Self.logger.fault("[REC-07] startRecording: screen capture started, starting cursor tracking")
 
         // Start cursor tracking
         let cursorSvc = CursorTrackingService(framerate: fps.rawValue)
         cursorService = cursorSvc
         _ = cursorSvc.start()
 
+        Self.logger.fault("[REC-08] startRecording: cursor tracking started")
+
         // Start microphone if enabled
         if recordMicrophone {
+            Self.logger.fault("[REC-09] startRecording: starting microphone")
             do {
                 try micService.startRecording(to: session.micAudioURL)
             } catch {
-                Self.logger.error("Failed to start microphone: \(error)")
+                Self.logger.error("[REC-09E] Failed to start microphone: \(error)")
             }
         }
 
-        // Start webcam if enabled
-        if enableWebcam, hasCameraPermission {
-            do {
-                try webcamService.start()
-                webcamOverlay.show(service: webcamService, position: webcamPosition, size: webcamSize)
-            } catch {
-                Self.logger.error("Failed to start webcam: \(error)")
-            }
+        // Start webcam recording if enabled
+        if recordWebcam {
+            await startWebcam(session: session)
         }
+
+        Self.logger.fault("[REC-11] startRecording: transitioning to recording state")
 
         // Transition to recording and start timer
         state = .recording
@@ -257,10 +271,14 @@ final class RecordingSessionController {
         elapsedTime = 0
         startElapsedTimer()
 
+        Self.logger.fault("[REC-12] startRecording: showing recording bubble")
+
         // Show recording bubble
         recordingBubble.show(controller: self)
 
-        Self.logger.info("Recording started for session \(sessionID.uuidString)")
+        Self.logger.fault("[REC-13] startRecording: complete (countdown window stays hidden, cleaned up on stop)")
+
+        Self.logger.fault("[REC-14] startRecording: all done for session \(sessionID.uuidString)")
     }
 
     func pauseRecording() {
@@ -291,7 +309,7 @@ final class RecordingSessionController {
 
         // Hide UI overlays
         recordingBubble.hide()
-        webcamOverlay.hide()
+        countdownOverlay.cleanup()
 
         // Stop screen capture
         if let screenSvc = screenService {
@@ -317,21 +335,34 @@ final class RecordingSessionController {
             _ = micService.stopRecording()
         }
 
-        // Stop webcam
-        webcamService.stop()
+        // Stop webcam (awaits file finalization)
+        await stopWebcam()
 
         // Update session duration
         currentSession?.duration = elapsedTime
 
         state = .editing
 
+        // Open the video editor window
+        if let session = currentSession {
+            editorWindow.show(
+                session: session,
+                onDone: { [weak self] in
+                    self?.finishEditing()
+                }
+            )
+        }
+
         Self.logger.info("Recording stopped, entering editing state")
     }
 
     func finishEditing() {
+        // Dismiss editor window
+        editorWindow.hide()
+
         // Ensure UI overlays are dismissed
         recordingBubble.hide()
-        webcamOverlay.hide()
+        countdownOverlay.cleanup()
 
         // Clean up temp files
         if let session = currentSession {
@@ -365,6 +396,61 @@ final class RecordingSessionController {
             try fm.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
         }
         return exportDirectory
+    }
+
+    // MARK: - Webcam
+
+    private func startWebcam(session: RecordingSession) async {
+        let granted = await WebcamCaptureService.requestPermission()
+        guard granted else {
+            Self.logger.error("Camera permission denied for webcam")
+            return
+        }
+
+        let svc = WebcamCaptureService()
+        do {
+            try svc.start()
+        } catch {
+            Self.logger.error("Failed to start webcam: \(error)")
+            return
+        }
+        webcamService = svc
+
+        // Start recording webcam to file
+        svc.startRecordingToFile(url: session.webcamVideoURL)
+        Self.logger.info("Webcam file recording started")
+
+        // Show floating circle overlay
+        let overlay = WebcamOverlayController()
+        webcamOverlay = overlay
+        overlay.show(service: svc, origin: nil, diameter: webcamDiameter)
+        isWebcamVisible = true
+    }
+
+    private func stopWebcam() async {
+        webcamOverlay?.hide()
+        webcamOverlay = nil
+        if let svc = webcamService {
+            await svc.stop()
+            webcamService = nil
+        }
+        isWebcamVisible = false
+    }
+
+    /// Toggle webcam circle overlay visibility during recording.
+    /// File recording continues regardless — this only controls the preview circle.
+    func toggleWebcamOverlay() {
+        guard let svc = webcamService else { return }
+        if isWebcamVisible {
+            webcamOverlay?.hide()
+            isWebcamVisible = false
+        } else {
+            if webcamOverlay == nil {
+                webcamOverlay = WebcamOverlayController()
+            }
+            webcamOverlay?.show(service: svc, origin: nil, diameter: webcamDiameter)
+            isWebcamVisible = true
+        }
     }
 
     // MARK: - Elapsed Timer

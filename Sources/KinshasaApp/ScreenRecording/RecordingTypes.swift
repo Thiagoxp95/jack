@@ -18,7 +18,6 @@ enum RecordingState: String, Equatable {
     case paused
     case stopped
     case editing
-    case exporting
 }
 
 // MARK: - CaptureSourceType
@@ -119,40 +118,60 @@ enum ExportResolution: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - WebcamPosition
+// MARK: - WebcamDefaults
 
-enum WebcamPosition: String, CaseIterable, Identifiable {
-    case bottomLeft
-    case bottomRight
-    case topLeft
-    case topRight
+enum WebcamDefaults {
+    static let minDiameter: CGFloat = 60
+    static let maxDiameter: CGFloat = 300
+    static let defaultDiameter: CGFloat = 120
+}
+
+// MARK: - CursorStyle
+
+enum CursorStyle: String, CaseIterable, Identifiable {
+    case white
+    case black
+    case yellow
+    case pink
+    case blue
+    case green
+    case orange
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .bottomLeft: return "Bottom Left"
-        case .bottomRight: return "Bottom Right"
-        case .topLeft: return "Top Left"
-        case .topRight: return "Top Right"
+        case .white: return "White"
+        case .black: return "Black"
+        case .yellow: return "Yellow"
+        case .pink: return "Pink"
+        case .blue: return "Blue"
+        case .green: return "Green"
+        case .orange: return "Orange"
         }
     }
-}
 
-// MARK: - WebcamSize
-
-enum WebcamSize: CGFloat, CaseIterable, Identifiable {
-    case small = 80
-    case medium = 120
-    case large = 180
-
-    var id: CGFloat { rawValue }
-
-    var label: String {
+    var fillHex: String {
         switch self {
-        case .small: return "Small"
-        case .medium: return "Medium"
-        case .large: return "Large"
+        case .white: return "#FFFFFF"
+        case .black: return "#1A1A1A"
+        case .yellow: return "#FFD60A"
+        case .pink: return "#FF375F"
+        case .blue: return "#0A84FF"
+        case .green: return "#30D158"
+        case .orange: return "#FF9F0A"
+        }
+    }
+
+    var strokeHex: String {
+        switch self {
+        case .white: return "#000000"
+        case .black: return "#FFFFFF"
+        case .yellow: return "#000000"
+        case .pink: return "#FFFFFF"
+        case .blue: return "#FFFFFF"
+        case .green: return "#000000"
+        case .orange: return "#000000"
         }
     }
 }
@@ -219,6 +238,8 @@ struct RecordingSession {
     var duration: TimeInterval
     let captureSourceType: CaptureSourceType
     let fps: RecordingFPS
+    /// Screen dimensions in points (for mapping cursor coordinates to video).
+    var screenSize: CGSize = .zero
 
     var screenVideoURL: URL {
         sessionDirectory.appendingPathComponent("screen.mov")
@@ -234,6 +255,10 @@ struct RecordingSession {
 
     var cursorDataURL: URL {
         sessionDirectory.appendingPathComponent("cursor_data.json")
+    }
+
+    var webcamVideoURL: URL {
+        sessionDirectory.appendingPathComponent("webcam.mov")
     }
 
     init(
