@@ -43,7 +43,7 @@ struct GestureZoomDetector {
         var gestureFlags = [Bool](repeating: false, count: events.count)
 
         for i in 0..<events.count {
-            if isJiggle(events: events, at: i) {
+            if isJiggle(events: events, at: i) || isCircle(events: events, at: i) {
                 gestureFlags[i] = true
             }
         }
@@ -104,6 +104,49 @@ struct GestureZoomDetector {
         }
 
         return reversals >= jiggleReversalThreshold
+    }
+
+    // MARK: - Circle Detector
+
+    /// Check if the cursor is making a circular motion at the given event index
+    /// by measuring cumulative angular displacement around the window centroid.
+    private static func isCircle(events: [CursorEvent], at index: Int) -> Bool {
+        let currentTime = events[index].t
+        let windowStart = currentTime - circleWindow
+
+        var start = index
+        while start > 0 && events[start - 1].t >= windowStart {
+            start -= 1
+        }
+
+        let windowCount = index - start + 1
+        guard windowCount >= 6 else { return false }
+
+        // Compute centroid of events in window
+        var centroidX: Double = 0
+        var centroidY: Double = 0
+        for j in start...index {
+            centroidX += events[j].x
+            centroidY += events[j].y
+        }
+        centroidX /= Double(windowCount)
+        centroidY /= Double(windowCount)
+
+        // Accumulate angular displacement
+        var totalAngle: Double = 0
+        for j in (start + 1)...index {
+            let angle0 = atan2(events[j - 1].y - centroidY, events[j - 1].x - centroidX)
+            let angle1 = atan2(events[j].y - centroidY, events[j].x - centroidX)
+            var delta = angle1 - angle0
+
+            // Normalize to [-pi, pi]
+            while delta > .pi { delta -= 2.0 * .pi }
+            while delta < -.pi { delta += 2.0 * .pi }
+
+            totalAngle += abs(delta)
+        }
+
+        return totalAngle >= circleAngleThreshold
     }
 
     // MARK: - Region Building

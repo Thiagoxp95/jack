@@ -42,6 +42,53 @@ final class GestureZoomDetectorTests: XCTestCase {
         XCTAssertEqual(result.first?.zoomLevel, 2.0)
     }
 
+    // MARK: - Circle Detection
+
+    func testCircularMotionTriggersZoom() {
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+
+        let centerX = 500.0
+        let centerY = 300.0
+        let radius = 80.0
+        let numPoints = 30
+        for i in 0..<numPoints {
+            let t = 1.0 + Double(i) * (0.8 / Double(numPoints))
+            let angle = (Double(i) / Double(numPoints)) * 2.0 * .pi
+            let x = centerX + radius * cos(angle)
+            let y = centerY + radius * sin(angle)
+            events.append(CursorEvent(t: t, x: x, y: y))
+        }
+        events.append(CursorEvent(t: 10.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertEqual(result.count, 1, "Circular motion should produce one zoom region")
+        XCTAssertEqual(result.first?.zoomLevel, 2.0)
+    }
+
+    func testSmallArcDoesNotTrigger() {
+        var events: [CursorEvent] = []
+        events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
+
+        let centerX = 500.0
+        let centerY = 300.0
+        let radius = 80.0
+        let numPoints = 10
+        for i in 0..<numPoints {
+            let t = 1.0 + Double(i) * 0.05
+            let angle = (Double(i) / Double(numPoints)) * 0.5 * .pi
+            let x = centerX + radius * cos(angle)
+            let y = centerY + radius * sin(angle)
+            events.append(CursorEvent(t: t, x: x, y: y))
+        }
+        events.append(CursorEvent(t: 10.0, x: 500.0, y: 300.0))
+
+        let result = GestureZoomDetector.detect(events: events)
+        XCTAssertTrue(result.isEmpty, "Small arc should not trigger circle detection")
+    }
+
+    // MARK: - Tail Duration
+
     func testJiggleZoomRegionIncludesTail() {
         var events: [CursorEvent] = []
         events.append(CursorEvent(t: 0.0, x: 500.0, y: 300.0))
