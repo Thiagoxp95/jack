@@ -7,6 +7,8 @@ struct VideoEditorView: View {
     var onDone: () -> Void
     var onExport: () -> Void
     @State private var lastScrubTime: Date = .distantPast
+    @State private var zoomDragStart: CGFloat?
+    @State private var zoomDragEnd: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -295,6 +297,25 @@ struct VideoEditorView: View {
                     }
                     .frame(width: max(0, endX - startX), height: height - 4)
                     .offset(x: startX)
+                    .onTapGesture(count: 2) {
+                        cycleZoomLevel(id: kf.id, current: kf.zoomLevel)
+                    }
+                    .contextMenu {
+                        Button("Delete", role: .destructive) {
+                            editor.removeZoomRegion(id: kf.id)
+                        }
+                    }
+                }
+
+                // Drag preview (semi-transparent while drawing)
+                if let dragStart = zoomDragStart, let dragEnd = zoomDragEnd {
+                    let minX = min(dragStart, dragEnd)
+                    let maxX = max(dragStart, dragEnd)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.blue.opacity(0.25))
+                        .stroke(Color.blue.opacity(0.6), lineWidth: 1)
+                        .frame(width: max(0, maxX - minX), height: height - 4)
+                        .offset(x: minX)
                 }
 
                 // Playhead
@@ -303,8 +324,59 @@ struct VideoEditorView: View {
                     .frame(width: 1, height: height)
                     .offset(x: timeToX(editor.currentTime, width: width))
             }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { value in
+                        guard width > 0 else { return }
+                        if zoomDragStart == nil {
+                            zoomDragStart = max(0, min(width, value.startLocation.x))
+                        }
+                        zoomDragEnd = max(0, min(width, value.location.x))
+                    }
+                    .onEnded { value in
+                        guard width > 0,
+                              let dragStart = zoomDragStart,
+                              let dragEnd = zoomDragEnd else {
+                            zoomDragStart = nil
+                            zoomDragEnd = nil
+                            return
+                        }
+
+                        let minX = min(dragStart, dragEnd)
+                        let maxX = max(dragStart, dragEnd)
+                        let startTime = (minX / width) * editor.duration
+                        let endTime = (maxX / width) * editor.duration
+
+                        // Only create if the region is at least 0.2 seconds
+                        if endTime - startTime >= 0.2 {
+                            editor.addZoomRegion(start: startTime, end: endTime, level: 2.0)
+                        }
+
+                        zoomDragStart = nil
+                        zoomDragEnd = nil
+                    }
+            )
+            .onScrollWheel { delta, location in
+                guard width > 0 else { return }
+                let time = (location.x / width) * editor.duration
+                if let kf = editor.zoomKeyframes.first(where: {
+                    time >= $0.startTime && time <= $0.endTime
+                }) {
+                    let newLevel = kf.zoomLevel + delta * 0.1
+                    editor.updateZoomLevel(id: kf.id, level: newLevel)
+                }
+            }
         }
         .padding(.horizontal, 8)
+    }
+
+    // MARK: - Zoom Helpers
+
+    private func cycleZoomLevel(id: UUID, current: Double) {
+        let presets: [Double] = [1.5, 2.0, 2.5, 3.0]
+        let nextIndex = presets.firstIndex(where: { $0 > current + 0.05 }) ?? 0
+        editor.updateZoomLevel(id: id, level: presets[nextIndex])
     }
 
     // MARK: - Webcam Panel
@@ -377,17 +449,9 @@ struct VideoEditorView: View {
                     Slider(value: $editor.cursorScale, in: 1...5, step: 0.5)
                 }
 
-                // Click highlight toggle
-                Toggle("Click Highlight", isOn: $editor.clickHighlightEnabled)
+                // Click press animation toggle
+                Toggle("Click Animation", isOn: $editor.clickHighlightEnabled)
                     .font(.caption)
-
-                if editor.clickHighlightEnabled {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Highlight Opacity: \(String(format: "%.0f%%", editor.clickHighlightOpacity * 100))")
-                            .font(.caption)
-                        Slider(value: $editor.clickHighlightOpacity, in: 0.1...1.0, step: 0.05)
-                    }
-                }
 
                 // Cursor smoothing toggle
                 Toggle("Cursor Smoothing", isOn: $editor.cursorSmoothingEnabled)
@@ -520,4 +584,43 @@ func formatTime(_ seconds: TimeInterval) -> String {
     let secs = totalSeconds % 60
     let frames = Int((seconds - Double(totalSeconds)) * 60) // frame count at 60fps
     return String(format: "%02d:%02d.%02d", minutes, secs, frames)
+}
+
+// MARK: - Scroll Wheel Modifier
+
+private struct ScrollWheelModifier: ViewModifier {
+    let handler: (Double, CGPoint) -> Void
+
+    func body(content: Content) -> some View {
+        content.overlay(ScrollWheelView(handler: handler))
+    }
+}
+
+private struct ScrollWheelView: NSViewRepresentable {
+    let handler: (Double, CGPoint) -> Void
+
+    func makeNSView(context: Context) -> ScrollWheelNSView {
+        let view = ScrollWheelNSView()
+        view.handler = handler
+        return view
+    }
+
+    func updateNSView(_ nsView: ScrollWheelNSView, context: Context) {
+        nsView.handler = handler
+    }
+}
+
+private class ScrollWheelNSView: NSView {
+    var handler: ((Double, CGPoint) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        handler?(Double(event.deltaY), CGPoint(x: location.x, y: location.y))
+    }
+}
+
+private extension View {
+    func onScrollWheel(_ handler: @escaping (Double, CGPoint) -> Void) -> some View {
+        modifier(ScrollWheelModifier(handler: handler))
+    }
 }
