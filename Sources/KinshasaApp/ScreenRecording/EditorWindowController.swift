@@ -13,11 +13,13 @@ final class EditorWindowController {
 
     func show(
         session: RecordingSession,
+        initialZoomKeyframes: [ZoomKeyframe] = [],
         onDone: @escaping @MainActor () -> Void
     ) {
         if window != nil { return }
 
         let editor = VideoEditorController(session: session)
+        editor.zoomKeyframes = initialZoomKeyframes
         self.editorController = editor
 
         let editorView = VideoEditorView(

@@ -258,9 +258,13 @@ final class RecordingSessionController {
             }
         }
 
-        // Start webcam recording if enabled
+        // Start webcam recording if enabled.
+        // Launched concurrently so camera initialization doesn't block the
+        // main run loop — cursor tracking needs the run loop to deliver events.
         if recordWebcam {
-            await startWebcam(session: session)
+            Task { @MainActor in
+                await self.startWebcam(session: session)
+            }
         }
 
         Self.logger.fault("[REC-11] startRecording: transitioning to recording state")
@@ -317,9 +321,10 @@ final class RecordingSessionController {
             screenService = nil
         }
 
-        // Stop cursor tracking and write data
+        // Stop cursor tracking, write data, and detect gesture zooms
+        var detectedZoomKeyframes: [ZoomKeyframe] = []
         if let cursorSvc = cursorService {
-            _ = await cursorSvc.stop()
+            let cursorData = await cursorSvc.stop()
             if let session = currentSession {
                 do {
                     try await cursorSvc.writeToFile(url: session.cursorDataURL)
@@ -327,6 +332,13 @@ final class RecordingSessionController {
                     Self.logger.error("Failed to write cursor data: \(error)")
                 }
             }
+
+            // Detect gesture-triggered zoom regions
+            detectedZoomKeyframes = GestureZoomDetector.detect(events: cursorData.events)
+            if !detectedZoomKeyframes.isEmpty {
+                Self.logger.info("Auto-detected \(detectedZoomKeyframes.count) gesture zoom region(s)")
+            }
+
             cursorService = nil
         }
 
@@ -347,6 +359,7 @@ final class RecordingSessionController {
         if let session = currentSession {
             editorWindow.show(
                 session: session,
+                initialZoomKeyframes: detectedZoomKeyframes,
                 onDone: { [weak self] in
                     self?.finishEditing()
                 }
