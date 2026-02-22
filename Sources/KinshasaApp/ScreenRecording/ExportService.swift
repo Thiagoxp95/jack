@@ -440,9 +440,12 @@ actor ExportService {
     // MARK: - Audio Track Helper
 
     /// Represents a paired audio writer input and reader output for processing.
+    /// Retains the asset and reader to prevent deallocation while processing.
     private struct AudioTrackPair {
         let input: AVAssetWriterInput
         let readerOutput: AVAssetReaderTrackOutput
+        let reader: AVAssetReader
+        let asset: AVURLAsset
     }
 
     /// Adds mic and system audio writer inputs if their files exist and are not muted.
@@ -537,7 +540,7 @@ actor ExportService {
         }
         writer.add(audioInput)
 
-        return AudioTrackPair(input: audioInput, readerOutput: readerOutput)
+        return AudioTrackPair(input: audioInput, readerOutput: readerOutput, reader: reader, asset: asset)
     }
 
     // MARK: - Audio Processing
