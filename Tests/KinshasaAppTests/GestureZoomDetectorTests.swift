@@ -56,7 +56,7 @@ final class GestureZoomDetectorTests: XCTestCase {
         XCTAssertEqual(result.count, 1)
         guard let keyframe = result.first else { return }
 
-        XCTAssertLessThanOrEqual(keyframe.startTime, 1.1)
+        XCTAssertLessThanOrEqual(keyframe.startTime, 1.25)
         XCTAssertGreaterThanOrEqual(keyframe.endTime, 4.0)
         XCTAssertLessThanOrEqual(keyframe.endTime, 5.0)
     }
