@@ -65,6 +65,29 @@ static float4 sampleBicubic(texture2d<float, access::sample> tex,
     return result / max(weightSum, 1e-6);
 }
 
+// MARK: - Soft Clamp Helper
+
+/// Soft-clamps a value within [low, high] with exponential deceleration in the margin zone.
+/// margin: fraction of the viewport half-size used as the deceleration zone (0.05 = 5%).
+static float softClamp(float value, float low, float high, float margin) {
+    float range = high - low;
+    float softLow = low + range * margin;
+    float softHigh = high - range * margin;
+
+    if (value < softLow) {
+        // Exponential ease into the lower bound
+        float t = (softLow - value) / (softLow - low);
+        t = clamp(t, 0.0f, 1.0f);
+        return softLow - (softLow - low) * (1.0 - exp(-3.0 * t)) / (1.0 - exp(-3.0));
+    } else if (value > softHigh) {
+        // Exponential ease into the upper bound
+        float t = (value - softHigh) / (high - softHigh);
+        t = clamp(t, 0.0f, 1.0f);
+        return softHigh + (high - softHigh) * (1.0 - exp(-3.0 * t)) / (1.0 - exp(-3.0));
+    }
+    return value;
+}
+
 // MARK: - Compute Kernel
 
 kernel void zoomCursorComposite(
@@ -88,9 +111,17 @@ kernel void zoomCursorComposite(
     float2 outUV = (float2(gid) + 0.5) / uniforms.outputSize;
 
     // ---- Phase 1: Zoom Transform ----
-    // Map output UV back to source UV using zoom center and inverted zoom level.
     float invZoom = 1.0 / max(uniforms.zoomLevel, 1e-4);
-    float2 sourceUV = uniforms.zoomCenter + (outUV - uniforms.zoomCenter) * invZoom;
+    float halfView = invZoom * 0.5;
+
+    // Soft-clamp zoom center so viewport doesn't reveal outside the source frame.
+    // The safe range for the center is [halfView, 1-halfView].
+    float2 clampedCenter = float2(
+        softClamp(uniforms.zoomCenter.x, halfView, 1.0 - halfView, 0.05),
+        softClamp(uniforms.zoomCenter.y, halfView, 1.0 - halfView, 0.05)
+    );
+
+    float2 sourceUV = clampedCenter + (outUV - clampedCenter) * invZoom;
     sourceUV = clamp(sourceUV, float2(0.0), float2(1.0));
 
     float4 color;
