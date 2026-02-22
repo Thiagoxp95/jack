@@ -162,3 +162,76 @@ final class ZoomInterpolationTests: XCTestCase {
         XCTAssertEqual(result, 1.0 + (2.0 - 1.0) * eased, accuracy: 0.001)
     }
 }
+
+@MainActor
+final class ZoomEditorTests: XCTestCase {
+    func testUpdateZoomLevelChangesExistingKeyframe() {
+        let session = RecordingSession(
+            sessionDirectory: URL(fileURLWithPath: "/tmp/test-\(UUID())"),
+            captureSourceType: .screen,
+            fps: .thirty
+        )
+        let editor = VideoEditorController(session: session)
+        editor.addZoomRegion(start: 1.0, end: 3.0, level: 2.0)
+        let id = editor.zoomKeyframes[0].id
+
+        editor.updateZoomLevel(id: id, level: 3.0)
+
+        XCTAssertEqual(editor.zoomKeyframes.count, 1)
+        XCTAssertEqual(editor.zoomKeyframes[0].zoomLevel, 3.0, accuracy: 0.001)
+        XCTAssertEqual(editor.zoomKeyframes[0].startTime, 1.0, accuracy: 0.001)
+        XCTAssertEqual(editor.zoomKeyframes[0].endTime, 3.0, accuracy: 0.001)
+    }
+
+    func testUpdateZoomLevelClampsRange() {
+        let session = RecordingSession(
+            sessionDirectory: URL(fileURLWithPath: "/tmp/test-\(UUID())"),
+            captureSourceType: .screen,
+            fps: .thirty
+        )
+        let editor = VideoEditorController(session: session)
+        editor.addZoomRegion(start: 0.0, end: 2.0, level: 2.0)
+        let id = editor.zoomKeyframes[0].id
+
+        editor.updateZoomLevel(id: id, level: 10.0)
+        XCTAssertEqual(editor.zoomKeyframes[0].zoomLevel, 4.0, accuracy: 0.001)
+
+        editor.updateZoomLevel(id: id, level: 0.5)
+        XCTAssertEqual(editor.zoomKeyframes[0].zoomLevel, 1.2, accuracy: 0.001)
+    }
+
+    func testUpdateZoomLevelSupportsUndo() {
+        let session = RecordingSession(
+            sessionDirectory: URL(fileURLWithPath: "/tmp/test-\(UUID())"),
+            captureSourceType: .screen,
+            fps: .thirty
+        )
+        let editor = VideoEditorController(session: session)
+        editor.addZoomRegion(start: 0.0, end: 2.0, level: 2.0)
+        let id = editor.zoomKeyframes[0].id
+
+        editor.updateZoomLevel(id: id, level: 3.0)
+        XCTAssertEqual(editor.zoomKeyframes[0].zoomLevel, 3.0, accuracy: 0.001)
+
+        editor.undo()
+        XCTAssertEqual(editor.zoomKeyframes[0].zoomLevel, 2.0, accuracy: 0.001)
+    }
+
+    func testAddZoomRegionPreventsOverlap() {
+        let session = RecordingSession(
+            sessionDirectory: URL(fileURLWithPath: "/tmp/test-\(UUID())"),
+            captureSourceType: .screen,
+            fps: .thirty
+        )
+        let editor = VideoEditorController(session: session)
+        editor.addZoomRegion(start: 2.0, end: 5.0, level: 2.0)
+
+        // Overlapping region should not be added
+        editor.addZoomRegion(start: 3.0, end: 6.0, level: 2.0)
+        XCTAssertEqual(editor.zoomKeyframes.count, 1)
+
+        // Non-overlapping region should be added
+        editor.addZoomRegion(start: 6.0, end: 8.0, level: 2.0)
+        XCTAssertEqual(editor.zoomKeyframes.count, 2)
+    }
+}
