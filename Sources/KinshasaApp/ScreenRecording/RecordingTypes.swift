@@ -1,5 +1,8 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
+import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - AppMode
 
@@ -118,6 +121,76 @@ enum ExportResolution: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - ExportFileFormat
+
+enum ExportFileFormat: String, CaseIterable, Identifiable {
+    case mp4
+    case mov
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .mp4: return "MP4"
+        case .mov: return "MOV"
+        }
+    }
+
+    var utType: UTType {
+        switch self {
+        case .mp4: return .mpeg4Movie
+        case .mov: return .quickTimeMovie
+        }
+    }
+
+    var avFileType: AVFileType {
+        switch self {
+        case .mp4: return .mp4
+        case .mov: return .mov
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .mp4: return "mp4"
+        case .mov: return "mov"
+        }
+    }
+}
+
+// MARK: - ExportAspectRatio
+
+enum ExportAspectRatio: String, CaseIterable, Identifiable {
+    case original
+    case sixteenByNine
+    case fourByThree
+    case oneByOne
+    case nineBySixteen
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .original: return "Original"
+        case .sixteenByNine: return "16:9"
+        case .fourByThree: return "4:3"
+        case .oneByOne: return "1:1"
+        case .nineBySixteen: return "9:16"
+        }
+    }
+
+    /// Target width/height ratio, or nil for original.
+    var ratio: CGFloat? {
+        switch self {
+        case .original: return nil
+        case .sixteenByNine: return 16.0 / 9.0
+        case .fourByThree: return 4.0 / 3.0
+        case .oneByOne: return 1.0
+        case .nineBySixteen: return 9.0 / 16.0
+        }
+    }
+}
+
 // MARK: - WebcamDefaults
 
 enum WebcamDefaults {
@@ -176,6 +249,61 @@ enum CursorStyle: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - MarkerColor
+
+enum MarkerColor: String, CaseIterable, Identifiable {
+    case blue, red, green, yellow, orange, purple
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .blue: return .blue
+        case .red: return .red
+        case .green: return .green
+        case .yellow: return .yellow
+        case .orange: return .orange
+        case .purple: return .purple
+        }
+    }
+}
+
+// MARK: - TimelineMarker
+
+struct TimelineMarker: Identifiable, Equatable {
+    let id: UUID
+    var time: TimeInterval
+    var label: String
+    var color: MarkerColor
+
+    init(id: UUID = UUID(), time: TimeInterval, label: String = "", color: MarkerColor = .blue) {
+        self.id = id
+        self.time = time
+        self.label = label
+        self.color = color
+    }
+}
+
+// MARK: - TimelineSegment
+
+struct TimelineSegment: Identifiable, Equatable {
+    let id: UUID
+    let sourceStart: TimeInterval
+    let sourceEnd: TimeInterval
+    var enabled: Bool
+
+    init(id: UUID = UUID(), sourceStart: TimeInterval, sourceEnd: TimeInterval, enabled: Bool = true) {
+        self.id = id
+        self.sourceStart = sourceStart
+        self.sourceEnd = sourceEnd
+        self.enabled = enabled
+    }
+
+    var sourceDuration: TimeInterval {
+        sourceEnd - sourceStart
+    }
+}
+
 // MARK: - CursorEvent
 
 struct CursorEvent: Codable, Equatable {
@@ -212,20 +340,6 @@ struct ZoomKeyframe: Identifiable, Equatable {
         self.startTime = startTime
         self.endTime = endTime
         self.zoomLevel = zoomLevel
-    }
-}
-
-// MARK: - CutRegion
-
-struct CutRegion: Identifiable, Equatable {
-    let id: UUID
-    let inPoint: Double
-    let outPoint: Double
-
-    init(id: UUID = UUID(), inPoint: Double, outPoint: Double) {
-        self.id = id
-        self.inPoint = inPoint
-        self.outPoint = outPoint
     }
 }
 

@@ -44,7 +44,41 @@ if [[ -n "${RELEASE_ARCHES}" ]]; then
 fi
 
 log "==> package app"
-SIGNING_MODE=adhoc ARCHES="${ARCHES_VALUE}" "${ROOT_DIR}/Scripts/package_app.sh" release
+PACKAGE_SIGNING_MODE="${SIGNING_MODE:-}"
+PACKAGE_APP_IDENTITY="${APP_IDENTITY:-}"
+
+if [[ -z "${PACKAGE_SIGNING_MODE}" && -z "${PACKAGE_APP_IDENTITY}" ]]; then
+  # Prefer a stable code-signing identity if one is available, so macOS TCC
+  # keeps Accessibility/Input Monitoring grants across rebuilds.
+  if command -v security >/dev/null 2>&1; then
+    DETECTED_IDENTITY_HASH="$(security find-identity -v -p codesigning 2>/dev/null \
+      | awk '/[0-9]+\) [0-9A-F]{40} / { print $2; exit }')"
+    if [[ -n "${DETECTED_IDENTITY_HASH}" ]]; then
+      PACKAGE_APP_IDENTITY="${DETECTED_IDENTITY_HASH}"
+    fi
+  fi
+fi
+
+if [[ -z "${PACKAGE_SIGNING_MODE}" && -z "${PACKAGE_APP_IDENTITY}" ]]; then
+  PACKAGE_SIGNING_MODE="adhoc"
+fi
+
+if [[ -n "${PACKAGE_APP_IDENTITY}" ]]; then
+  log "==> using signing identity: ${PACKAGE_APP_IDENTITY}"
+else
+  log "==> using ad-hoc signing (permissions may reset after rebuilds)"
+fi
+
+if [[ -n "${PACKAGE_SIGNING_MODE}" ]]; then
+  SIGNING_MODE="${PACKAGE_SIGNING_MODE}" APP_IDENTITY="${PACKAGE_APP_IDENTITY}" ARCHES="${ARCHES_VALUE}" "${ROOT_DIR}/Scripts/package_app.sh" release
+else
+  APP_IDENTITY="${PACKAGE_APP_IDENTITY}" ARCHES="${ARCHES_VALUE}" "${ROOT_DIR}/Scripts/package_app.sh" release
+fi
+
+if [[ -f "${APP_BUNDLE}/Contents/Info.plist" ]]; then
+  APP_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${APP_BUNDLE}/Contents/Info.plist")
+  log "==> bundle id: ${APP_BUNDLE_ID}"
+fi
 
 log "==> launch app"
 if ! open "${APP_BUNDLE}"; then

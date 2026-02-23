@@ -4,6 +4,7 @@ struct ContentView: View {
     @ObservedObject var controller: DictationController
     @Bindable var recordingController: RecordingSessionController
     @State private var selectedSection: SettingsSection = .overview
+    @State private var isLoadingSetup = false
     private let setupWindow = SetupWindowController()
 
     var body: some View {
@@ -46,8 +47,6 @@ struct ContentView: View {
             notesSection
         case .shortcuts:
             shortcutsSection
-        case .indicators:
-            indicatorsSection
         case .audioModel:
             audioModelSection
         case .screenRecording:
@@ -59,38 +58,6 @@ struct ContentView: View {
 
     private var overviewSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            settingsCard(title: "Live Controls", subtitle: "Start, stop, and monitor dictation quickly.") {
-                HStack(spacing: 10) {
-                    Button("Start Listening") {
-                        controller.startFromUI()
-                    }
-                    .disabled(controller.isRecording || controller.isTranscribing || controller.isPreparingModel)
-
-                    Button("Stop & Transcribe") {
-                        controller.stopFromUI()
-                    }
-                    .disabled(!controller.isRecording)
-
-                    Button("Toggle") {
-                        controller.toggleFromUI()
-                    }
-                    .disabled(controller.isTranscribing || controller.isPreparingModel)
-                }
-
-                if controller.isPreparingModel {
-                    ProgressView("Preparing local model...")
-                        .controlSize(.small)
-                }
-
-                LabeledContent("Current Key", value: controller.invocationKeyDisplayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("Current Output", value: controller.recordingOutputModeText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             settingsCard(title: "Voice To Text Permissions", subtitle: "Input Monitoring, Accessibility, and Microphone for dictation.") {
                 permissionRow(
                     title: "Input Monitoring",
@@ -145,17 +112,54 @@ struct ContentView: View {
                 .font(.caption)
             }
 
-            settingsCard(title: "Last Transcript", subtitle: "Latest captured text.") {
-                Text(controller.lastTranscript.isEmpty ? "No transcript yet." : controller.lastTranscript)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(.vertical, 4)
-            }
         }
     }
 
     private var notesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Output Destination", subtitle: "Control where transcriptions go.") {
+                LabeledContent("Default", value: "Paste")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Current Recording", value: controller.recordingOutputModeText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Voice Note Switch Key", value: controller.voiceNoteSwitchKeyDisplayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button(controller.isCapturingVoiceNoteSwitchKey ? "Listening for key..." : "Change Voice Note Key") {
+                        controller.startVoiceNoteSwitchKeyCapture()
+                    }
+                    .disabled(controller.isCapturingVoiceNoteSwitchKey || controller.isCapturingInvocationKey)
+
+                    if controller.isCapturingVoiceNoteSwitchKey {
+                        Button("Cancel") {
+                            controller.cancelVoiceNoteSwitchKeyCapture()
+                        }
+                    }
+                }
+
+                if controller.isCapturingVoiceNoteSwitchKey {
+                    Text("Press one key. During recording, pressing this key switches output to Voice Note for the current session only.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("While recording, press this key to switch from Paste to Voice Note. The key press is consumed and not typed in the focused app.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(controller.notesDirectoryPathText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+            }
+
             let notes = controller.loadAllNotes()
 
             if notes.isEmpty {
@@ -275,62 +279,6 @@ struct ContentView: View {
                 }
             }
 
-            settingsCard(title: "Output Destination", subtitle: "Control where transcriptions go.") {
-                LabeledContent("Default", value: "Paste")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("Current Recording", value: controller.recordingOutputModeText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                LabeledContent("Voice Note Switch Key", value: controller.voiceNoteSwitchKeyDisplayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    Button(controller.isCapturingVoiceNoteSwitchKey ? "Listening for key..." : "Change Voice Note Key") {
-                        controller.startVoiceNoteSwitchKeyCapture()
-                    }
-                    .disabled(controller.isCapturingVoiceNoteSwitchKey || controller.isCapturingInvocationKey)
-
-                    if controller.isCapturingVoiceNoteSwitchKey {
-                        Button("Cancel") {
-                            controller.cancelVoiceNoteSwitchKeyCapture()
-                        }
-                    }
-                }
-
-                if controller.isCapturingVoiceNoteSwitchKey {
-                    Text("Press one key. During recording, pressing this key switches output to Voice Note for the current session only.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text("While recording, press this key to switch from Paste to Voice Note. The key press is consumed and not typed in the focused app.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text(controller.notesDirectoryPathText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-            }
-        }
-    }
-
-    private var indicatorsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            settingsCard(title: "Unified Notch Indicator", subtitle: "Single visual style used everywhere.") {
-                Text("Actionfy now uses one fixed indicator style: a notch-expansion overlay centered at the top of the screen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Legacy indicator modes (Rive, SVG/HTML, built-in wave, and floating placement/size customization) have been removed.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -356,20 +304,6 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            settingsCard(title: "Model Warmth", subtitle: "Keep speech model responsive.") {
-                Toggle("Keep model warm in background", isOn: $controller.keepModelWarmEnabled)
-
-                Toggle("Only while plugged in", isOn: $controller.keepModelWarmOnlyOnPower)
-                    .disabled(!controller.keepModelWarmEnabled)
-
-                LabeledContent("Warm Status", value: controller.keepModelWarmStatusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Runs a lightweight warmup about every 45 seconds while idle.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -437,14 +371,25 @@ struct ContentView: View {
 
             default:
                 settingsCard(title: "Start Recording", subtitle: "Capture your screen, audio, and camera.") {
-                    Button("Start Recording") {
+                    Button {
+                        isLoadingSetup = true
                         Task {
                             await recordingController.openSetup()
                             setupWindow.show(controller: recordingController)
+                            isLoadingSetup = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isLoadingSetup {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("Start Recording")
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
+                    .disabled(isLoadingSetup)
                 }
             }
 
@@ -564,7 +509,6 @@ private extension ContentView {
         case overview
         case notes
         case shortcuts
-        case indicators
         case audioModel
         case screenRecording
         case advanced
@@ -579,8 +523,6 @@ private extension ContentView {
                 return "Notes"
             case .shortcuts:
                 return "Shortcuts"
-            case .indicators:
-                return "Indicators"
             case .audioModel:
                 return "Audio & Model"
             case .screenRecording:
@@ -598,8 +540,6 @@ private extension ContentView {
                 return "Voice notes captured during recordings."
             case .shortcuts:
                 return "Configure invocation behavior and output routing."
-            case .indicators:
-                return "Single notch-expansion indicator."
             case .audioModel:
                 return "Recording volume behavior and model warm-up settings."
             case .screenRecording:
@@ -617,8 +557,6 @@ private extension ContentView {
                 return "note.text"
             case .shortcuts:
                 return "command"
-            case .indicators:
-                return "rectangle.topthird.inset.filled"
             case .audioModel:
                 return "waveform"
             case .screenRecording:

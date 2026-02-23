@@ -7,13 +7,13 @@ let package = Package(
         .macOS(.v14),
     ],
     dependencies: [
-        .package(url: "https://github.com/rive-app/rive-ios.git", from: "6.7.0"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.11.0"),
     ],
     targets: [
         .executableTarget(
             name: "KinshasaApp",
             dependencies: [
-                .product(name: "RiveRuntime", package: "rive-ios"),
+                .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "Sources/KinshasaApp",
             resources: [

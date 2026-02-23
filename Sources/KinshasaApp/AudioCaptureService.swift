@@ -36,7 +36,11 @@ final class AudioCaptureService {
     private var recorder: AVAudioRecorder?
 
     var microphonePermissionGranted: Bool {
-        AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        if #available(macOS 14.0, *) {
+            return AVAudioApplication.shared.recordPermission == .granted
+        }
+
+        return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
 
     var isRecording: Bool {
@@ -48,24 +52,45 @@ final class AudioCaptureService {
     }
 
     func requestMicrophonePermissionIfNeeded(prompt: Bool = true) async -> Bool {
-        let status = AVCaptureDevice.authorizationStatus(for: .audio)
-
-        switch status {
-        case .authorized:
-            return true
-        case .notDetermined:
-            guard prompt else {
+        if #available(macOS 14.0, *) {
+            let permission = AVAudioApplication.shared.recordPermission
+            switch permission {
+            case .granted:
+                return true
+            case .undetermined:
+                guard prompt else {
+                    return false
+                }
+                return await withCheckedContinuation { continuation in
+                    AVAudioApplication.requestRecordPermission { granted in
+                        continuation.resume(returning: granted)
+                    }
+                }
+            case .denied:
+                return false
+            @unknown default:
                 return false
             }
-            return await withCheckedContinuation { continuation in
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
-                    continuation.resume(returning: granted)
+        } else {
+            let status = AVCaptureDevice.authorizationStatus(for: .audio)
+
+            switch status {
+            case .authorized:
+                return true
+            case .notDetermined:
+                guard prompt else {
+                    return false
                 }
+                return await withCheckedContinuation { continuation in
+                    AVCaptureDevice.requestAccess(for: .audio) { granted in
+                        continuation.resume(returning: granted)
+                    }
+                }
+            case .denied, .restricted:
+                return false
+            @unknown default:
+                return false
             }
-        case .denied, .restricted:
-            return false
-        @unknown default:
-            return false
         }
     }
 

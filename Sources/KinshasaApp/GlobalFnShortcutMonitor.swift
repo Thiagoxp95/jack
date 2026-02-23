@@ -15,15 +15,31 @@ final class GlobalFnShortcutMonitor {
         CGEventMask(1 << CGEventType.keyUp.rawValue)
 
     var onEvent: ((ShortcutEvent) -> Void)?
+    var onVoiceNoteSwitchKeyPressed: (() -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var invocationKeyCode: Int64 = InvocationKey.defaultKeyCode
     private var isInvocationKeyPressed = false
+    private var voiceNoteSwitchKeyCode: Int64?
+    private var voiceNoteSwitchArmed = false
+    private var consumeVoiceNoteSwitchKeyUp = false
 
     func setInvocationKeyCode(_ keyCode: Int64) {
         invocationKeyCode = keyCode
         isInvocationKeyPressed = false
+    }
+
+    func setVoiceNoteSwitchKeyCode(_ keyCode: Int64?) {
+        voiceNoteSwitchKeyCode = keyCode
+        consumeVoiceNoteSwitchKeyUp = false
+    }
+
+    func setVoiceNoteSwitchArmed(_ armed: Bool) {
+        voiceNoteSwitchArmed = armed
+        if !armed {
+            consumeVoiceNoteSwitchKeyUp = false
+        }
     }
 
     func isInvocationKeyCurrentlyPressed() -> Bool {
@@ -59,9 +75,13 @@ final class GlobalFnShortcutMonitor {
 
             guard type == .flagsChanged else {
                 if type == .keyDown {
-                    monitor.handleKeyEvent(event, isKeyDown: true)
+                    if monitor.handleKeyEvent(event, isKeyDown: true) {
+                        return nil
+                    }
                 } else if type == .keyUp {
-                    monitor.handleKeyEvent(event, isKeyDown: false)
+                    if monitor.handleKeyEvent(event, isKeyDown: false) {
+                        return nil
+                    }
                 }
                 return Unmanaged.passUnretained(event)
             }
@@ -75,7 +95,7 @@ final class GlobalFnShortcutMonitor {
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: Self.eventMask,
             callback: callback,
             userInfo: userInfo
@@ -105,6 +125,8 @@ final class GlobalFnShortcutMonitor {
         runLoopSource = nil
         eventTap = nil
         isInvocationKeyPressed = false
+        voiceNoteSwitchArmed = false
+        consumeVoiceNoteSwitchKeyUp = false
     }
 
     private func handleFlagsChanged(_ event: CGEvent) {
@@ -119,28 +141,62 @@ final class GlobalFnShortcutMonitor {
         }
 
         isInvocationKeyPressed = keyDown
+        if keyDown, voiceNoteSwitchKeyCode != nil {
+            voiceNoteSwitchArmed = true
+        }
         onEvent?(keyDown ? .down : .up)
     }
 
-    private func handleKeyEvent(_ event: CGEvent, isKeyDown: Bool) {
+    private func handleKeyEvent(_ event: CGEvent, isKeyDown: Bool) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+        if let voiceNoteSwitchKeyCode,
+           keyCode == voiceNoteSwitchKeyCode
+        {
+            if isKeyDown {
+                let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                if isRepeat {
+                    return voiceNoteSwitchArmed
+                }
+
+                guard voiceNoteSwitchArmed else {
+                    return false
+                }
+
+                consumeVoiceNoteSwitchKeyUp = true
+                onVoiceNoteSwitchKeyPressed?()
+                return true
+            }
+
+            if consumeVoiceNoteSwitchKeyUp {
+                consumeVoiceNoteSwitchKeyUp = false
+                return true
+            }
+
+            return false
+        }
+
         guard keyCode == invocationKeyCode else {
-            return
+            return false
         }
 
         if isKeyDown {
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             if isRepeat {
-                return
+                return false
             }
         }
 
         guard isKeyDown != isInvocationKeyPressed else {
-            return
+            return false
         }
 
         isInvocationKeyPressed = isKeyDown
+        if isKeyDown, voiceNoteSwitchKeyCode != nil {
+            voiceNoteSwitchArmed = true
+        }
         onEvent?(isKeyDown ? .down : .up)
+        return false
     }
 
     private static func keyStateFromModifierFlags(for keyCode: Int64, flags: CGEventFlags) -> Bool? {

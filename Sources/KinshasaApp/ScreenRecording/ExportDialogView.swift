@@ -21,9 +21,11 @@ struct ExportDialogView: View {
     @State private var codec: VideoCodec = .h264
     @State private var quality: ExportQuality = .high
     @State private var resolution: ExportResolution = .original
+    @State private var fileFormat: ExportFileFormat = .mp4
     @State private var phase: ExportPhase = .settings
     @State private var progress: Double = 0
     @State private var exportTask: Task<Void, Never>?
+    @State private var exportService: ExportService?
 
     // MARK: - Closures
 
@@ -98,6 +100,19 @@ struct ExportDialogView: View {
             .labelsHidden()
         }
 
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Format")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Picker("Format", selection: $fileFormat) {
+                ForEach(ExportFileFormat.allCases) { f in
+                    Text(f.label).tag(f)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+
         Divider()
 
         HStack {
@@ -138,6 +153,7 @@ struct ExportDialogView: View {
         HStack {
             Spacer()
             Button("Cancel") {
+                exportService?.cancel()
                 exportTask?.cancel()
                 phase = .settings
             }
@@ -214,7 +230,7 @@ struct ExportDialogView: View {
         let panel = NSSavePanel()
         panel.title = "Export Recording"
         panel.nameFieldStringValue = defaultFilename()
-        panel.allowedContentTypes = [.mpeg4Movie]
+        panel.allowedContentTypes = [fileFormat.utType]
         panel.canCreateDirectories = true
 
         let exportDir = RecordingSessionController.exportDirectory
@@ -232,7 +248,7 @@ struct ExportDialogView: View {
     private func defaultFilename() -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        return "Recording-\(timestamp).mp4"
+        return "Recording-\(timestamp).\(fileFormat.fileExtension)"
     }
 
     // MARK: - Export Execution
@@ -245,6 +261,8 @@ struct ExportDialogView: View {
             codec: codec,
             quality: quality,
             resolution: resolution,
+            fileFormat: fileFormat,
+            aspectRatio: editor.aspectRatio,
             outputURL: outputURL
         )
 
@@ -253,8 +271,9 @@ struct ExportDialogView: View {
 
         exportTask = Task {
             do {
-                let exportService = ExportService()
-                try await exportService.exportWithEffects(
+                let service = ExportService()
+                await MainActor.run { exportService = service }
+                try await service.exportWithEffects(
                     session: session,
                     editor: editorRef,
                     config: config,

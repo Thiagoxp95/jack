@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
 // MARK: - RecordingBubbleView
@@ -26,9 +27,36 @@ private struct RecordingBubbleView: View {
                 .foregroundStyle(.white)
 
             // Divider
-            Capsule()
-                .fill(Color.white.opacity(0.25))
-                .frame(width: 1, height: 16)
+            bubbleDivider
+
+            // Webcam toggle button
+            Button {
+                controller.toggleWebcamOverlay()
+            } label: {
+                Image(systemName: controller.isWebcamVisible ? "web.camera.fill" : "web.camera")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(controller.isWebcamVisible ? .green : .white)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(controller.isWebcamVisible ? "Hide Webcam" : "Show Webcam")
+
+            // Presenter Overlay button — opens macOS Video Effects panel
+            Button {
+                AVCaptureDevice.showSystemUserInterface(.videoEffects)
+            } label: {
+                Image(systemName: "person.crop.rectangle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Presenter Overlay (Video Effects)")
+
+            // Divider
+            bubbleDivider
 
             // Pause / Resume button
             Button {
@@ -69,6 +97,12 @@ private struct RecordingBubbleView: View {
         .preferredColorScheme(.dark)
     }
 
+    private var bubbleDivider: some View {
+        Capsule()
+            .fill(Color.white.opacity(0.25))
+            .frame(width: 1, height: 16)
+    }
+
     @State private var pulsingOpacity: Double = 1.0
 }
 
@@ -84,7 +118,7 @@ final class RecordingBubbleController {
     func show(controller: RecordingSessionController) {
         if panel != nil { return }
 
-        let size = NSSize(width: 220, height: 44)
+        let size = NSSize(width: 310, height: 44)
 
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -92,6 +126,7 @@ final class RecordingBubbleController {
             backing: .buffered,
             defer: false
         )
+        panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -101,7 +136,9 @@ final class RecordingBubbleController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let bubbleView = RecordingBubbleView(controller: controller)
+            .frame(width: size.width, height: size.height)
         let hostingView = NSHostingView(rootView: bubbleView)
+        hostingView.sizingOptions = []
         hostingView.frame = NSRect(origin: .zero, size: size)
         panel.contentView = hostingView
 
@@ -114,7 +151,7 @@ final class RecordingBubbleController {
 
         let screenFrame = screen.visibleFrame
         let finalX = screenFrame.midX - (size.width / 2)
-        let finalY = screenFrame.minY + 40
+        let finalY = screenFrame.minY + 80
         let startY = finalY - 60
 
         // Start below final position for slide-up animation
@@ -148,7 +185,8 @@ final class RecordingBubbleController {
             panel.animator().alphaValue = 0
         }, completionHandler: {
             Task { @MainActor [weak self] in
-                self?.panel?.close()
+                self?.panel?.contentView = nil
+                self?.panel?.orderOut(nil)
                 self?.panel = nil
             }
         })

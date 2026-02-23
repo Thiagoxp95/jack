@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import os
 
 // MARK: - WebcamPreviewView
 
@@ -87,15 +88,23 @@ private final class WebcamPreviewView: NSView {
 final class WebcamOverlayController {
 
     private var panel: NSPanel?
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.kinshasa",
+        category: "WebcamOverlay"
+    )
+
+    /// The current origin of the webcam panel (reflects user drag).
+    var currentOrigin: NSPoint? {
+        panel?.frame.origin
+    }
 
     // MARK: - Show
 
-    func show(service: WebcamCaptureService, position: WebcamPosition, size: WebcamSize) {
+    func show(service: WebcamCaptureService, origin: NSPoint?, diameter: CGFloat) {
         if panel != nil { return }
 
         guard let previewLayer = service.previewLayer else { return }
 
-        let diameter = size.rawValue
         let panelSize = NSSize(width: diameter, height: diameter)
 
         let panel = NSPanel(
@@ -104,6 +113,7 @@ final class WebcamOverlayController {
             backing: .buffered,
             defer: false
         )
+        panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -117,49 +127,34 @@ final class WebcamOverlayController {
         previewView.configure(previewLayer: previewLayer)
         panel.contentView = previewView
 
-        // Position based on WebcamPosition preset
-        let origin = self.origin(for: position, diameter: diameter)
-        panel.setFrameOrigin(origin)
+        if let origin {
+            panel.setFrameOrigin(origin)
+        } else {
+            // Default to bottom-left of screen
+            let screen = NSScreen.main ?? NSScreen.screens.first
+            let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            let margin: CGFloat = 20
+            panel.setFrameOrigin(NSPoint(x: visibleFrame.minX + margin, y: visibleFrame.minY + margin))
+        }
         panel.orderFrontRegardless()
 
         self.panel = panel
     }
 
+    // MARK: - Resize
+
+    func resize(diameter: CGFloat) {
+        guard let panel else { return }
+        let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let newOrigin = NSPoint(x: center.x - diameter / 2, y: center.y - diameter / 2)
+        panel.setFrame(NSRect(origin: newOrigin, size: NSSize(width: diameter, height: diameter)), display: true)
+    }
+
     // MARK: - Hide
 
     func hide() {
-        panel?.close()
+        panel?.contentView = nil
+        panel?.orderOut(nil)
         panel = nil
-    }
-
-    // MARK: - Positioning
-
-    private func origin(for position: WebcamPosition, diameter: CGFloat) -> NSPoint {
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let margin: CGFloat = 20
-
-        switch position {
-        case .bottomLeft:
-            return NSPoint(
-                x: visibleFrame.minX + margin,
-                y: visibleFrame.minY + margin
-            )
-        case .bottomRight:
-            return NSPoint(
-                x: visibleFrame.maxX - diameter - margin,
-                y: visibleFrame.minY + margin
-            )
-        case .topLeft:
-            return NSPoint(
-                x: visibleFrame.minX + margin,
-                y: visibleFrame.maxY - diameter - margin
-            )
-        case .topRight:
-            return NSPoint(
-                x: visibleFrame.maxX - diameter - margin,
-                y: visibleFrame.maxY - diameter - margin
-            )
-        }
     }
 }

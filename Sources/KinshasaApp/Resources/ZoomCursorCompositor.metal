@@ -13,13 +13,13 @@ struct CompositorUniforms {
     float  cursorScale;           // offset 40: 1.0 - 3.0
     float  cursorVisible;         // offset 44: 0 or 1
     float  clickHighlightPhase;   // offset 48: 0-1 for click animation (0 = no click)
-    float  _pad1;                 // offset 52: padding
+    float  cursorClickScale;     // offset 52: cursor press animation (1.0 = normal, <1 = pressed)
     float  _pad2;                 // offset 56: padding
     float  _pad3;                 // offset 60: padding to align float4 to 16-byte boundary
     float4 clickHighlightColor;   // offset 64: RGBA
     float  clickHighlightRadius;  // offset 80: max radius in pixels
-    float  _pad4;                 // offset 84: struct tail padding
-    float  _pad5;                 // offset 88: struct tail padding
+    float  contentOffsetX;        // offset 84: content area X offset for aspect ratio bars
+    float  contentOffsetY;        // offset 88: content area Y offset for aspect ratio bars
     float  _pad6;                 // offset 92: struct tail padding (total: 96 bytes)
 };
 
@@ -65,29 +65,6 @@ static float4 sampleBicubic(texture2d<float, access::sample> tex,
     return result / max(weightSum, 1e-6);
 }
 
-// MARK: - Soft Clamp Helper
-
-/// Soft-clamps a value within [low, high] with exponential deceleration in the margin zone.
-/// margin: fraction of the viewport half-size used as the deceleration zone (0.05 = 5%).
-static float softClamp(float value, float low, float high, float margin) {
-    float range = high - low;
-    float softLow = low + range * margin;
-    float softHigh = high - range * margin;
-
-    if (value < softLow) {
-        // Exponential ease into the lower bound
-        float t = (softLow - value) / (softLow - low);
-        t = clamp(t, 0.0f, 1.0f);
-        return softLow - (softLow - low) * (1.0 - exp(-3.0 * t)) / (1.0 - exp(-3.0));
-    } else if (value > softHigh) {
-        // Exponential ease into the upper bound
-        float t = (value - softHigh) / (high - softHigh);
-        t = clamp(t, 0.0f, 1.0f);
-        return softHigh + (high - softHigh) * (1.0 - exp(-3.0 * t)) / (1.0 - exp(-3.0));
-    }
-    return value;
-}
-
 // MARK: - Compute Kernel
 
 kernel void zoomCursorComposite(
@@ -108,43 +85,65 @@ kernel void zoomCursorComposite(
         filter::linear
     );
 
-    float2 outUV = (float2(gid) + 0.5) / uniforms.outputSize;
-
-    // ---- Phase 1: Zoom Transform ----
-    float invZoom = 1.0 / max(uniforms.zoomLevel, 1e-4);
-    float halfView = invZoom * 0.5;
-
-    // Soft-clamp zoom center so viewport doesn't reveal outside the source frame.
-    // The safe range for the center is [halfView, 1-halfView].
-    float2 clampedCenter = float2(
-        softClamp(uniforms.zoomCenter.x, halfView, 1.0 - halfView, 0.05),
-        softClamp(uniforms.zoomCenter.y, halfView, 1.0 - halfView, 0.05)
+    // Mip-filtered sampler for the cursor texture — uses trilinear filtering
+    // across mip levels so the cursor stays crisp at any rendered size.
+    constexpr sampler cursorSampler(
+        coord::normalized,
+        address::clamp_to_edge,
+        filter::linear,
+        mip_filter::linear
     );
 
-    float2 sourceUV = clampedCenter + (outUV - clampedCenter) * invZoom;
-    sourceUV = clamp(sourceUV, float2(0.0), float2(1.0));
+    float2 pixelPos = float2(gid) + 0.5;
+
+    // ---- Phase 0: Content Area (aspect ratio bars) ----
+    float2 contentOffset = float2(uniforms.contentOffsetX, uniforms.contentOffsetY);
+    float2 contentSize = uniforms.outputSize - 2.0 * contentOffset;
+    float2 contentPos = pixelPos - contentOffset;
+    float2 contentUV = contentPos / contentSize;
+
+    bool inContent = (contentUV.x >= 0.0 && contentUV.x <= 1.0 &&
+                      contentUV.y >= 0.0 && contentUV.y <= 1.0);
 
     float4 color;
-    if (uniforms.zoomLevel > 1.01) {
-        // Bicubic (Catmull-Rom) for zoomed view.
-        color = sampleBicubic(sourceTexture, textureSampler, sourceUV, uniforms.sourceSize);
+
+    if (!inContent) {
+        // Outside content area: black bar
+        color = float4(0.0, 0.0, 0.0, 1.0);
     } else {
-        // Bilinear for 1:1 mapping.
-        color = sourceTexture.sample(textureSampler, sourceUV);
+        float2 outUV = contentUV;
+
+        // ---- Phase 1: Zoom Transform ----
+        // Use the zoom center directly from CameraTracker. No soft-clamping —
+        // the preview uses .scaleEffect with the same anchor, and CameraTracker
+        // already keeps the viewport reasonable via its deadzone logic.
+        float invZoom = 1.0 / max(uniforms.zoomLevel, 1e-4);
+
+        float2 sourceUV = uniforms.zoomCenter + (outUV - uniforms.zoomCenter) * invZoom;
+        sourceUV = clamp(sourceUV, float2(0.0), float2(1.0));
+
+        if (uniforms.zoomLevel > 1.01) {
+            // Bicubic (Catmull-Rom) for zoomed view.
+            color = sampleBicubic(sourceTexture, textureSampler, sourceUV, uniforms.sourceSize);
+        } else {
+            // Bilinear for 1:1 mapping.
+            color = sourceTexture.sample(textureSampler, sourceUV);
+        }
     }
 
     // ---- Phase 2: Cursor Overlay ----
+    // Matches CursorOverlayView's 14×20 base frame and click press animation.
     if (uniforms.cursorVisible > 0.5) {
-        float cursorBaseSize = 24.0;
-        float cursorSize = cursorBaseSize * uniforms.cursorScale;
-        float2 pixelPos  = float2(gid) + 0.5;
+        float scale = uniforms.cursorScale * uniforms.cursorClickScale;
+        float cursorWidth  = 14.0 * scale;
+        float cursorHeight = 20.0 * scale;
         float2 delta     = pixelPos - uniforms.cursorPosition;
 
         // Check if this pixel falls within the cursor rectangle.
-        if (delta.x >= 0.0 && delta.x < cursorSize &&
-            delta.y >= 0.0 && delta.y < cursorSize) {
-            float2 cursorUV = delta / cursorSize;
-            float4 cursorSample = cursorTexture.sample(textureSampler, cursorUV);
+        if (delta.x >= 0.0 && delta.x < cursorWidth &&
+            delta.y >= 0.0 && delta.y < cursorHeight) {
+            float2 cursorUV = float2(delta.x / cursorWidth, delta.y / cursorHeight);
+            float4 cursorSample = cursorTexture.sample(cursorSampler, cursorUV);
 
             // Alpha-blend cursor over the scene.
             float a = cursorSample.a;
@@ -155,7 +154,6 @@ kernel void zoomCursorComposite(
 
     // ---- Phase 3: Click Highlight ----
     if (uniforms.clickHighlightPhase > 0.0) {
-        float2 pixelPos = float2(gid) + 0.5;
         float dist = length(pixelPos - uniforms.cursorPosition);
 
         float currentRadius = uniforms.clickHighlightRadius * uniforms.clickHighlightPhase;

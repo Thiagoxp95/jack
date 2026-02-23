@@ -1,4 +1,104 @@
+import AVFoundation
+import QuartzCore
 import SwiftUI
+
+// MARK: - CameraTracker
+
+/// Broadcast-style lazy camera that only pans when the cursor approaches
+/// the edge of the zoomed viewport. Creates a cinematic "soccer camera" feel
+/// where the subject moves freely within a deadzone and the camera follows
+/// smoothly when the subject nears the frame edge.
+final class CameraTracker {
+    private var anchorX: Double = 0.5
+    private var anchorY: Double = 0.5
+    private var lastTimestamp: TimeInterval = 0
+    private var wasZoomed = false
+
+    /// Fraction of the viewport where the cursor moves freely (no camera pan).
+    /// 0.6 means the inner 60% is a deadzone; camera only reacts in the outer 20% on each side.
+    private let deadzoneRatio: Double = 0.6
+
+    /// Camera stiffness — higher = more responsive.
+    /// 6.0 gives ~0.4s to settle (cinematic broadcast feel).
+    private let stiffness: Double = 6.0
+
+    /// Compute the lazy-follow anchor for `scaleEffect`.
+    ///
+    /// - Parameters:
+    ///   - cursorNormX: Cursor X in normalized view coords (0-1).
+    ///   - cursorNormY: Cursor Y in normalized view coords (0-1).
+    ///   - zoomLevel: Current interpolated zoom level.
+    ///   - timestamp: Explicit timestamp (for export). If nil, uses wall-clock time.
+    /// - Returns: A `UnitPoint` anchor for `scaleEffect`.
+    func update(
+        cursorNormX: Double,
+        cursorNormY: Double,
+        zoomLevel: Double,
+        timestamp: TimeInterval? = nil
+    ) -> UnitPoint {
+        // Not zoomed — reset and center
+        guard zoomLevel > 1.01 else {
+            reset()
+            return .center
+        }
+
+        let now = timestamp ?? CACurrentMediaTime()
+
+        // First frame entering a zoom region: snap to cursor
+        if !wasZoomed {
+            anchorX = cursorNormX
+            anchorY = cursorNormY
+            lastTimestamp = now
+            wasZoomed = true
+            return UnitPoint(x: anchorX, y: anchorY)
+        }
+
+        let dt = now - lastTimestamp
+        guard dt > 0.0001 else { return UnitPoint(x: anchorX, y: anchorY) }
+        let clampedDt = min(dt, 1.0 / 30.0)
+        lastTimestamp = now
+
+        // Compute target anchors using deadzone logic
+        let targetX = targetAnchor(cursor: cursorNormX, current: anchorX, zoom: zoomLevel)
+        let targetY = targetAnchor(cursor: cursorNormY, current: anchorY, zoom: zoomLevel)
+
+        // Frame-rate independent exponential smoothing
+        let factor = 1.0 - exp(-stiffness * clampedDt)
+        anchorX += (targetX - anchorX) * factor
+        anchorY += (targetY - anchorY) * factor
+
+        // Clamp to valid range
+        anchorX = max(0, min(1, anchorX))
+        anchorY = max(0, min(1, anchorY))
+
+        return UnitPoint(x: anchorX, y: anchorY)
+    }
+
+    /// For a single axis, compute the target anchor that keeps the cursor
+    /// within the deadzone. If cursor is already inside, don't move.
+    private func targetAnchor(cursor: Double, current: Double, zoom: Double) -> Double {
+        // Where the cursor appears within the viewport (0 = left edge, 1 = right edge)
+        let cursorInViewport = cursor * zoom - current * (zoom - 1)
+        let margin = (1.0 - deadzoneRatio) / 2.0
+
+        if cursorInViewport < margin {
+            // Cursor is leaving through the left/top — pan to bring it to deadzone edge
+            return max(0, min(1, (cursor * zoom - margin) / (zoom - 1)))
+        } else if cursorInViewport > 1.0 - margin {
+            // Cursor is leaving through the right/bottom — pan to bring it to deadzone edge
+            return max(0, min(1, (cursor * zoom - (1.0 - margin)) / (zoom - 1)))
+        }
+
+        // Cursor is inside the deadzone — don't move
+        return current
+    }
+
+    func reset() {
+        anchorX = 0.5
+        anchorY = 0.5
+        wasZoomed = false
+    }
+}
 
 // MARK: - VideoEditorView
 
@@ -9,6 +109,12 @@ struct VideoEditorView: View {
     @State private var lastScrubTime: Date = .distantPast
     @State private var zoomDragStart: CGFloat?
     @State private var zoomDragEnd: CGFloat?
+    @State private var zoomHoverX: CGFloat?
+    @State private var resizingKeyframeID: UUID?
+    @State private var resizingEdge: ZoomResizeEdge?
+    @State private var cameraTracker = CameraTracker()
+    @State private var lastMagnifyScale: CGFloat = 1.0
+    @State private var bladeHoverX: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,9 +122,44 @@ struct VideoEditorView: View {
             editorToolbar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(EditorColors.background)
 
-            Divider()
+            Rectangle().fill(EditorColors.divider).frame(height: 1)
+
+            // Aspect ratio picker
+            HStack(spacing: 8) {
+                Text("Aspect Ratio")
+                    .font(.caption)
+                    .foregroundColor(EditorColors.secondary)
+                HStack(spacing: 1) {
+                    ForEach(ExportAspectRatio.allCases) { ratio in
+                        Button {
+                            editor.aspectRatio = ratio
+                        } label: {
+                            Text(ratio.label)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(
+                                    editor.aspectRatio == ratio
+                                        ? AnyShapeStyle(EditorColors.accentGradient)
+                                        : AnyShapeStyle(EditorColors.card)
+                                )
+                                .foregroundColor(
+                                    editor.aspectRatio == ratio ? .white : .primary
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(EditorColors.background)
+
+            Rectangle().fill(EditorColors.divider).frame(height: 1)
 
             // Main content
             HStack(spacing: 0) {
@@ -27,14 +168,14 @@ struct VideoEditorView: View {
                     videoPreview
                         .frame(minHeight: 300)
 
-                    Divider()
+                    Rectangle().fill(EditorColors.divider).frame(height: 1)
 
                     timelinePanel
-                        .frame(minHeight: 200)
+                        .frame(minHeight: 220)
                 }
                 .frame(maxWidth: .infinity)
 
-                Divider()
+                Rectangle().fill(EditorColors.divider).frame(width: 1)
 
                 // Right: Effects + Audio panel
                 ScrollView {
@@ -48,7 +189,7 @@ struct VideoEditorView: View {
                     .padding(12)
                 }
                 .frame(width: 280)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(EditorColors.background)
             }
         }
         .frame(minWidth: 900, minHeight: 600)
@@ -61,6 +202,11 @@ struct VideoEditorView: View {
                 onDismiss: { showExportSheet = false }
             )
         }
+        .onChange(of: editor.micMuted) { _, _ in updateAudioVolumes() }
+        .onChange(of: editor.systemMuted) { _, _ in updateAudioVolumes() }
+        .onChange(of: editor.micVolume) { _, _ in updateAudioVolumes() }
+        .onChange(of: editor.systemVolume) { _, _ in updateAudioVolumes() }
+        .onAppear { updateAudioVolumes() }
     }
 
     // MARK: - Toolbar
@@ -80,16 +226,43 @@ struct VideoEditorView: View {
 
             Spacer()
 
+            // Blade mode toggle
+            Button {
+                editor.toggleBladeMode()
+            } label: {
+                Label("Blade", systemImage: "scissors")
+                    .foregroundColor(editor.isBladeMode ? .white : EditorColors.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        editor.isBladeMode
+                            ? AnyShapeStyle(EditorColors.accentGradient)
+                            : AnyShapeStyle(Color.clear)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+
+            // Add marker button
+            Button {
+                editor.addMarker()
+            } label: {
+                Label("Marker", systemImage: "flag.fill")
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
             Text(formatTime(editor.currentTime))
                 .font(.system(.title3, design: .monospaced))
                 .foregroundColor(.white)
 
             Text(" / ")
-                .foregroundColor(.gray)
+                .foregroundColor(EditorColors.secondary)
 
-            Text(formatTime(editor.duration))
+            Text(formatTime(editor.editedDuration))
                 .font(.system(.title3, design: .monospaced))
-                .foregroundColor(.gray)
+                .foregroundColor(EditorColors.secondary)
 
             Spacer()
 
@@ -105,27 +278,53 @@ struct VideoEditorView: View {
     @ViewBuilder
     private var videoPreview: some View {
         GeometryReader { geometry in
+            let previewSize: CGSize = {
+                guard let targetRatio = editor.aspectRatio.ratio else {
+                    return geometry.size
+                }
+                let availableAspect = geometry.size.width / geometry.size.height
+                if availableAspect > targetRatio {
+                    let w = geometry.size.height * targetRatio
+                    return CGSize(width: w, height: geometry.size.height)
+                } else {
+                    let h = geometry.size.width / targetRatio
+                    return CGSize(width: geometry.size.width, height: h)
+                }
+            }()
+
+            let videoAspect = editor.session.screenSize.width / max(editor.session.screenSize.height, 1)
+
+            let videoGroupSize: CGSize = {
+                let containerAspect = previewSize.width / previewSize.height
+                if videoAspect > containerAspect {
+                    let h = previewSize.width / videoAspect
+                    return CGSize(width: previewSize.width, height: h)
+                } else {
+                    let w = previewSize.height * videoAspect
+                    return CGSize(width: w, height: previewSize.height)
+                }
+            }()
+
             let time = editor.isPlaying ? editor.smoothTime : editor.currentTime
             let zoomLevel = MetalVideoRenderer.interpolateZoom(
                 at: time,
                 keyframes: editor.zoomKeyframes,
                 rampDuration: MetalVideoRenderer.cinematicRampDuration
             )
-            let anchor = previewZoomAnchor(at: time, viewSize: geometry.size)
+            let anchor = lazyZoomAnchor(at: time, zoomLevel: zoomLevel, viewSize: videoGroupSize)
 
             ZStack {
-                // Zoomable content: video + cursor (zoomed together)
                 MetalPreviewView(session: editor.session, editor: editor)
-                    .background(Color.black)
                     .overlay {
                         CursorOverlayView(editor: editor)
                     }
+                    .aspectRatio(videoAspect, contentMode: .fit)
                     .scaleEffect(zoomLevel, anchor: anchor)
+                    .clipped()
 
-                // Webcam overlay (not zoomed — it's a separate camera feed)
-                WebcamEditorOverlay(editor: editor, viewSize: geometry.size)
+                WebcamEditorOverlay(editor: editor, viewSize: videoGroupSize)
+                    .frame(width: videoGroupSize.width, height: videoGroupSize.height)
 
-                // Play/Pause overlay
                 if !editor.isPlaying {
                     Button(action: editor.togglePlayPause) {
                         Image(systemName: "play.circle.fill")
@@ -135,21 +334,26 @@ struct VideoEditorView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .frame(width: previewSize.width, height: previewSize.height)
+            .background(Color.black)
             .clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    /// Computes the zoom anchor point in view coordinates, centered on the cursor.
-    /// The cursor is always the anchor so it's always visible in the zoomed viewport.
-    /// .clipped() on the parent prevents overflow — no clamping needed.
-    private func previewZoomAnchor(at time: TimeInterval, viewSize: CGSize) -> UnitPoint {
+    /// Broadcast-style lazy camera anchor.
+    private func lazyZoomAnchor(
+        at time: TimeInterval,
+        zoomLevel: Double,
+        viewSize: CGSize
+    ) -> UnitPoint {
         let screenSize = editor.session.screenSize
         guard screenSize.width > 0, screenSize.height > 0,
               let pos = editor.cursorPosition(at: time) else {
+            cameraTracker.reset()
             return .center
         }
 
-        // Map cursor from screen coords to view coords (accounting for letterboxing)
         let videoAspect = screenSize.width / screenSize.height
         let viewAspect = viewSize.width / viewSize.height
 
@@ -171,47 +375,71 @@ struct VideoEditorView: View {
         let viewX = (pos.x / screenSize.width) * renderSize.width + offset.x
         let viewY = (pos.y / screenSize.height) * renderSize.height + offset.y
 
-        // Shift anchor from cursor tip to cursor body center so the full
-        // arrow shape is visible at edges. The cursor arrow extends right
-        // and down from the tip by (14*scale, 20*scale).
-        let bodyX = viewX + 7.0 * editor.cursorScale
-        let bodyY = viewY + 10.0 * editor.cursorScale
+        let normX = max(0, min(1, viewX / viewSize.width))
+        let normY = max(0, min(1, viewY / viewSize.height))
 
-        // Normalize to UnitPoint (0-1 relative to view), clamped to bounds
-        let normX = max(0, min(1, bodyX / viewSize.width))
-        let normY = max(0, min(1, bodyY / viewSize.height))
-
-        return UnitPoint(x: normX, y: normY)
+        return cameraTracker.update(
+            cursorNormX: normX,
+            cursorNormY: normY,
+            zoomLevel: zoomLevel
+        )
     }
 
     // MARK: - Timeline Panel
 
     @ViewBuilder
     private var timelinePanel: some View {
-        VStack(spacing: 4) {
-            // Video timeline
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Video")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .padding(.leading, 8)
+        VStack(spacing: 0) {
+            // Scrollable tracks area
+            GeometryReader { outerGeo in
+                let baseWidth = outerGeo.size.width
+                let scaledWidth = max(baseWidth, baseWidth * editor.timelineScale)
 
-                videoTimeline
-                    .frame(height: 40)
+                ScrollView(.horizontal, showsIndicators: editor.timelineScale > 1.05) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Time ruler
+                        timeRuler
+                            .frame(height: 16)
+
+                        sectionHeader("VIDEO")
+                        videoTimeline
+                            .frame(height: 44)
+
+                        sectionHeader("ZOOM")
+                        zoomTimeline
+                            .frame(height: 30)
+
+                        sectionHeader("AUDIO")
+                        HStack(spacing: 4) {
+                            waveformView(samples: editor.micWaveform, color: EditorColors.micWaveform, label: "Mic")
+                                .frame(height: 28)
+                            waveformView(samples: editor.systemWaveform, color: EditorColors.systemWaveform, label: "Sys")
+                                .frame(height: 28)
+                        }
+
+                        if !editor.markers.isEmpty {
+                            sectionHeader("MARKERS")
+                            markersRow
+                                .frame(height: 20)
+                        }
+                    }
+                    .frame(width: scaledWidth)
+                    .padding(.horizontal, 8)
+                }
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { value in
+                            let delta = value.magnification / lastMagnifyScale
+                            editor.timelineScale = max(1.0, min(10.0, editor.timelineScale * delta))
+                            lastMagnifyScale = value.magnification
+                        }
+                        .onEnded { _ in
+                            lastMagnifyScale = 1.0
+                        }
+                )
             }
 
-            // Zoom timeline
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Zoom")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .padding(.leading, 8)
-
-                zoomTimeline
-                    .frame(height: 30)
-            }
-
-            // Playback controls
+            // Playback controls (fixed below scroll area)
             HStack(spacing: 12) {
                 Button(action: editor.stepBackward) {
                     Image(systemName: "backward.frame.fill")
@@ -231,27 +459,85 @@ struct VideoEditorView: View {
 
                 Spacer()
 
-                Button("Set In") {
-                    editor.setInPoint()
+                Button {
+                    editor.splitAtPlayhead()
+                } label: {
+                    Label("Split", systemImage: "scissors")
+                        .font(.caption)
                 }
-                .font(.caption)
 
-                Button("Set Out") {
-                    editor.setOutPoint()
+                Button {
+                    editor.deleteSelectedSegment()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .font(.caption)
                 }
-                .font(.caption)
-
-                Button("Delete Selection") {
-                    editor.deleteSelection()
-                }
-                .font(.caption)
-                .disabled(editor.inPoint == nil || editor.outPoint == nil)
+                .disabled(editor.selectedSegmentID == nil)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(EditorColors.card)
         }
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(EditorColors.background)
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(EditorColors.secondary)
+            .tracking(0.5)
+            .padding(.leading, 8)
+    }
+
+    // MARK: - Time Ruler
+
+    @ViewBuilder
+    private var timeRuler: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            Canvas { context, size in
+                let duration = editor.duration
+                guard duration > 0, width > 0 else { return }
+
+                let pxPerSec = Double(width) / duration
+                let tickInterval: Double
+                if pxPerSec > 80 { tickInterval = 1 }
+                else if pxPerSec > 20 { tickInterval = 5 }
+                else if pxPerSec > 8 { tickInterval = 15 }
+                else { tickInterval = 30 }
+
+                var t: Double = 0
+                while t <= duration {
+                    let x = CGFloat(t / duration) * width
+
+                    // Tick mark
+                    let tickPath = Path { p in
+                        p.move(to: CGPoint(x: x, y: size.height - 4))
+                        p.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    context.stroke(tickPath, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
+
+                    // Time label
+                    let label = formatTimeCompact(t)
+                    let text = Text(label)
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(Color.gray)
+                    context.draw(text, at: CGPoint(x: x + 2, y: size.height / 2 - 2), anchor: .leading)
+
+                    t += tickInterval
+                }
+            }
+        }
+    }
+
+    private func formatTimeCompact(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        if mins > 0 {
+            return String(format: "%d:%02d", mins, secs)
+        }
+        return String(format: "%ds", secs)
     }
 
     // MARK: - Video Timeline
@@ -261,75 +547,127 @@ struct VideoEditorView: View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let height = geometry.size.height
+            let segmentGap: CGFloat = 1.5
 
             ZStack(alignment: .leading) {
                 // Track background
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.3))
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(EditorColors.trackBackground)
 
-                // Cut regions (red overlays)
-                ForEach(editor.cuts) { cut in
-                    let startX = timeToX(cut.inPoint, width: width)
-                    let endX = timeToX(cut.outPoint, width: width)
-                    Rectangle()
-                        .fill(Color.red.opacity(0.4))
-                        .frame(width: max(0, endX - startX), height: height)
-                        .offset(x: startX)
+                // Segments with visual gap
+                ForEach(editor.segments) { segment in
+                    let rawStartX = sourceTimeToX(segment.sourceStart, width: width)
+                    let rawEndX = sourceTimeToX(segment.sourceEnd, width: width)
+                    let startX = rawStartX + segmentGap
+                    let endX = rawEndX - segmentGap
+                    let segWidth = max(0, endX - startX)
+                    let isSelected = editor.selectedSegmentID == segment.id
+
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            segment.enabled
+                                ? (isSelected ? Color.white.opacity(0.12) : EditorColors.subtleFill)
+                                : EditorColors.disabledSegment
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(
+                                    isSelected
+                                        ? AnyShapeStyle(EditorColors.selectedSegmentBorder)
+                                        : AnyShapeStyle(EditorColors.subtleStroke),
+                                    lineWidth: isSelected ? 2 : 0.5
+                                )
+                        )
+                        .frame(width: segWidth, height: height - 6)
+                        .offset(x: startX, y: 3)
+                        .allowsHitTesting(false) // Selection handled by drag gesture below
                 }
 
-                // In point marker (yellow line)
-                if let inPt = editor.inPoint {
+                // Disabled segment red overlay
+                ForEach(editor.segments.filter { !$0.enabled }) { segment in
+                    let startX = sourceTimeToX(segment.sourceStart, width: width) + segmentGap
+                    let endX = sourceTimeToX(segment.sourceEnd, width: width) - segmentGap
                     Rectangle()
-                        .fill(Color.yellow)
+                        .fill(EditorColors.cutRegion)
+                        .frame(width: max(0, endX - startX), height: height - 6)
+                        .offset(x: startX, y: 3)
+                        .allowsHitTesting(false)
+                }
+
+                // Blade hover indicator
+                if editor.isBladeMode, let hoverX = bladeHoverX {
+                    Rectangle()
+                        .fill(EditorColors.bladeIndicator)
                         .frame(width: 2, height: height)
-                        .offset(x: timeToX(inPt, width: width))
+                        .offset(x: hoverX)
+                        .allowsHitTesting(false)
                 }
 
-                // Out point marker (yellow line)
-                if let outPt = editor.outPoint {
+                // Playhead (positioned at source time)
+                let playheadSrcTime = editor.sourceTime(forEditedTime: editor.currentTime)
+                let playheadX = sourceTimeToX(playheadSrcTime, width: width)
+                VStack(spacing: 0) {
+                    // Top handle
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(EditorColors.playhead)
+                        .frame(width: 8, height: 6)
+                    // Vertical line
                     Rectangle()
-                        .fill(Color.yellow)
-                        .frame(width: 2, height: height)
-                        .offset(x: timeToX(outPt, width: width))
+                        .fill(EditorColors.playhead)
+                        .frame(width: 2)
                 }
-
-                // Playhead (white line)
-                Rectangle()
-                    .fill(Color.white)
-                    .frame(width: 2, height: height)
-                    .offset(x: timeToX(editor.currentTime, width: width))
+                .frame(height: height + 4)
+                .offset(x: playheadX - 4, y: -2)
+                .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
-                    guard width > 0 else { return }
-                    let now = Date()
-                    guard now.timeIntervalSince(lastScrubTime) >= 1.0 / 30.0 else { return }
-                    lastScrubTime = now
-
-                    if editor.isPlaying {
-                        editor.pause()
+                    if editor.isBladeMode {
+                        bladeHoverX = location.x
+                        NSCursor.crosshair.set()
                     }
-                    let ratio = max(0, min(1, location.x / width))
-                    editor.currentTime = ratio * editor.duration
                 case .ended:
-                    break
+                    bladeHoverX = nil
+                    if editor.isBladeMode { NSCursor.arrow.set() }
                 }
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         guard width > 0 else { return }
-                        if editor.isPlaying {
-                            editor.pause()
+                        if editor.isBladeMode {
+                            bladeHoverX = value.location.x
+                        } else {
+                            // Scrub: convert click X → source time → edited time
+                            if editor.isPlaying { editor.pause() }
+                            let srcTime = max(0, min(editor.duration, (value.location.x / width) * editor.duration))
+                            if let editedT = editor.editedTime(forSourceTime: srcTime) {
+                                editor.currentTime = editedT
+                            }
                         }
-                        let ratio = max(0, min(1, value.location.x / width))
-                        editor.currentTime = ratio * editor.duration
+                    }
+                    .onEnded { value in
+                        guard width > 0 else { return }
+                        let dragDist = abs(value.location.x - value.startLocation.x)
+                            + abs(value.location.y - value.startLocation.y)
+
+                        if editor.isBladeMode {
+                            let srcTime = (value.location.x / width) * editor.duration
+                            editor.splitAtSourceTime(srcTime)
+                        } else if dragDist < 4 {
+                            // Short tap → toggle segment selection
+                            let srcTime = (value.location.x / width) * editor.duration
+                            if let seg = editor.segment(atSourceTime: srcTime) {
+                                editor.selectSegment(
+                                    editor.selectedSegmentID == seg.id ? nil : seg.id
+                                )
+                            }
+                        }
                     }
             )
         }
-        .padding(.horizontal, 8)
     }
 
     // MARK: - Zoom Timeline
@@ -339,25 +677,50 @@ struct VideoEditorView: View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let height = geometry.size.height
+            let edgeThreshold: CGFloat = 6
 
             ZStack(alignment: .leading) {
                 // Track background
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.2))
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(EditorColors.trackBackground)
 
-                // Zoom regions (blue)
+                // Ghost block on hover
+                if let hoverX = zoomHoverX, zoomDragStart == nil, resizingKeyframeID == nil {
+                    let ghostDuration = min(3.0, max(0.5, editor.duration * 0.1))
+                    let ghostHalfWidth = zoomTimeToX(ghostDuration / 2, width: width)
+                    let ghostStart = max(0, hoverX - ghostHalfWidth)
+                    let ghostEnd = min(width, hoverX + ghostHalfWidth)
+                    let ghostStartTime = (ghostStart / width) * editor.duration
+                    let ghostEndTime = (ghostEnd / width) * editor.duration
+                    let overlapsExisting = editor.zoomKeyframes.contains { kf in
+                        ghostStartTime < kf.endTime && ghostEndTime > kf.startTime
+                    }
+                    if !overlapsExisting {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.blue.opacity(0.15))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                            )
+                            .frame(width: max(0, ghostEnd - ghostStart), height: height - 4)
+                            .offset(x: ghostStart, y: 2)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+                // Zoom regions
                 ForEach(editor.zoomKeyframes) { kf in
-                    let startX = timeToX(kf.startTime, width: width)
-                    let endX = timeToX(kf.endTime, width: width)
+                    let startX = zoomTimeToX(kf.startTime, width: width)
+                    let endX = zoomTimeToX(kf.endTime, width: width)
                     ZStack {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.blue.opacity(0.4))
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(EditorColors.zoomBlock)
                         Text(String(format: "%.1fx", kf.zoomLevel))
-                            .font(.system(size: 9))
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.white)
                     }
                     .frame(width: max(0, endX - startX), height: height - 4)
-                    .offset(x: startX)
+                    .offset(x: startX, y: 2)
                     .onTapGesture(count: 2) {
                         cycleZoomLevel(id: kf.id, current: kf.zoomLevel)
                     }
@@ -368,54 +731,138 @@ struct VideoEditorView: View {
                     }
                 }
 
-                // Drag preview (semi-transparent while drawing)
+                // Drag preview
                 if let dragStart = zoomDragStart, let dragEnd = zoomDragEnd {
                     let minX = min(dragStart, dragEnd)
                     let maxX = max(dragStart, dragEnd)
-                    RoundedRectangle(cornerRadius: 2)
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(Color.blue.opacity(0.25))
-                        .stroke(Color.blue.opacity(0.6), lineWidth: 1)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color.blue.opacity(0.6), lineWidth: 1)
+                        )
                         .frame(width: max(0, maxX - minX), height: height - 4)
-                        .offset(x: minX)
+                        .offset(x: minX, y: 2)
                 }
 
                 // Playhead
                 Rectangle()
-                    .fill(Color.white.opacity(0.6))
+                    .fill(EditorColors.playhead.opacity(0.6))
                     .frame(width: 1, height: height)
-                    .offset(x: timeToX(editor.currentTime, width: width))
+                    .offset(x: zoomTimeToX(editor.currentTime, width: width))
             }
             .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    zoomHoverX = location.x
+                    var nearEdge = false
+                    for kf in editor.zoomKeyframes {
+                        let leftEdge = zoomTimeToX(kf.startTime, width: width)
+                        let rightEdge = zoomTimeToX(kf.endTime, width: width)
+                        if abs(location.x - leftEdge) < edgeThreshold || abs(location.x - rightEdge) < edgeThreshold {
+                            nearEdge = true
+                            break
+                        }
+                    }
+                    if nearEdge {
+                        NSCursor.resizeLeftRight.set()
+                    } else {
+                        NSCursor.arrow.set()
+                    }
+                case .ended:
+                    zoomHoverX = nil
+                    NSCursor.arrow.set()
+                }
+            }
             .gesture(
-                DragGesture(minimumDistance: 4)
+                DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         guard width > 0 else { return }
-                        if zoomDragStart == nil {
+
+                        if zoomDragStart == nil && resizingKeyframeID == nil {
+                            let startX = value.startLocation.x
+
+                            for kf in editor.zoomKeyframes {
+                                let leftEdge = zoomTimeToX(kf.startTime, width: width)
+                                let rightEdge = zoomTimeToX(kf.endTime, width: width)
+                                if abs(startX - leftEdge) < edgeThreshold {
+                                    resizingKeyframeID = kf.id
+                                    resizingEdge = .left
+                                    editor.updateZoomRegionTimes(id: kf.id, pushUndo: true)
+                                    return
+                                }
+                                if abs(startX - rightEdge) < edgeThreshold {
+                                    resizingKeyframeID = kf.id
+                                    resizingEdge = .right
+                                    editor.updateZoomRegionTimes(id: kf.id, pushUndo: true)
+                                    return
+                                }
+                            }
+
                             zoomDragStart = max(0, min(width, value.startLocation.x))
                         }
-                        zoomDragEnd = max(0, min(width, value.location.x))
+
+                        if let id = resizingKeyframeID, let edge = resizingEdge {
+                            let time = max(0, min(editor.duration, (value.location.x / width) * editor.duration))
+                            switch edge {
+                            case .left:
+                                editor.updateZoomRegionTimes(id: id, startTime: time)
+                            case .right:
+                                editor.updateZoomRegionTimes(id: id, endTime: time)
+                            }
+                        } else {
+                            zoomDragEnd = max(0, min(width, value.location.x))
+                        }
                     }
                     .onEnded { value in
-                        guard width > 0,
-                              let dragStart = zoomDragStart,
-                              let dragEnd = zoomDragEnd else {
+                        if resizingKeyframeID != nil {
+                            resizingKeyframeID = nil
+                            resizingEdge = nil
+                            return
+                        }
+
+                        guard width > 0 else {
                             zoomDragStart = nil
                             zoomDragEnd = nil
                             return
                         }
 
-                        let minX = min(dragStart, dragEnd)
-                        let maxX = max(dragStart, dragEnd)
-                        let startTime = (minX / width) * editor.duration
-                        let endTime = (maxX / width) * editor.duration
-
-                        // Only create if the region is at least 0.2 seconds
-                        if endTime - startTime >= 0.2 {
-                            editor.addZoomRegion(start: startTime, end: endTime, level: 2.0)
-                        }
-
+                        let savedStart = zoomDragStart
+                        let savedEnd = zoomDragEnd
                         zoomDragStart = nil
                         zoomDragEnd = nil
+
+                        guard let start = savedStart, let end = savedEnd else {
+                            let time = (value.location.x / width) * editor.duration
+                            let blockDuration = min(3.0, max(0.5, editor.duration * 0.1))
+                            let startTime = max(0, time - blockDuration / 2)
+                            let endTime = min(editor.duration, time + blockDuration / 2)
+                            if endTime - startTime >= 0.2 {
+                                editor.addZoomRegion(start: startTime, end: endTime, level: 2.0)
+                            }
+                            return
+                        }
+
+                        let minX = min(start, end)
+                        let maxX = max(start, end)
+                        let dragDistance = maxX - minX
+
+                        if dragDistance < 4 {
+                            let time = (value.location.x / width) * editor.duration
+                            let blockDuration = min(3.0, max(0.5, editor.duration * 0.1))
+                            let startTime = max(0, time - blockDuration / 2)
+                            let endTime = min(editor.duration, time + blockDuration / 2)
+                            if endTime - startTime >= 0.2 {
+                                editor.addZoomRegion(start: startTime, end: endTime, level: 2.0)
+                            }
+                        } else {
+                            let startTime = (minX / width) * editor.duration
+                            let endTime = (maxX / width) * editor.duration
+                            if endTime - startTime >= 0.2 {
+                                editor.addZoomRegion(start: startTime, end: endTime, level: 2.0)
+                            }
+                        }
                     }
             )
             .onScrollWheel { delta, location in
@@ -429,7 +876,91 @@ struct VideoEditorView: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
+    }
+
+    // MARK: - Waveform View
+
+    @ViewBuilder
+    private func waveformView(samples: [Float], color: Color, label: String) -> some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(EditorColors.trackBackground)
+
+                if samples.isEmpty {
+                    Text(label)
+                        .font(.system(size: 9))
+                        .foregroundColor(EditorColors.secondary)
+                } else {
+                    Canvas { context, size in
+                        let count = samples.count
+                        guard count > 0 else { return }
+                        let barWidth = size.width / CGFloat(count)
+                        let midY = size.height / 2
+
+                        for i in 0..<count {
+                            let amplitude = CGFloat(samples[i])
+                            let barHeight = max(1, amplitude * midY)
+                            let x = CGFloat(i) * barWidth
+                            let rect = CGRect(
+                                x: x,
+                                y: midY - barHeight,
+                                width: max(1, barWidth - 0.5),
+                                height: barHeight * 2
+                            )
+                            context.fill(Path(rect), with: .color(color.opacity(0.6)))
+                        }
+                    }
+                }
+
+                // Playhead
+                Rectangle()
+                    .fill(EditorColors.playhead.opacity(0.4))
+                    .frame(width: 1, height: height)
+                    .offset(x: sourceTimeToX(
+                        editor.sourceTime(forEditedTime: editor.currentTime),
+                        width: width
+                    ))
+            }
+        }
+    }
+
+    // MARK: - Markers Row
+
+    @ViewBuilder
+    private var markersRow: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+
+            ZStack(alignment: .leading) {
+                ForEach(editor.markers) { marker in
+                    let x = sourceTimeToX(marker.time, width: width)
+                    MarkerFlag(color: marker.color.color)
+                        .frame(width: 10, height: 16)
+                        .offset(x: x - 5)
+                        .onTapGesture {
+                            editor.jumpToMarker(id: marker.id)
+                        }
+                        .contextMenu {
+                            Text(marker.label.isEmpty ? "Marker" : marker.label)
+                            ForEach(MarkerColor.allCases) { mc in
+                                Button {
+                                    editor.updateMarkerColor(id: marker.id, color: mc)
+                                } label: {
+                                    Label(mc.rawValue.capitalized, systemImage: "circle.fill")
+                                }
+                            }
+                            Divider()
+                            Button("Delete", role: .destructive) {
+                                editor.removeMarker(id: marker.id)
+                            }
+                        }
+                }
+            }
+        }
     }
 
     // MARK: - Zoom Helpers
@@ -450,7 +981,6 @@ struct VideoEditorView: View {
                     .font(.caption)
 
                 if editor.webcamEnabled {
-                    // Webcam scale slider
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Size: \(String(format: "%.0f%%", editor.webcamScale * 100))")
                             .font(.caption)
@@ -459,13 +989,13 @@ struct VideoEditorView: View {
 
                     Text("Drag the webcam circle in the preview to reposition.")
                         .font(.system(size: 10))
-                        .foregroundColor(.gray)
+                        .foregroundColor(EditorColors.secondary)
                 }
             }
             .padding(.top, 4)
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(EditorColors.card))
     }
 
     // MARK: - Cursor Effects Panel
@@ -474,7 +1004,6 @@ struct VideoEditorView: View {
     private var cursorEffectsPanel: some View {
         DisclosureGroup("Cursor Effects") {
             VStack(alignment: .leading, spacing: 12) {
-                // Cursor style picker
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Cursor Color")
                         .font(.caption)
@@ -503,25 +1032,22 @@ struct VideoEditorView: View {
                     }
                 }
 
-                // Cursor scale slider
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Cursor Scale: \(String(format: "%.1fx", editor.cursorScale))")
                         .font(.caption)
                     Slider(value: $editor.cursorScale, in: 1...5, step: 0.5)
                 }
 
-                // Click press animation toggle
                 Toggle("Click Animation", isOn: $editor.clickHighlightEnabled)
                     .font(.caption)
 
-                // Cursor smoothing toggle
                 Toggle("Cursor Smoothing", isOn: $editor.cursorSmoothingEnabled)
                     .font(.caption)
             }
             .padding(.top, 4)
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(EditorColors.card))
     }
 
     // MARK: - Audio Tracks Panel
@@ -530,7 +1056,6 @@ struct VideoEditorView: View {
     private var audioTracksPanel: some View {
         DisclosureGroup("Audio") {
             VStack(spacing: 12) {
-                // Microphone track
                 audioTrack(
                     label: "Microphone",
                     icon: "mic.fill",
@@ -538,7 +1063,6 @@ struct VideoEditorView: View {
                     muted: $editor.micMuted
                 )
 
-                // System audio track
                 audioTrack(
                     label: "System Audio",
                     icon: "speaker.wave.2.fill",
@@ -549,7 +1073,7 @@ struct VideoEditorView: View {
             .padding(.top, 4)
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(EditorColors.card))
     }
 
     @ViewBuilder
@@ -574,25 +1098,14 @@ struct VideoEditorView: View {
                 .buttonStyle(.plain)
             }
 
-            // Waveform placeholder
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.gray.opacity(0.2))
-                .frame(height: 24)
-                .overlay {
-                    Text("Waveform")
-                        .font(.system(size: 9))
-                        .foregroundColor(.gray)
-                }
-
-            // Volume slider
             HStack {
                 Text("Vol")
                     .font(.system(size: 9))
-                    .foregroundColor(.gray)
+                    .foregroundColor(EditorColors.secondary)
                 Slider(value: volume, in: 0...2)
                 Text(String(format: "%.0f%%", volume.wrappedValue * 100))
                     .font(.system(size: 9))
-                    .foregroundColor(.gray)
+                    .foregroundColor(EditorColors.secondary)
                     .frame(width: 32, alignment: .trailing)
             }
         }
@@ -600,9 +1113,28 @@ struct VideoEditorView: View {
 
     // MARK: - Helpers
 
-    private func timeToX(_ time: TimeInterval, width: CGFloat) -> CGFloat {
+    /// Map source time to X position (for segment rendering on the full source timeline)
+    private func sourceTimeToX(_ time: TimeInterval, width: CGFloat) -> CGFloat {
         guard editor.duration > 0 else { return 0 }
         return CGFloat(time / editor.duration) * width
+    }
+
+    /// Map edited-timeline time to X position (for playhead and waveform overlay)
+    private func editedTimeToX(_ time: TimeInterval, width: CGFloat) -> CGFloat {
+        guard editor.editedDuration > 0 else { return 0 }
+        return CGFloat(time / editor.editedDuration) * width
+    }
+
+    /// Map source time to X for zoom timeline (always uses full source duration)
+    private func zoomTimeToX(_ time: TimeInterval, width: CGFloat) -> CGFloat {
+        guard editor.duration > 0 else { return 0 }
+        return CGFloat(time / editor.duration) * width
+    }
+
+    // MARK: - Audio Sync
+
+    private func updateAudioVolumes() {
+        editor.rebuildAudioMix()
     }
 
     // MARK: - Keyboard Shortcuts
@@ -612,7 +1144,36 @@ struct VideoEditorView: View {
             EditorShortcut(key: " ", modifiers: []) { editor.togglePlayPause() },
             EditorShortcut(key: .rightArrow, modifiers: []) { editor.stepForward() },
             EditorShortcut(key: .leftArrow, modifiers: []) { editor.stepBackward() },
+            EditorShortcut(key: "b", modifiers: []) { editor.toggleBladeMode() },
+            EditorShortcut(key: "m", modifiers: []) { editor.addMarker() },
+            EditorShortcut(key: .delete, modifiers: []) { editor.deleteSelectedSegment() },
         ]
+    }
+}
+
+// MARK: - MarkerFlag Shape
+
+private struct MarkerFlag: View {
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Triangle()
+                .fill(color)
+            Triangle()
+                .stroke(color.opacity(0.8), lineWidth: 1)
+        }
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -706,4 +1267,10 @@ private extension View {
     func onScrollWheel(_ handler: @escaping (Double, CGPoint) -> Void) -> some View {
         modifier(ScrollWheelModifier(handler: handler))
     }
+}
+
+// MARK: - Zoom Resize Edge
+
+private enum ZoomResizeEdge {
+    case left, right
 }

@@ -183,6 +183,15 @@ actor CursorTrackingService {
 
         buffer.storeEventTap(tap, source: source)
 
+        // Seed the initial cursor position at t=0 so the editor always has
+        // data from the very start of the recording. Without this, cursor
+        // data only begins when the first mouse event is delivered, which
+        // can be delayed if the main run loop is busy (e.g. webcam setup).
+        if let syntheticEvent = CGEvent(source: nil) {
+            let pos = syntheticEvent.location
+            buffer.append(CursorEvent(t: 0.0, x: Double(pos.x), y: Double(pos.y), click: nil))
+        }
+
         Self.logger.info("Cursor tracking started")
         return true
     }
@@ -238,8 +247,6 @@ actor CursorTrackingService {
 
     private func finalizeData() -> CursorTrackingData {
         flushBuffer()
-        let data = CursorTrackingData(framerate: framerate, events: collectedEvents)
-        collectedEvents.removeAll()
-        return data
+        return CursorTrackingData(framerate: framerate, events: collectedEvents)
     }
 }

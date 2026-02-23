@@ -47,6 +47,7 @@ final class EditorWindowController {
 
         window.center()
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
 
         self.window = window
 

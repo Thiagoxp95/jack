@@ -11,6 +11,8 @@ struct ExportConfiguration {
     let codec: VideoCodec
     let quality: ExportQuality
     let resolution: ExportResolution
+    let fileFormat: ExportFileFormat
+    let aspectRatio: ExportAspectRatio
     let outputURL: URL
 }
 
@@ -45,40 +47,143 @@ enum ExportError: LocalizedError {
     }
 }
 
+// MARK: - ResumeOnce
+
+/// Thread-safe single-use continuation resumer.
+/// Prevents double-resume crashes when cancel races with normal completion.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private let continuation: CheckedContinuation<Void, Error>
+
+    init(_ continuation: CheckedContinuation<Void, Error>) {
+        self.continuation = continuation
+    }
+
+    func succeed() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        continuation.resume()
+    }
+
+    func fail(_ error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        continuation.resume(throwing: error)
+    }
+}
+
 // MARK: - ExportService
 
-actor ExportService {
+/// Exports recorded video with Metal-rendered effects (zoom, cursor, click highlights).
+///
+/// Architecture: all tracks (video + audio) processed via `requestMediaDataWhenReady`
+/// on dedicated serial GCD queues. A `DispatchGroup` coordinates completion, and
+/// `withCheckedThrowingContinuation` bridges back to `async throws`.
+/// Video frames use a zero-copy Metal pipeline: the GPU renders directly into
+/// IOSurface-backed pixel buffers from the writer's pool.
+final class ExportService: @unchecked Sendable {
 
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.kinshasa",
         category: "ExportService"
     )
 
+    // MARK: - Instance Properties (retained for lifetime of export)
+
+    private var writer: AVAssetWriter?
+    private var reader: AVAssetReader?
+    private var videoInput: AVAssetWriterInput?
+    private var videoReaderOutput: AVAssetReaderTrackOutput?
+    private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var audioPairs: [(input: AVAssetWriterInput, readerOutput: AVAssetReaderTrackOutput, reader: AVAssetReader, asset: AVURLAsset)] = []
+    private var renderer: MetalVideoRenderer?
+    private var metalTextureCache: CVMetalTextureCache?
+
+    private var _isCancelled = false
+    private let cancelLock = NSLock()
+
+    /// Thread-safe cancellation flag. Written from the caller's thread,
+    /// read from GCD export queues.
+    private var isCancelled: Bool {
+        cancelLock.lock()
+        defer { cancelLock.unlock() }
+        return _isCancelled
+    }
+
+    // MARK: - Cancel
+
+    func cancel() {
+        cancelLock.lock()
+        _isCancelled = true
+        cancelLock.unlock()
+    }
+
+    // MARK: - Zero-Copy Texture Helper
+
+    /// Creates a Metal texture backed by the same IOSurface memory as the pixel buffer.
+    /// GPU writes go directly into the pixel buffer — no blit or memcpy needed.
+    private func makeOutputTexture(from pixelBuffer: CVPixelBuffer, size: CGSize) -> MTLTexture? {
+        guard let cache = metalTextureCache else { return nil }
+
+        var cvTexture: CVMetalTexture?
+        let status = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            cache,
+            pixelBuffer,
+            nil,
+            .bgra8Unorm,
+            Int(size.width),
+            Int(size.height),
+            0,
+            &cvTexture
+        )
+
+        guard status == kCVReturnSuccess, let unwrapped = cvTexture else {
+            return nil
+        }
+
+        return CVMetalTextureGetTexture(unwrapped)
+    }
+
     // MARK: - Export With Effects
 
-    /// Exports the edited recording with Metal-rendered effects applied.
-    ///
-    /// - Parameters:
-    ///   - session: The recording session containing source file paths.
-    ///   - editor: The video editor controller with edit state (cuts, zoom, cursor settings).
-    ///   - config: Export configuration (codec, quality, resolution, output URL).
-    ///   - progress: A callback reporting export progress from 0.0 to 1.0.
     func exportWithEffects(
         session: RecordingSession,
         editor: VideoEditorController,
         config: ExportConfiguration,
         progress: @Sendable @escaping (Double) -> Void
     ) async throws {
-        // Create the Metal renderer
-        guard let renderer = MetalVideoRenderer() else {
+        // 1. Setup Metal renderer
+        guard let metalRenderer = MetalVideoRenderer() else {
             throw ExportError.metalInitFailed
         }
+        renderer = metalRenderer
 
-        // Snapshot editor state from the main actor
+        // Create texture cache for zero-copy output path
+        var cache: CVMetalTextureCache?
+        let cacheStatus = CVMetalTextureCacheCreate(
+            kCFAllocatorDefault,
+            nil,
+            metalRenderer.device,
+            nil,
+            &cache
+        )
+        guard cacheStatus == kCVReturnSuccess, let validCache = cache else {
+            throw ExportError.metalInitFailed
+        }
+        metalTextureCache = validCache
+
+        // 2. Snapshot editor state on MainActor
         let editorState = await MainActor.run {
             EditorSnapshot(
-                cuts: editor.cuts,
+                segments: editor.segments,
                 zoomKeyframes: editor.zoomKeyframes,
+                markers: editor.markers,
                 cursorScale: editor.cursorScale,
                 cursorStyle: editor.cursorStyle,
                 clickHighlightEnabled: editor.clickHighlightEnabled,
@@ -92,17 +197,49 @@ actor ExportService {
                 webcamScale: editor.webcamScale,
                 webcamPositionX: editor.webcamPositionX,
                 webcamPositionY: editor.webcamPositionY,
-                inPoint: editor.inPoint,
-                outPoint: editor.outPoint
+                webcamStartOffset: editor.webcamStartOffset
             )
         }
 
-        // Load cursor data from editor
         let cursorData: CursorTrackingData? = await MainActor.run {
             editor.cursorData
         }
 
-        // Set up source asset and reader
+        // 2b. Pre-render cursor texture for Metal compositing
+        let cursorTexture = metalRenderer.createCursorTexture(style: editorState.cursorStyle)
+
+        // 2c. Set up webcam reader if enabled
+        var webcamReaderOutput: AVAssetReaderTrackOutput?
+        var webcamAssetReader: AVAssetReader?
+        if editorState.webcamEnabled {
+            let webcamURL = session.webcamVideoURL
+            if FileManager.default.fileExists(atPath: webcamURL.path) {
+                do {
+                    let webcamAsset = AVURLAsset(url: webcamURL)
+                    let webcamTracks = try await webcamAsset.loadTracks(withMediaType: .video)
+                    if let webcamTrack = webcamTracks.first {
+                        let reader = try AVAssetReader(asset: webcamAsset)
+                        let output = AVAssetReaderTrackOutput(
+                            track: webcamTrack,
+                            outputSettings: [
+                                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                            ]
+                        )
+                        output.alwaysCopiesSampleData = false
+                        if reader.canAdd(output) {
+                            reader.add(output)
+                            reader.startReading()
+                            webcamAssetReader = reader
+                            webcamReaderOutput = output
+                        }
+                    }
+                } catch {
+                    Self.logger.warning("Failed to set up webcam reader: \(error)")
+                }
+            }
+        }
+
+        // 3. Load source asset
         let sourceAsset = AVURLAsset(url: session.screenVideoURL)
         let duration: CMTime
         let videoTrack: AVAssetTrack
@@ -128,15 +265,81 @@ actor ExportService {
         }
 
         let totalDuration = duration.seconds
-        let outputSize = resolvedSize(natural: naturalSize, resolution: config.resolution)
 
-        // Set up AVAssetReader
-        let reader: AVAssetReader
+        // Compute canvas size, content size, and content offset.
+        // When an aspect ratio is selected AND a resolution is set, the resolution
+        // target applies to the canvas dimensions (the full output including bars).
+        let canvasSize: CGSize
+        let contentSize: CGSize
+        let contentOffset: CGPoint
+
+        if let targetRatio = config.aspectRatio.ratio {
+            let sourceAspect = naturalSize.width / naturalSize.height
+
+            // Determine canvas dimensions — resolution targets the canvas
+            let rawCanvas: CGSize
+            switch config.resolution {
+            case .original:
+                // Expand from natural size to fill the target aspect ratio
+                if sourceAspect > targetRatio {
+                    rawCanvas = CGSize(width: naturalSize.width,
+                                       height: (naturalSize.width / targetRatio).rounded(.down))
+                } else {
+                    rawCanvas = CGSize(width: (naturalSize.height * targetRatio).rounded(.down),
+                                       height: naturalSize.height)
+                }
+            case .p1080:
+                rawCanvas = CGSize(width: (1080.0 * targetRatio).rounded(.down), height: 1080)
+            case .p720:
+                rawCanvas = CGSize(width: (720.0 * targetRatio).rounded(.down), height: 720)
+            }
+
+            // Ensure even dimensions for video codecs
+            canvasSize = CGSize(
+                width: rawCanvas.width - rawCanvas.width.truncatingRemainder(dividingBy: 2),
+                height: rawCanvas.height - rawCanvas.height.truncatingRemainder(dividingBy: 2)
+            )
+
+            // Fit the source content inside the canvas maintaining its native aspect ratio
+            if sourceAspect > targetRatio {
+                // Source wider → match canvas width, content shorter
+                let h = (canvasSize.width / sourceAspect).rounded(.down)
+                contentSize = CGSize(width: canvasSize.width,
+                                     height: h - h.truncatingRemainder(dividingBy: 2))
+            } else {
+                // Source taller → match canvas height, content narrower
+                let w = (canvasSize.height * sourceAspect).rounded(.down)
+                contentSize = CGSize(width: w - w.truncatingRemainder(dividingBy: 2),
+                                     height: canvasSize.height)
+            }
+
+            contentOffset = CGPoint(
+                x: (canvasSize.width - contentSize.width) / 2,
+                y: (canvasSize.height - contentSize.height) / 2
+            )
+        } else {
+            contentSize = resolvedSize(natural: naturalSize, resolution: config.resolution)
+            canvasSize = contentSize
+            contentOffset = .zero
+        }
+
+        let outputSize = canvasSize
+
+        // Cursor events are in screen-point coordinates (CGEvent.location), but the
+        // video is captured at 2× (or Nx) resolution. Compute scale factors to map
+        // point-space cursor positions into output pixel coordinates.
+        let screenSize = session.screenSize
+        let coordScaleX: CGFloat = screenSize.width > 0 ? contentSize.width / screenSize.width : 1.0
+        let coordScaleY: CGFloat = screenSize.height > 0 ? contentSize.height / screenSize.height : 1.0
+
+        // 4. Set up AVAssetReader
+        let assetReader: AVAssetReader
         do {
-            reader = try AVAssetReader(asset: sourceAsset)
+            assetReader = try AVAssetReader(asset: sourceAsset)
         } catch {
             throw ExportError.assetReaderSetupFailed(error.localizedDescription)
         }
+        reader = assetReader
 
         let readerOutputSettings: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
@@ -146,226 +349,542 @@ actor ExportService {
             outputSettings: readerOutputSettings
         )
         readerOutput.alwaysCopiesSampleData = false
+        videoReaderOutput = readerOutput
 
-        guard reader.canAdd(readerOutput) else {
+        guard assetReader.canAdd(readerOutput) else {
             throw ExportError.assetReaderSetupFailed("Cannot add video output to reader")
         }
-        reader.add(readerOutput)
+        assetReader.add(readerOutput)
 
-        // Set up AVAssetWriter
+        // 5. Set up AVAssetWriter
         let fm = FileManager.default
         if fm.fileExists(atPath: config.outputURL.path) {
             try? fm.removeItem(at: config.outputURL)
         }
 
-        let writer: AVAssetWriter
+        let assetWriter: AVAssetWriter
         do {
-            writer = try AVAssetWriter(outputURL: config.outputURL, fileType: .mp4)
+            assetWriter = try AVAssetWriter(outputURL: config.outputURL, fileType: config.fileFormat.avFileType)
         } catch {
             throw ExportError.assetWriterSetupFailed(error.localizedDescription)
         }
+        writer = assetWriter
 
+        // 6. Create video input + pixel buffer adaptor
         let videoSettings = videoWriterSettings(
             codec: config.codec,
             quality: config.quality,
             size: outputSize
         )
-        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        videoInput.expectsMediaDataInRealTime = false
+        let vidInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        vidInput.expectsMediaDataInRealTime = false
+        videoInput = vidInput
 
         let pixelBufferAttributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: Int(outputSize.width),
             kCVPixelBufferHeightKey as String: Int(outputSize.height),
             kCVPixelBufferMetalCompatibilityKey as String: true,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
         ]
-        let pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: videoInput,
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: vidInput,
             sourcePixelBufferAttributes: pixelBufferAttributes
         )
+        pixelBufferAdaptor = adaptor
 
-        guard writer.canAdd(videoInput) else {
+        guard assetWriter.canAdd(vidInput) else {
             throw ExportError.assetWriterSetupFailed("Cannot add video input to writer")
         }
-        writer.add(videoInput)
+        assetWriter.add(vidInput)
 
-        // Add audio tracks
-        let audioInputs = try await addAudioTracks(to: writer, session: session, editor: editorState)
+        // 7. Add audio tracks (passthrough — no re-encoding)
+        try await addAudioTracks(to: assetWriter, session: session, editor: editorState)
 
-        // Start reading and writing
-        guard reader.startReading() else {
+        // 8. Start reading and writing
+        guard assetReader.startReading() else {
             throw ExportError.assetReaderSetupFailed(
-                reader.error?.localizedDescription ?? "Unknown reader error"
+                assetReader.error?.localizedDescription ?? "Unknown reader error"
             )
         }
 
-        guard writer.startWriting() else {
+        guard assetWriter.startWriting() else {
             throw ExportError.assetWriterSetupFailed(
-                writer.error?.localizedDescription ?? "Unknown writer error"
+                assetWriter.error?.localizedDescription ?? "Unknown writer error"
             )
         }
-        writer.startSession(atSourceTime: .zero)
+        assetWriter.startSession(atSourceTime: .zero)
 
-        // Start audio processing concurrently to avoid AVAssetWriter interleaving deadlock.
-        // The writer expects interleaved audio+video data. If we only feed video first,
-        // the writer's buffer fills up and it refuses more video until audio catches up.
-        var audioCompletionTasks: [Task<Void, Never>] = []
-        for audioInput in audioInputs {
-            let task = Self.startAudioProcessing(
-                writerInput: audioInput.input,
-                readerOutput: audioInput.readerOutput,
-                reader: audioInput.reader,
-                asset: audioInput.asset
-            )
-            audioCompletionTasks.append(task)
-        }
+        // 9. Process all tracks via requestMediaDataWhenReady + DispatchGroup.
+        //    Video and each audio track run on dedicated serial queues.
+        //    DispatchGroup coordinates completion; ResumeOnce bridges back to async.
 
-        // Process video frames
-        var previousCursorPos = CGPoint(x: -100, y: -100)
+        let completionGroup = DispatchGroup()
 
-        while let sampleBuffer = readerOutput.copyNextSampleBuffer() {
-            // Check for cancellation
-            if Task.isCancelled {
-                reader.cancelReading()
-                writer.cancelWriting()
-                throw ExportError.cancelled
+        // Prepare nonisolated(unsafe) captures for GCD callbacks
+        nonisolated(unsafe) let capturedReaderOutput = readerOutput
+        nonisolated(unsafe) let capturedVidInput = vidInput
+        nonisolated(unsafe) let capturedAdaptor = adaptor
+        nonisolated(unsafe) let capturedWriter = assetWriter
+        nonisolated(unsafe) let capturedRenderer = metalRenderer
+        nonisolated(unsafe) let capturedCursorTexture = cursorTexture
+        nonisolated(unsafe) let capturedWebcamOutput = webcamReaderOutput
+        nonisolated(unsafe) let capturedWebcamReader = webcamAssetReader
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let resumer = ResumeOnce(continuation)
+
+            // Enter all groups upfront before any processing starts
+            completionGroup.enter() // video
+            for _ in self.audioPairs {
+                completionGroup.enter()
             }
 
-            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            let timeSeconds = presentationTime.seconds
+            // --- Video track ---
+            let videoQueue = DispatchQueue(label: "com.kinshasa.export.video")
+            nonisolated(unsafe) var previousCursorPos = CGPoint(x: -100, y: -100)
+            nonisolated(unsafe) var lastWebcamCGImage: CGImage? = nil
+            nonisolated(unsafe) var lastWebcamTime: Double = -1.0
+            // Use the same broadcast-style lazy camera as the preview so zoom
+            // framing matches exactly. The tracker is only called from videoQueue.
+            nonisolated(unsafe) let exportCameraTracker = CameraTracker()
 
-            // Skip frames in cut regions
-            if isInCutRegion(time: timeSeconds, cuts: editorState.cuts) {
-                continue
-            }
+            capturedVidInput.requestMediaDataWhenReady(on: videoQueue) { [self] in
+                while capturedVidInput.isReadyForMoreMediaData {
+                    // Check cancellation
+                    if self.isCancelled {
+                        capturedWebcamReader?.cancelReading()
+                        capturedVidInput.markAsFinished()
+                        completionGroup.leave()
+                        resumer.fail(ExportError.cancelled)
+                        return
+                    }
 
-            // Report progress
-            if totalDuration > 0 {
-                progress(min(timeSeconds / totalDuration, 1.0))
-            }
+                    // Check writer health
+                    guard capturedWriter.status == .writing else {
+                        capturedVidInput.markAsFinished()
+                        completionGroup.leave()
+                        resumer.fail(ExportError.writerFailed(
+                            capturedWriter.error?.localizedDescription ?? "Writer not in writing state"
+                        ))
+                        return
+                    }
 
-            // Get source pixel buffer
-            guard let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-                continue
-            }
+                    guard let sampleBuffer = capturedReaderOutput.copyNextSampleBuffer() else {
+                        // End of video stream
+                        capturedVidInput.markAsFinished()
+                        completionGroup.leave()
+                        return
+                    }
 
-            // Compute zoom level at this timestamp
-            let zoomLevel = MetalVideoRenderer.interpolateZoom(
-                at: timeSeconds,
-                keyframes: editorState.zoomKeyframes,
-                rampDuration: MetalVideoRenderer.cinematicRampDuration
-            )
+                    autoreleasepool {
+                        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                        let timeSeconds = presentationTime.seconds
 
-            // Compute cursor position
-            var cursorPosition: CGPoint?
-            if let cursorData, !cursorData.events.isEmpty {
-                cursorPosition = interpolatedCursorPosition(
-                    at: timeSeconds,
-                    events: cursorData.events
-                )
+                        // Skip frames in disabled segments
+                        if self.isInDisabledSegment(time: timeSeconds, segments: editorState.segments) {
+                            return // from autoreleasepool, not from outer while
+                        }
 
-                if editorState.cursorSmoothingEnabled, let pos = cursorPosition {
-                    let smoothed = MetalVideoRenderer.smoothCursorPosition(
-                        previous: previousCursorPos,
-                        current: pos
-                    )
-                    cursorPosition = smoothed
-                    previousCursorPos = smoothed
-                }
-            }
+                        // Report progress
+                        if totalDuration > 0 {
+                            progress(min(timeSeconds / totalDuration, 1.0))
+                        }
 
-            // Compute click highlight phase
-            var clickPhase: Double = 0
-            if editorState.clickHighlightEnabled, let cursorData {
-                let clickWindow = 0.15
-                if let clickEvent = cursorData.events.first(where: {
-                    $0.click != nil && abs($0.t - timeSeconds) < clickWindow
-                }) {
-                    let elapsed = timeSeconds - clickEvent.t
-                    if elapsed >= 0 && elapsed < clickWindow {
-                        clickPhase = 1.0 - (elapsed / clickWindow)
+                        // Get source pixel buffer
+                        guard let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                            return
+                        }
+
+                        // Compute zoom level
+                        let zoomLevel = MetalVideoRenderer.interpolateZoom(
+                            at: timeSeconds,
+                            keyframes: editorState.zoomKeyframes,
+                            rampDuration: MetalVideoRenderer.cinematicRampDuration
+                        )
+
+                        // Compute cursor position (map from screen points → output pixels)
+                        var cursorPosition: CGPoint?
+                        // Raw position before smoothing — used for CameraTracker
+                        // to match preview behavior (preview feeds raw cursor to tracker).
+                        var rawCursorContentPos: CGPoint?
+                        if let cursorData, !cursorData.events.isEmpty {
+                            cursorPosition = self.interpolatedCursorPosition(
+                                at: timeSeconds,
+                                events: cursorData.events
+                            )
+
+                            // Scale from point coordinates to output pixel coordinates
+                            if let pos = cursorPosition {
+                                let scaled = CGPoint(
+                                    x: pos.x * coordScaleX,
+                                    y: pos.y * coordScaleY
+                                )
+                                cursorPosition = scaled
+                                rawCursorContentPos = scaled
+                            }
+
+                            if editorState.cursorSmoothingEnabled, let pos = cursorPosition {
+                                let smoothed = MetalVideoRenderer.smoothCursorPosition(
+                                    previous: previousCursorPos,
+                                    current: pos
+                                )
+                                cursorPosition = smoothed
+                                previousCursorPos = smoothed
+                            }
+                        }
+
+                        // Compute click highlight phase (expanding ring)
+                        var clickPhase: Double = 0
+                        // Compute cursor click scale (press animation matching CursorOverlayView)
+                        var cursorClickScale: Double = 1.0
+                        if editorState.clickHighlightEnabled, let cursorData {
+                            let clickWindow = 0.15
+                            let clickAnimDuration = 0.25
+                            let clickPressDepth = 0.25
+
+                            if let clickEvent = cursorData.events.first(where: {
+                                $0.click != nil && $0.t <= timeSeconds && (timeSeconds - $0.t) < max(clickWindow, clickAnimDuration)
+                            }) {
+                                // Click highlight ring
+                                let elapsed = timeSeconds - clickEvent.t
+                                if elapsed >= 0 && elapsed < clickWindow {
+                                    clickPhase = 1.0 - (elapsed / clickWindow)
+                                }
+
+                                // Cursor press animation (shrink then bounce back)
+                                if elapsed >= 0 && elapsed < clickAnimDuration {
+                                    let progress = elapsed / clickAnimDuration
+                                    let pressAmount = sin(.pi * sqrt(progress))
+                                    cursorClickScale = 1.0 - clickPressDepth * pressAmount
+                                }
+                            }
+                        }
+
+                        // Use the same broadcast-style lazy camera as the preview.
+                        // CameraTracker produces a normalized anchor (0-1) that the
+                        // shader uses as zoom center. Feed RAW cursor (before smoothing)
+                        // to match preview behavior where CameraTracker gets unsmoothed input.
+                        let cursorNormX: Double
+                        let cursorNormY: Double
+                        if let rawPos = rawCursorContentPos {
+                            cursorNormX = rawPos.x / contentSize.width
+                            cursorNormY = rawPos.y / contentSize.height
+                        } else {
+                            cursorNormX = 0.5
+                            cursorNormY = 0.5
+                        }
+
+                        let anchor = exportCameraTracker.update(
+                            cursorNormX: cursorNormX,
+                            cursorNormY: cursorNormY,
+                            zoomLevel: zoomLevel,
+                            timestamp: timeSeconds
+                        )
+                        let zoomCenter = CGPoint(x: anchor.x, y: anchor.y)
+
+                        // Transform cursor position from source-space to zoomed content-space.
+                        // The shader zooms the video content, so the cursor must track where
+                        // its source position appears in the zoomed view.
+                        if zoomLevel > 1.0, let pos = cursorPosition {
+                            let normalizedX = pos.x / contentSize.width
+                            let normalizedY = pos.y / contentSize.height
+                            // Inverse of shader's: sourceUV = center + (outUV - center) * invZoom
+                            let zoomedX = zoomCenter.x + (normalizedX - zoomCenter.x) * zoomLevel
+                            let zoomedY = zoomCenter.y + (normalizedY - zoomCenter.y) * zoomLevel
+                            cursorPosition = CGPoint(
+                                x: zoomedX * contentSize.width + contentOffset.x,
+                                y: zoomedY * contentSize.height + contentOffset.y
+                            )
+                        } else if let pos = cursorPosition {
+                            // No zoom: offset cursor into canvas space
+                            cursorPosition = CGPoint(
+                                x: pos.x + contentOffset.x,
+                                y: pos.y + contentOffset.y
+                            )
+                        }
+
+                        let clickColor = SIMD4<Float>(
+                            1.0, 0.8, 0.0,
+                            Float(editorState.clickHighlightOpacity)
+                        )
+
+                        // Zero-copy render path:
+                        // 1. Get pixel buffer from writer's pool (IOSurface-backed)
+                        guard let pool = capturedAdaptor.pixelBufferPool else {
+                            Self.logger.warning("Pixel buffer pool unavailable at \(timeSeconds)s")
+                            return
+                        }
+                        var outputPixelBuffer: CVPixelBuffer?
+                        let pbStatus = CVPixelBufferPoolCreatePixelBuffer(
+                            kCFAllocatorDefault, pool, &outputPixelBuffer
+                        )
+                        guard pbStatus == kCVReturnSuccess, let outputPB = outputPixelBuffer else {
+                            Self.logger.warning("Failed to get pixel buffer from pool at \(timeSeconds)s")
+                            return
+                        }
+
+                        // 2. Create Metal texture from the pixel buffer's IOSurface
+                        guard let outputTexture = self.makeOutputTexture(from: outputPB, size: outputSize) else {
+                            Self.logger.warning("Failed to create output texture at \(timeSeconds)s")
+                            return
+                        }
+
+                        // 3. Render directly into the pixel buffer's memory — zero CPU copies.
+                        // Cursor overlay is rendered via Core Graphics (step 3b) for
+                        // pixel-perfect vector quality matching the SwiftUI preview.
+                        // Click highlight still renders in Metal using cursorPosition.
+                        let cursorSizeScale = coordScaleX * zoomLevel
+                        let success = capturedRenderer.renderIntoTexture(
+                            sourcePixelBuffer: sourcePixelBuffer,
+                            outputTexture: outputTexture,
+                            zoomCenter: zoomCenter,
+                            zoomLevel: zoomLevel,
+                            cursorPosition: cursorPosition,
+                            cursorScale: editorState.cursorScale * cursorSizeScale,
+                            cursorClickScale: cursorClickScale,
+                            renderCursorOverlay: false,
+                            clickPhase: clickPhase,
+                            clickColor: clickColor,
+                            clickRadius: 30.0 * cursorSizeScale,
+                            cursorTexture: capturedCursorTexture,
+                            contentOffset: contentOffset
+                        )
+
+                        guard success else {
+                            Self.logger.warning("Metal render failed for frame at \(timeSeconds)s")
+                            return
+                        }
+
+                        // 3b. Composite cursor using Core Graphics for crisp vector rendering
+                        if let pos = cursorPosition {
+                            Self.compositeCursor(
+                                onto: outputPB,
+                                outputSize: outputSize,
+                                position: pos,
+                                cursorScale: editorState.cursorScale,
+                                cursorSizeScale: cursorSizeScale,
+                                clickScale: cursorClickScale,
+                                style: editorState.cursorStyle
+                            )
+                        }
+
+                        // 3c. Composite webcam overlay (CPU, Core Graphics)
+                        // Apply webcamStartOffset: webcam starts recording AFTER screen,
+                        // so subtract the delay to align webcam with composition time.
+                        if let webcamOut = capturedWebcamOutput {
+                            let webcamTimeSeconds = max(0, timeSeconds - editorState.webcamStartOffset)
+                            if let webcamImage = Self.advanceWebcamReader(
+                                output: webcamOut,
+                                toTime: webcamTimeSeconds,
+                                lastTime: &lastWebcamTime,
+                                lastImage: &lastWebcamCGImage
+                            ) {
+                                Self.compositeWebcam(
+                                    image: webcamImage,
+                                    onto: outputPB,
+                                    outputSize: outputSize,
+                                    contentSize: contentSize,
+                                    contentOffset: contentOffset,
+                                    webcamScale: editorState.webcamScale,
+                                    webcamPositionX: editorState.webcamPositionX,
+                                    webcamPositionY: editorState.webcamPositionY
+                                )
+                            }
+                        }
+
+                        // 4. Append — the pixel buffer already contains the rendered data
+                        guard capturedWriter.status == .writing else { return }
+                        capturedAdaptor.append(outputPB, withPresentationTime: presentationTime)
                     }
                 }
             }
 
-            // Zoom center follows cursor when zoomed, with edge clamping
-            let zoomCenter: CGPoint
-            if zoomLevel > 1.0, let pos = cursorPosition {
-                let rawCenterX = pos.x / naturalSize.width
-                let rawCenterY = pos.y / naturalSize.height
-                let invZoom = 1.0 / zoomLevel
-                let halfView = invZoom * 0.5
-                zoomCenter = CGPoint(
-                    x: max(halfView, min(1.0 - halfView, rawCenterX)),
-                    y: max(halfView, min(1.0 - halfView, rawCenterY))
-                )
-            } else {
-                zoomCenter = CGPoint(x: 0.5, y: 0.5)
+            // --- Audio tracks ---
+            for pair in self.audioPairs {
+                let audioQueue = DispatchQueue(label: "com.kinshasa.export.audio.\(UUID().uuidString)")
+                nonisolated(unsafe) let audioWriterInput = pair.input
+                nonisolated(unsafe) let audioReaderOutput = pair.readerOutput
+                audioWriterInput.requestMediaDataWhenReady(on: audioQueue) { [self] in
+                    while audioWriterInput.isReadyForMoreMediaData {
+                        if self.isCancelled {
+                            audioWriterInput.markAsFinished()
+                            completionGroup.leave()
+                            return
+                        }
+                        guard capturedWriter.status == .writing else {
+                            audioWriterInput.markAsFinished()
+                            completionGroup.leave()
+                            return
+                        }
+                        if let sampleBuffer = audioReaderOutput.copyNextSampleBuffer() {
+                            _ = autoreleasepool {
+                                audioWriterInput.append(sampleBuffer)
+                            }
+                        } else {
+                            audioWriterInput.markAsFinished()
+                            completionGroup.leave()
+                            return
+                        }
+                    }
+                }
             }
 
-            let clickColor = SIMD4<Float>(
-                1.0, 0.8, 0.0,
-                Float(editorState.clickHighlightOpacity)
-            )
+            // --- Finalization ---
+            // When all tracks finish (video + audio), finalize the writer.
+            completionGroup.notify(queue: .global()) { [self] in
+                // Keep readers/assets alive until processing completes
+                withExtendedLifetime(self.audioPairs) {}
+                withExtendedLifetime((capturedWebcamReader, capturedWebcamOutput)) {}
 
-            // Render through Metal
-            guard let outputTexture = renderer.renderFrame(
-                sourcePixelBuffer: sourcePixelBuffer,
-                outputSize: outputSize,
-                zoomCenter: zoomCenter,
-                zoomLevel: zoomLevel,
-                cursorPosition: cursorPosition,
-                cursorScale: editorState.cursorScale,
-                clickPhase: clickPhase,
-                clickColor: clickColor,
-                clickRadius: 30.0
-            ) else {
-                Self.logger.warning("Metal render failed for frame at \(timeSeconds)s")
-                continue
+                if self.isCancelled {
+                    capturedWriter.cancelWriting()
+                    resumer.fail(ExportError.cancelled)
+                    return
+                }
+
+                capturedWriter.finishWriting {
+                    if capturedWriter.status == .failed {
+                        resumer.fail(ExportError.writerFailed(
+                            capturedWriter.error?.localizedDescription ?? "Unknown writer error"
+                        ))
+                    } else {
+                        resumer.succeed()
+                    }
+                }
             }
-
-            // Wait for the video input to be ready
-            while !videoInput.isReadyForMoreMediaData {
-                try await Task.sleep(nanoseconds: 10_000_000) // 10ms
-            }
-
-            // Copy rendered texture to a pixel buffer for writing
-            guard let outputPixelBuffer = pixelBufferFromTexture(
-                outputTexture,
-                device: renderer.device,
-                adaptor: pixelBufferAdaptor
-            ) else {
-                Self.logger.warning("Failed to create pixel buffer from texture at \(timeSeconds)s")
-                continue
-            }
-
-            pixelBufferAdaptor.append(outputPixelBuffer, withPresentationTime: presentationTime)
         }
 
-        // Finalize video
-        videoInput.markAsFinished()
-
-        // Wait for concurrent audio processing to complete
-        // (audio inputs mark themselves as finished in their callbacks)
-        for task in audioCompletionTasks {
-            await task.value
-        }
-
-        await writer.finishWriting()
-
-        if writer.status == .failed {
-            throw ExportError.writerFailed(
-                writer.error?.localizedDescription ?? "Unknown writer error"
-            )
+        // Flush texture cache to release CVMetalTexture references
+        if let cache = metalTextureCache {
+            CVMetalTextureCacheFlush(cache, 0)
         }
 
         progress(1.0)
         Self.logger.info("Export completed to \(config.outputURL.path)")
     }
 
+    // MARK: - Audio Track Setup
+
+    private func addAudioTracks(
+        to writer: AVAssetWriter,
+        session: RecordingSession,
+        editor: EditorSnapshot
+    ) async throws {
+        let fm = FileManager.default
+
+        // Microphone audio
+        if !editor.micMuted && fm.fileExists(atPath: session.micAudioURL.path) {
+            try await addAudioPair(
+                url: session.micAudioURL,
+                writer: writer,
+                label: "mic"
+            )
+        }
+
+        // System audio
+        if !editor.systemMuted && fm.fileExists(atPath: session.systemAudioURL.path) {
+            try await addAudioPair(
+                url: session.systemAudioURL,
+                writer: writer,
+                label: "system"
+            )
+        }
+    }
+
+    /// Adds an audio reader/writer pair.
+    /// For compressed sources (AAC), uses passthrough (no re-encoding).
+    /// For uncompressed sources (PCM), decodes and re-encodes to AAC.
+    private func addAudioPair(
+        url: URL,
+        writer: AVAssetWriter,
+        label: String
+    ) async throws {
+        let asset = AVURLAsset(url: url)
+        let tracks: [AVAssetTrack]
+        do {
+            tracks = try await asset.loadTracks(withMediaType: .audio)
+        } catch {
+            Self.logger.warning("Failed to load \(label) audio tracks: \(error)")
+            return
+        }
+
+        guard let audioTrack = tracks.first else {
+            Self.logger.info("No \(label) audio track found, skipping")
+            return
+        }
+
+        // Detect whether the source is compressed (AAC) or uncompressed (PCM).
+        let formatDescriptions = try await audioTrack.load(.formatDescriptions)
+        let isCompressed: Bool
+        if let desc = formatDescriptions.first {
+            let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)
+            let formatID = asbd?.pointee.mFormatID ?? 0
+            isCompressed = formatID != kAudioFormatLinearPCM
+        } else {
+            isCompressed = true // Assume compressed if we can't tell
+        }
+
+        let audioReader: AVAssetReader
+        do {
+            audioReader = try AVAssetReader(asset: asset)
+        } catch {
+            Self.logger.warning("Failed to create \(label) audio reader: \(error)")
+            return
+        }
+
+        let readerOutput: AVAssetReaderTrackOutput
+        let audioInput: AVAssetWriterInput
+
+        if isCompressed {
+            // Passthrough: compressed AAC buffers copied directly
+            readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
+            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
+        } else {
+            // Decode PCM source to raw samples, then encode to AAC for export
+            let decodingSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsFloatKey: false,
+            ]
+            readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: decodingSettings)
+
+            let encodingSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 128_000,
+            ]
+            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: encodingSettings)
+        }
+
+        audioInput.expectsMediaDataInRealTime = false
+
+        guard audioReader.canAdd(readerOutput) else {
+            Self.logger.warning("Cannot add \(label) audio reader output")
+            return
+        }
+        audioReader.add(readerOutput)
+
+        guard audioReader.startReading() else {
+            Self.logger.warning("Cannot start reading \(label) audio")
+            return
+        }
+
+        guard writer.canAdd(audioInput) else {
+            Self.logger.warning("Cannot add \(label) audio input to writer")
+            return
+        }
+        writer.add(audioInput)
+
+        audioPairs.append((input: audioInput, readerOutput: readerOutput, reader: audioReader, asset: asset))
+    }
+
     // MARK: - Resolved Size
 
-    /// Calculates output dimensions maintaining aspect ratio.
     func resolvedSize(natural: CGSize, resolution: ExportResolution) -> CGSize {
         switch resolution {
         case .original:
@@ -374,7 +893,6 @@ actor ExportService {
             let targetHeight: CGFloat = 1080
             let aspect = natural.width / natural.height
             let targetWidth = (targetHeight * aspect).rounded(.down)
-            // Ensure even dimensions for video encoding
             return CGSize(
                 width: targetWidth - targetWidth.truncatingRemainder(dividingBy: 2),
                 height: targetHeight
@@ -392,7 +910,6 @@ actor ExportService {
 
     // MARK: - Video Writer Settings
 
-    /// Builds AVAssetWriter video settings dictionary.
     func videoWriterSettings(
         codec: VideoCodec,
         quality: ExportQuality,
@@ -426,7 +943,6 @@ actor ExportService {
             AVVideoAverageBitRateKey: bitRate,
         ]
 
-        // Profile level only applies to H.264; HEVC selects automatically.
         if codec == .h264 {
             compressionProperties[AVVideoProfileLevelKey] = profileLevel
         }
@@ -439,177 +955,283 @@ actor ExportService {
         ]
     }
 
-    // MARK: - Audio Track Helper
+    // MARK: - Webcam Compositing
 
-    /// Represents a paired audio writer input and reader output for processing.
-    /// Retains the asset and reader to prevent deallocation while processing.
-    private struct AudioTrackPair {
-        let input: AVAssetWriterInput
-        let readerOutput: AVAssetReaderTrackOutput
-        let reader: AVAssetReader
-        let asset: AVURLAsset
-    }
+    /// Advances the webcam reader to the given time, returning the most recent frame.
+    /// Consumes samples up to the target time, keeping the last valid frame.
+    private static func advanceWebcamReader(
+        output: AVAssetReaderTrackOutput,
+        toTime targetTime: Double,
+        lastTime: inout Double,
+        lastImage: inout CGImage?
+    ) -> CGImage? {
+        // If we're before the last consumed frame, return cached
+        if targetTime <= lastTime {
+            return lastImage
+        }
 
-    /// Adds mic and system audio writer inputs if their files exist and are not muted.
-    private func addAudioTracks(
-        to writer: AVAssetWriter,
-        session: RecordingSession,
-        editor: EditorSnapshot
-    ) async throws -> [AudioTrackPair] {
-        let audioSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 48_000,
-            AVNumberOfChannelsKey: 2,
-            AVEncoderBitRateKey: 128_000,
-        ]
+        // Consume samples until we reach the target time.
+        // Only create CGImage for the final frame to avoid wasting CPU
+        // on intermediate frames that would be immediately discarded.
+        var latestBuffer: CMSampleBuffer?
 
-        var pairs: [AudioTrackPair] = []
-        let fm = FileManager.default
+        while true {
+            guard let sampleBuffer = output.copyNextSampleBuffer() else {
+                break // End of webcam stream — keep showing last frame
+            }
 
-        // Microphone audio
-        if !editor.micMuted && fm.fileExists(atPath: session.micAudioURL.path) {
-            if let pair = try await makeAudioPair(
-                url: session.micAudioURL,
-                settings: audioSettings,
-                writer: writer,
-                label: "mic"
-            ) {
-                pairs.append(pair)
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            latestBuffer = sampleBuffer
+
+            if pts >= targetTime {
+                lastTime = pts
+                break
             }
         }
 
-        // System audio
-        if !editor.systemMuted && fm.fileExists(atPath: session.systemAudioURL.path) {
-            if let pair = try await makeAudioPair(
-                url: session.systemAudioURL,
-                settings: audioSettings,
-                writer: writer,
-                label: "system"
-            ) {
-                pairs.append(pair)
+        if let buffer = latestBuffer,
+           let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) {
+            var cgImage: CGImage?
+            VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &cgImage)
+            if let img = cgImage {
+                lastImage = img
+                lastTime = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
             }
         }
 
-        return pairs
+        return lastImage
     }
 
-    private func makeAudioPair(
-        url: URL,
-        settings: [String: Any],
-        writer: AVAssetWriter,
-        label: String
-    ) async throws -> AudioTrackPair? {
-        let asset = AVURLAsset(url: url)
-        let tracks: [AVAssetTrack]
-        do {
-            tracks = try await asset.loadTracks(withMediaType: .audio)
-        } catch {
-            Self.logger.warning("Failed to load \(label) audio tracks: \(error)")
-            return nil
+    /// Composites a webcam CGImage as a circular overlay onto a pixel buffer.
+    /// Called after Metal rendering — draws on top of the existing frame content.
+    private static func compositeWebcam(
+        image: CGImage,
+        onto pixelBuffer: CVPixelBuffer,
+        outputSize: CGSize,
+        contentSize: CGSize = .zero,
+        contentOffset: CGPoint = .zero,
+        webcamScale: Double,
+        webcamPositionX: Double,
+        webcamPositionY: Double
+    ) {
+        let width = Int(outputSize.width)
+        let height = Int(outputSize.height)
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+
+        // Create CGContext from the pixel buffer (BGRA, premultiplied alpha)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue:
+            CGBitmapInfo.byteOrder32Little.rawValue |
+            CGImageAlphaInfo.premultipliedFirst.rawValue
+        )
+        guard let ctx = CGContext(
+            data: baseAddress,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else { return }
+
+        // Flip to top-left origin (video coordinate system)
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1.0, y: -1.0)
+
+        // Calculate webcam circle geometry (matches WebcamEditorOverlay formula).
+        // Position webcam relative to content area so it isn't drawn on black bars.
+        let activeSize = contentSize.width > 0 ? contentSize : outputSize
+        let diameter = min(activeSize.width, activeSize.height) * 0.18 * webcamScale
+        let centerX = contentOffset.x + webcamPositionX * activeSize.width
+        let centerY = contentOffset.y + webcamPositionY * activeSize.height
+        let radius = diameter / 2.0
+
+        let circleRect = CGRect(
+            x: centerX - radius,
+            y: centerY - radius,
+            width: diameter,
+            height: diameter
+        )
+
+        // 1. Draw shadow behind the circle
+        ctx.saveGState()
+        // Negative height because the context is Y-flipped (top-left origin)
+        ctx.setShadow(
+            offset: CGSize(width: 0, height: -2),
+            blur: 6,
+            color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.5)
+        )
+
+        // Fill a solid circle (generates the shadow)
+        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        ctx.fillEllipse(in: circleRect)
+        ctx.restoreGState()
+
+        // 2. Clip to circle and draw webcam image (aspect fill)
+        ctx.saveGState()
+        ctx.addEllipse(in: circleRect)
+        ctx.clip()
+
+        let imgWidth = CGFloat(image.width)
+        let imgHeight = CGFloat(image.height)
+        let imgAspect = imgWidth / imgHeight
+
+        let drawRect: CGRect
+        if imgAspect > 1.0 {
+            // Image is wider: match height, crop sides
+            let drawHeight = diameter
+            let drawWidth = diameter * imgAspect
+            drawRect = CGRect(
+                x: centerX - drawWidth / 2.0,
+                y: centerY - drawHeight / 2.0,
+                width: drawWidth,
+                height: drawHeight
+            )
+        } else {
+            // Image is taller: match width, crop top/bottom
+            let drawWidth = diameter
+            let drawHeight = diameter / imgAspect
+            drawRect = CGRect(
+                x: centerX - drawWidth / 2.0,
+                y: centerY - drawHeight / 2.0,
+                width: drawWidth,
+                height: drawHeight
+            )
         }
 
-        guard let audioTrack = tracks.first else {
-            Self.logger.info("No \(label) audio track found, skipping")
-            return nil
-        }
+        // Flip the image locally to counter CGImage's bottom-up orientation
+        // in the already-flipped (top-left origin) context.
+        ctx.translateBy(x: drawRect.origin.x, y: drawRect.origin.y + drawRect.height)
+        ctx.scaleBy(x: 1.0, y: -1.0)
+        ctx.draw(image, in: CGRect(origin: .zero, size: drawRect.size))
+        ctx.restoreGState()
 
-        let reader: AVAssetReader
-        do {
-            reader = try AVAssetReader(asset: asset)
-        } catch {
-            Self.logger.warning("Failed to create \(label) audio reader: \(error)")
-            return nil
-        }
-
-        let readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
-        guard reader.canAdd(readerOutput) else {
-            Self.logger.warning("Cannot add \(label) audio reader output")
-            return nil
-        }
-        reader.add(readerOutput)
-
-        guard reader.startReading() else {
-            Self.logger.warning("Cannot start reading \(label) audio")
-            return nil
-        }
-
-        let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
-        audioInput.expectsMediaDataInRealTime = false
-
-        guard writer.canAdd(audioInput) else {
-            Self.logger.warning("Cannot add \(label) audio input to writer")
-            return nil
-        }
-        writer.add(audioInput)
-
-        return AudioTrackPair(input: audioInput, readerOutput: readerOutput, reader: reader, asset: asset)
+        // 3. White border ring
+        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.setLineWidth(2.0)
+        let borderRect = circleRect.insetBy(dx: 1.0, dy: 1.0)
+        ctx.strokeEllipse(in: borderRect)
     }
 
-    // MARK: - Audio Processing
+    // MARK: - Cursor Compositing
 
-    /// Wraps a non-Sendable value for safe transfer across concurrency boundaries.
-    /// Safety: the wrapped value must only be accessed from a single context after transfer.
-    private final class SendableBox<T>: @unchecked Sendable {
-        let value: T
-        init(_ value: T) { self.value = value }
-    }
+    /// Composites a vector-rendered cursor arrow onto a pixel buffer using Core Graphics.
+    /// Produces pixel-perfect anti-aliased results matching the SwiftUI CursorOverlayView
+    /// (which renders as vector shapes at display resolution).
+    private static func compositeCursor(
+        onto pixelBuffer: CVPixelBuffer,
+        outputSize: CGSize,
+        position: CGPoint,
+        cursorScale: Double,
+        cursorSizeScale: Double,
+        clickScale: Double,
+        style: CursorStyle
+    ) {
+        let width = Int(outputSize.width)
+        let height = Int(outputSize.height)
 
-    /// Starts audio processing on a concurrent task with its own serial DispatchQueue.
-    /// Must be `nonisolated static` so the closure doesn't capture the actor.
-    /// The `reader` and `asset` parameters are retained by the task closure to prevent
-    /// ARC from deallocating them while the callback is still reading samples.
-    private nonisolated static func startAudioProcessing(
-        writerInput: AVAssetWriterInput,
-        readerOutput: AVAssetReaderTrackOutput,
-        reader: AVAssetReader,
-        asset: AVURLAsset
-    ) -> Task<Void, Never> {
-        let writerBox = SendableBox(writerInput)
-        let readerBox = SendableBox(readerOutput)
-        let readerOwner = SendableBox(reader)
-        let assetOwner = SendableBox(asset)
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
 
-        return Task {
-            let writerInput = writerBox.value
-            let readerOutput = readerBox.value
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
 
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                nonisolated(unsafe) var finished = false
-                let queue = DispatchQueue(label: "com.kinshasa.export.audio.\(UUID().uuidString)")
-                writerInput.requestMediaDataWhenReady(on: queue) {
-                    while writerInput.isReadyForMoreMediaData {
-                        if let sampleBuffer = readerOutput.copyNextSampleBuffer() {
-                            writerInput.append(sampleBuffer)
-                        } else {
-                            if !finished {
-                                finished = true
-                                writerInput.markAsFinished()
-                                continuation.resume()
-                            }
-                            return
-                        }
-                    }
-                }
-            }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue:
+            CGBitmapInfo.byteOrder32Little.rawValue |
+            CGImageAlphaInfo.premultipliedFirst.rawValue
+        )
+        guard let ctx = CGContext(
+            data: baseAddress,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else { return }
 
-            // Keep reader and asset alive until processing completes
-            withExtendedLifetime((readerOwner, assetOwner)) {}
-        }
+        ctx.setShouldAntialias(true)
+        ctx.setAllowsAntialiasing(true)
+        ctx.interpolationQuality = .high
+
+        // Flip to top-left origin (video coordinate system)
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1.0, y: -1.0)
+
+        // Compute cursor size. In the SwiftUI preview:
+        //   frame = 14 * cursorScale * clickScale  ×  20 * cursorScale * clickScale
+        //   then .scaleEffect(zoomLevel) scales everything (including the 1.5pt stroke).
+        // cursorSizeScale = coordScaleX * zoomLevel maps points→output pixels + zoom.
+        let totalScale = cursorScale * cursorSizeScale * clickScale
+        let cursorW = 14.0 * totalScale
+        let cursorH = 20.0 * totalScale
+
+        // Build cursor arrow path at exact output pixel size.
+        // Same geometry as CursorShape in CursorOverlayView.
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: 0))
+        path.addLine(to: CGPoint(x: 0, y: cursorH * 0.85))
+        path.addLine(to: CGPoint(x: cursorW * 0.3, y: cursorH * 0.65))
+        path.addLine(to: CGPoint(x: cursorW * 0.5, y: cursorH))
+        path.addLine(to: CGPoint(x: cursorW * 0.7, y: cursorH * 0.92))
+        path.addLine(to: CGPoint(x: cursorW * 0.48, y: cursorH * 0.58))
+        path.addLine(to: CGPoint(x: cursorW * 0.9, y: cursorH * 0.55))
+        path.closeSubpath()
+
+        let fillColor = MetalVideoRenderer.cgColor(fromHex: style.fillHex)
+        let strokeColor = MetalVideoRenderer.cgColor(fromHex: style.strokeHex)
+
+        // In SwiftUI, stroke lineWidth = 1.5 (in the pre-zoom frame), then
+        // .scaleEffect(zoom) scales it. So output stroke = 1.5 * cursorSizeScale.
+        let strokeWidth = 1.5 * cursorSizeScale
+
+        // Shadow matching CursorOverlayView: .shadow(color: .black.opacity(0.4), radius: 2, x: 1, y: 1)
+        // Scale shadow parameters by cursorSizeScale to match .scaleEffect behavior.
+        ctx.saveGState()
+        ctx.translateBy(x: position.x, y: position.y)
+
+        ctx.setShadow(
+            offset: CGSize(width: cursorSizeScale, height: -cursorSizeScale),
+            blur: 2.0 * cursorSizeScale,
+            color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.4)
+        )
+
+        // Fill (shadow is applied to this draw call)
+        ctx.addPath(path)
+        ctx.setFillColor(fillColor)
+        ctx.fillPath()
+
+        // Turn off shadow for the stroke to avoid double-shadow
+        ctx.setShadow(offset: .zero, blur: 0, color: nil)
+
+        // Stroke with round joins/caps matching the preview
+        ctx.addPath(path)
+        ctx.setStrokeColor(strokeColor)
+        ctx.setLineWidth(strokeWidth)
+        ctx.setLineJoin(.round)
+        ctx.setLineCap(.round)
+        ctx.strokePath()
+
+        ctx.restoreGState()
     }
 
     // MARK: - Frame Helpers
 
-    /// Checks whether a given timestamp falls within any cut region.
-    private func isInCutRegion(time: Double, cuts: [CutRegion]) -> Bool {
-        for cut in cuts {
-            if time >= cut.inPoint && time < cut.outPoint {
-                return true
+    private func isInDisabledSegment(time: Double, segments: [TimelineSegment]) -> Bool {
+        for segment in segments {
+            if time >= segment.sourceStart && time < segment.sourceEnd {
+                return !segment.enabled
             }
         }
         return false
     }
 
-    /// Interpolates cursor position from cursor events at a given time.
     private func interpolatedCursorPosition(
         at time: Double,
         events: [CursorEvent]
@@ -624,7 +1246,6 @@ actor ExportService {
             return CGPoint(x: last.x, y: last.y)
         }
 
-        // Binary search for bracketing events
         var lo = 0
         var hi = events.count - 1
 
@@ -639,72 +1260,5 @@ actor ExportService {
 
         let event = events[hi]
         return CGPoint(x: event.x, y: event.y)
-    }
-
-    // MARK: - Texture to PixelBuffer
-
-    /// Copies a Metal texture into a CVPixelBuffer suitable for AVAssetWriter.
-    private func pixelBufferFromTexture(
-        _ texture: MTLTexture,
-        device: MTLDevice,
-        adaptor: AVAssetWriterInputPixelBufferAdaptor
-    ) -> CVPixelBuffer? {
-        let width = texture.width
-        let height = texture.height
-
-        // Get a pixel buffer from the adaptor's pool
-        guard let pool = adaptor.pixelBufferPool else { return nil }
-
-        var pixelBuffer: CVPixelBuffer?
-        let status = CVPixelBufferPoolCreatePixelBuffer(
-            kCFAllocatorDefault,
-            pool,
-            &pixelBuffer
-        )
-        guard status == kCVReturnSuccess, let outputBuffer = pixelBuffer else {
-            return nil
-        }
-
-        CVPixelBufferLockBaseAddress(outputBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(outputBuffer, []) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(outputBuffer) else {
-            return nil
-        }
-
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(outputBuffer)
-
-        // The texture is .private storage, so we need to blit it to a shared buffer first.
-        let bufferLength = bytesPerRow * height
-        guard let sharedBuffer = device.makeBuffer(length: bufferLength, options: .storageModeShared) else {
-            return nil
-        }
-
-        guard let commandQueue = device.makeCommandQueue(),
-              let commandBuffer = commandQueue.makeCommandBuffer(),
-              let blitEncoder = commandBuffer.makeBlitCommandEncoder()
-        else {
-            return nil
-        }
-
-        blitEncoder.copy(
-            from: texture,
-            sourceSlice: 0,
-            sourceLevel: 0,
-            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-            sourceSize: MTLSize(width: width, height: height, depth: 1),
-            to: sharedBuffer,
-            destinationOffset: 0,
-            destinationBytesPerRow: bytesPerRow,
-            destinationBytesPerImage: bufferLength
-        )
-        blitEncoder.endEncoding()
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-
-        // Copy from the shared Metal buffer to the CVPixelBuffer
-        memcpy(baseAddress, sharedBuffer.contents(), bufferLength)
-
-        return outputBuffer
     }
 }

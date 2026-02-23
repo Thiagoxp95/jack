@@ -56,6 +56,18 @@ final class RecordingSessionController {
     var fps: RecordingFPS = .sixty
     private(set) var isWebcamVisible = false
 
+    // Device selection
+    var selectedMicDeviceID: String?
+    var selectedCameraDeviceID: String?
+
+    var availableMicDevices: [AVCaptureDevice] {
+        MicrophoneCaptureService.availableInputDevices
+    }
+
+    var availableCameras: [AVCaptureDevice] {
+        WebcamCaptureService.availableCameras
+    }
+
     // MARK: - Services (private)
 
     private var screenService: ScreenRecordingService?
@@ -63,6 +75,8 @@ final class RecordingSessionController {
     private let micService = MicrophoneCaptureService()
     private var webcamService: WebcamCaptureService?
     private var webcamOverlay: WebcamOverlayController?
+    /// Camera session started during countdown so hardware is warm when recording begins.
+    private var preWarmedWebcamService: WebcamCaptureService?
 
     // MARK: - UI Controllers (private)
 
@@ -128,6 +142,7 @@ final class RecordingSessionController {
         let wasCountdown = state == .countdown
         state = .idle
         countdownOverlay.cleanup()
+        cleanUpPreWarmedWebcam()
         if wasCountdown {
             recordingBubble.hide()
         }
@@ -162,18 +177,36 @@ final class RecordingSessionController {
         )
         currentSession = session
 
+        // Pre-warm webcam camera hardware before countdown.
+        // Camera cold-start takes 1-2s; warming it up here means the overlay
+        // appears instantly after the countdown finishes.
+        if recordWebcam {
+            Self.logger.fault("[REC-PRE] Pre-warming webcam camera")
+            await preWarmWebcam()
+        }
+
         // Transition to countdown
         state = .countdown
-        Self.logger.fault("[REC-02] startRecording: showing countdown")
 
-        // Show countdown overlay (waits for animation to complete, window is hidden but alive)
+        Self.logger.fault("[REC-02] startRecording: showing countdown overlay")
+
+        // Show countdown overlay first (at .screenSaver level, above everything).
+        // Hide the app AFTER the countdown finishes so the overlay is always visible.
         await countdownOverlay.show()
 
-        Self.logger.fault("[REC-03] startRecording: countdown done, window hidden")
+        // Hide only normal-level app windows (setup, main window) so they don't
+        // appear in the recording. Floating panels (webcam overlay, recording
+        // bubble) must stay visible — NSApp.hide(nil) would hide those too.
+        for window in NSApplication.shared.windows where window.level == .normal && window.isVisible {
+            window.orderOut(nil)
+        }
+
+        Self.logger.fault("[REC-03] startRecording: countdown done, app hidden")
 
         guard state == .countdown else {
             Self.logger.fault("[REC-XX] startRecording: cancelled during countdown")
             countdownOverlay.cleanup()
+            cleanUpPreWarmedWebcam()
             return
         }
 
@@ -196,6 +229,7 @@ final class RecordingSessionController {
         switch sourceType {
         case .screen:
             guard selectedDisplayIndex < availableDisplays.count else {
+                cleanUpPreWarmedWebcam()
                 throw RecordingSessionError.noDisplayAvailable
             }
             captureDisplay = availableDisplays[selectedDisplayIndex]
@@ -205,6 +239,7 @@ final class RecordingSessionController {
             guard let windowID = selectedWindowID,
                   let window = availableWindows.first(where: { $0.windowID == windowID })
             else {
+                cleanUpPreWarmedWebcam()
                 throw RecordingSessionError.noWindowSelected
             }
             captureDisplay = nil
@@ -212,6 +247,7 @@ final class RecordingSessionController {
 
         case .region:
             guard selectedDisplayIndex < availableDisplays.count else {
+                cleanUpPreWarmedWebcam()
                 throw RecordingSessionError.noDisplayAvailable
             }
             captureDisplay = availableDisplays[selectedDisplayIndex]
@@ -230,14 +266,40 @@ final class RecordingSessionController {
         }
         currentSession = session
 
+        // --- Show user-visible UI first for instant post-countdown feedback ---
+
+        // Activate pre-warmed webcam (overlay + file recording — nearly instant)
+        if recordWebcam {
+            Self.logger.fault("[REC-11] startRecording: activating pre-warmed webcam")
+            activateWebcam(session: session)
+        }
+
+        // Transition to recording and start timer immediately
+        Self.logger.fault("[REC-12] startRecording: transitioning to recording state")
+        state = .recording
+        recordingStartDate = Date()
+        elapsedTime = 0
+        startElapsedTimer()
+
+        // Show recording bubble
+        recordingBubble.show(controller: self)
+
+        // --- Now start backend capture services ---
+
         Self.logger.fault("[REC-06] startRecording: calling startCapture")
 
-        try await screenSvc.startCapture(
-            display: captureDisplay,
-            window: captureWindow,
-            region: captureRegion,
-            captureSystemAudio: recordSystemAudio
-        )
+        do {
+            try await screenSvc.startCapture(
+                display: captureDisplay,
+                window: captureWindow,
+                region: captureRegion,
+                captureSystemAudio: recordSystemAudio
+            )
+        } catch {
+            Self.logger.error("[REC-ERR] Screen capture failed: \(error)")
+            await tearDownAfterStartupFailure()
+            throw error
+        }
 
         Self.logger.fault("[REC-07] startRecording: screen capture started, starting cursor tracking")
 
@@ -248,7 +310,8 @@ final class RecordingSessionController {
 
         Self.logger.fault("[REC-08] startRecording: cursor tracking started")
 
-        // Start microphone if enabled
+        // Start microphone and webcam file recording together so they are
+        // time-aligned. Both start AFTER screen capture is running.
         if recordMicrophone {
             Self.logger.fault("[REC-09] startRecording: starting microphone")
             do {
@@ -258,27 +321,10 @@ final class RecordingSessionController {
             }
         }
 
-        // Start webcam recording if enabled.
-        // Launched concurrently so camera initialization doesn't block the
-        // main run loop — cursor tracking needs the run loop to deliver events.
         if recordWebcam {
-            Task { @MainActor in
-                await self.startWebcam(session: session)
-            }
+            Self.logger.fault("[REC-09W] startRecording: starting webcam file recording (synced with mic)")
+            startWebcamFileRecording(session: session)
         }
-
-        Self.logger.fault("[REC-11] startRecording: transitioning to recording state")
-
-        // Transition to recording and start timer
-        state = .recording
-        recordingStartDate = Date()
-        elapsedTime = 0
-        startElapsedTimer()
-
-        Self.logger.fault("[REC-12] startRecording: showing recording bubble")
-
-        // Show recording bubble
-        recordingBubble.show(controller: self)
 
         Self.logger.fault("[REC-13] startRecording: complete (countdown window stays hidden, cleaned up on stop)")
 
@@ -413,31 +459,90 @@ final class RecordingSessionController {
 
     // MARK: - Webcam
 
-    private func startWebcam(session: RecordingSession) async {
+    /// Start the camera capture session so hardware is warm before the countdown finishes.
+    private func preWarmWebcam() async {
         let granted = await WebcamCaptureService.requestPermission()
         guard granted else {
-            Self.logger.error("Camera permission denied for webcam")
+            Self.logger.error("[REC-PRE] Camera permission denied")
             return
         }
 
         let svc = WebcamCaptureService()
         do {
             try svc.start()
+            preWarmedWebcamService = svc
+            Self.logger.fault("[REC-PRE] Webcam camera pre-warmed")
         } catch {
-            Self.logger.error("Failed to start webcam: \(error)")
-            return
+            Self.logger.error("[REC-PRE] Failed to pre-warm webcam: \(error)")
         }
+    }
+
+    /// Activate webcam overlay using a pre-warmed or new service.
+    /// Shows the floating circle preview immediately. File recording is
+    /// started separately via ``startWebcamFileRecording(session:)`` so it
+    /// can be synchronized with the microphone start.
+    private func activateWebcam(session: RecordingSession) {
+        let svc: WebcamCaptureService
+
+        if let preWarmed = preWarmedWebcamService {
+            svc = preWarmed
+            preWarmedWebcamService = nil
+            Self.logger.fault("[REC-WC] Using pre-warmed webcam service")
+        } else {
+            // Fallback: cold start (permission already granted from setup)
+            guard WebcamCaptureService.hasPermission else {
+                Self.logger.error("[REC-WC] Camera permission not granted")
+                return
+            }
+            let newSvc = WebcamCaptureService()
+            do {
+                try newSvc.start()
+            } catch {
+                Self.logger.error("[REC-WC] Failed to cold-start webcam: \(error)")
+                return
+            }
+            svc = newSvc
+        }
+
         webcamService = svc
 
-        // Start recording webcam to file
-        svc.startRecordingToFile(url: session.webcamVideoURL)
-        Self.logger.info("Webcam file recording started")
-
-        // Show floating circle overlay
+        // Show floating circle overlay (file recording started later for sync)
         let overlay = WebcamOverlayController()
         webcamOverlay = overlay
         overlay.show(service: svc, origin: nil, diameter: webcamDiameter)
         isWebcamVisible = true
+    }
+
+    /// Start writing the webcam capture session to disk.
+    /// Called after screen capture begins so the file aligns with mic audio.
+    private func startWebcamFileRecording(session: RecordingSession) {
+        guard let svc = webcamService else { return }
+        svc.startRecordingToFile(url: session.webcamVideoURL)
+        Self.logger.info("Webcam file recording started (synced with mic)")
+    }
+
+    private func cleanUpPreWarmedWebcam() {
+        guard let svc = preWarmedWebcamService else { return }
+        preWarmedWebcamService = nil
+        Task { await svc.stop() }
+    }
+
+    /// Tear down UI and services when screen capture fails after the timer/bubble were already shown.
+    private func tearDownAfterStartupFailure() async {
+        stopElapsedTimer()
+        recordingBubble.hide()
+        countdownOverlay.cleanup()
+
+        screenService = nil
+        cursorService = nil
+
+        await stopWebcam()
+        cleanUpPreWarmedWebcam()
+
+        currentSession = nil
+        elapsedTime = 0
+        recordingStartDate = nil
+        state = .idle
     }
 
     private func stopWebcam() async {

@@ -4,29 +4,38 @@ import SwiftUI
 // MARK: - SetupWindowController
 
 @MainActor
-final class SetupWindowController {
+final class SetupWindowController: NSObject, NSWindowDelegate {
 
     private var panel: NSPanel?
+    private weak var recordingController: RecordingSessionController?
 
     // MARK: - Show
 
     func show(controller: RecordingSessionController) {
-        if panel != nil { return }
+        // If already visible, just bring to front
+        if let existing = panel {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
 
-        let size = NSSize(width: 480, height: 520)
+        self.recordingController = controller
+
+        let size = NSSize(width: 420, height: 580)
 
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        panel.isReleasedWhenClosed = false
         panel.titlebarAppearsTransparent = true
         panel.isMovableByWindowBackground = true
-        panel.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+        panel.backgroundColor = .windowBackgroundColor
         panel.level = .floating
         panel.hidesOnDeactivate = false
-        panel.title = "Recording Setup"
+        panel.title = ""
+        panel.delegate = self
 
         let setupView = RecordingSetupView(controller: controller) { [weak self] in
             self?.hide()
@@ -42,7 +51,19 @@ final class SetupWindowController {
     // MARK: - Hide
 
     func hide() {
-        panel?.close()
+        guard let p = panel else { return }
         panel = nil
+        p.delegate = nil
+        p.contentView = nil
+        p.close()
+    }
+
+    // MARK: - NSWindowDelegate
+
+    nonisolated func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.recordingController?.cancelSetup()
+            self?.panel = nil
+        }
     }
 }

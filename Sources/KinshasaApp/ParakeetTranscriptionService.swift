@@ -1,9 +1,14 @@
+import AVFoundation
+import FluidAudio
 import Foundation
+
+extension AsrManager: @retroactive @unchecked Sendable {}
 
 struct ParakeetConfiguration: Sendable {
     var cliPath: String
     var model: String
     var cacheDirectory: String
+    var version: AsrModelVersion
 }
 
 struct TranscriptionResult: Sendable {
@@ -12,733 +17,262 @@ struct TranscriptionResult: Sendable {
 }
 
 enum ParakeetTranscriptionError: LocalizedError {
-    case cliNotFound(path: String)
-    case workerScriptMissing
-    case workerProtocol(String)
-    case processLaunchFailed(String)
-    case transcriptionFailed(exitCode: Int32, details: String)
-    case transcriptMissing(path: String, details: String)
+    case modelPreparationFailed(String)
+    case missingEngine
+    case transcriptionFailed(String)
+    case audioTrimFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case let .cliNotFound(path):
-            return "Local Parakeet runtime is not ready at: \(path). Please wait for automatic setup to finish."
-        case .workerScriptMissing:
-            return "Bundled Parakeet worker script is missing from app resources."
-        case let .workerProtocol(details):
-            return "Parakeet worker communication failed: \(details)"
-        case let .processLaunchFailed(message):
-            return "Failed to launch local Parakeet CLI: \(message)"
-        case let .transcriptionFailed(exitCode, details):
-            return "Parakeet local transcription failed (exit \(exitCode)): \(details)"
-        case let .transcriptMissing(path, details):
-            return "Transcription finished, but no output text file was found at: \(path). \(details)"
+        case let .modelPreparationFailed(details):
+            return "Failed to prepare CoreML speech engine: \(details)"
+        case .missingEngine:
+            return "CoreML speech engine is unavailable."
+        case let .transcriptionFailed(details):
+            return "CoreML transcription failed: \(details)"
+        case let .audioTrimFailed(details):
+            return "Failed to prepare tail audio for transcription: \(details)"
         }
     }
 }
 
 struct ParakeetTranscriptionService {
-    private static let worker = ParakeetWorker()
+    private static let engine = CoreMLParakeetEngine()
 
     func prepare(configuration: ParakeetConfiguration) async throws {
-        try await Self.worker.prepare(configuration: configuration)
+        try await Self.engine.prepare(configuration: configuration)
     }
 
-    func transcribe(audioFileURL: URL, configuration: ParakeetConfiguration) async throws -> TranscriptionResult {
-        do {
-            let text = try await Self.worker.transcribe(audioFileURL: audioFileURL, configuration: configuration)
-            return TranscriptionResult(text: text, backend: "Persistent Worker")
-        } catch {
-            do {
-                try await Self.worker.reset(configuration: configuration)
-                let recoveredText = try await Self.worker.transcribe(audioFileURL: audioFileURL, configuration: configuration)
-                return TranscriptionResult(text: recoveredText, backend: "Persistent Worker (recovered)")
-            } catch {
-                return try await transcribeUsingCLI(audioFileURL: audioFileURL, configuration: configuration)
-            }
-        }
-    }
-
-    func transcribeUsingCLI(
+    func transcribe(
         audioFileURL: URL,
         configuration: ParakeetConfiguration,
-        backendLabel: String = "CLI Fallback"
+        startSeconds: TimeInterval? = nil,
+        backendLabel: String = "CoreML Streaming"
     ) async throws -> TranscriptionResult {
-        let text = try await Task.detached(priority: .userInitiated) {
-            try Self.transcribeBlocking(audioFileURL: audioFileURL, configuration: configuration)
-        }.value
+        let text = try await Self.engine.transcribe(
+            audioFileURL: audioFileURL,
+            configuration: configuration,
+            startSeconds: startSeconds
+        )
         return TranscriptionResult(text: text, backend: backendLabel)
     }
 
-    func keepWarm(configuration: ParakeetConfiguration) async throws {
-        try await Self.worker.warmup(configuration: configuration)
+    // Backward-compatible shim; this backend is CoreML-only.
+    func transcribeUsingCLI(
+        audioFileURL: URL,
+        configuration: ParakeetConfiguration,
+        backendLabel: String = "CoreML Streaming"
+    ) async throws -> TranscriptionResult {
+        try await transcribe(
+            audioFileURL: audioFileURL,
+            configuration: configuration,
+            startSeconds: nil,
+            backendLabel: backendLabel
+        )
     }
 
-    private static func transcribeBlocking(audioFileURL: URL, configuration: ParakeetConfiguration) throws -> String {
-        let fm = FileManager.default
+    func keepWarm(configuration: ParakeetConfiguration) async throws {
+        try await Self.engine.warmup(configuration: configuration)
+    }
+}
 
-        let cliPath = (configuration.cliPath as NSString).expandingTildeInPath
-        guard fm.isExecutableFile(atPath: cliPath) else {
-            throw ParakeetTranscriptionError.cliNotFound(path: cliPath)
+private actor CoreMLParakeetEngine {
+    nonisolated(unsafe) private var asrManager: AsrManager?
+    private var activeConfigurationKey: String?
+    private var warmedConfigurationKeys: Set<String> = []
+    private var warmupAudioURL: URL?
+
+    func prepare(configuration: ParakeetConfiguration) async throws {
+        let key = configurationKey(configuration)
+        _ = try await ensureManager(configuration: configuration)
+
+        guard !warmedConfigurationKeys.contains(key) else {
+            return
         }
 
-        let outputDir = fm.temporaryDirectory.appendingPathComponent("parakeet-output-\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        try await warmup(configuration: configuration)
+        warmedConfigurationKeys.insert(key)
+    }
+
+    func transcribe(
+        audioFileURL: URL,
+        configuration: ParakeetConfiguration,
+        startSeconds: TimeInterval?
+    ) async throws -> String {
+        let manager = try await ensureManager(configuration: configuration)
+        let trimmedStart = max(0, startSeconds ?? 0)
+
+        var temporaryTailURL: URL?
+        let targetURL: URL
+
+        if trimmedStart > 0 {
+            guard let clippedURL = try clipAudioIfNeeded(sourceURL: audioFileURL, startSeconds: trimmedStart) else {
+                return ""
+            }
+            targetURL = clippedURL
+            temporaryTailURL = clippedURL
+        } else {
+            targetURL = audioFileURL
+        }
 
         defer {
-            try? fm.removeItem(at: outputDir)
+            if let temporaryTailURL {
+                try? FileManager.default.removeItem(at: temporaryTailURL)
+            }
         }
 
-        var arguments = [
-            "--model", configuration.model,
-            "--output-format", "txt",
-            "--output-template", "{filename}",
-            "--output-dir", outputDir.path,
-        ]
+        do {
+            let result = try await manager.transcribeStreaming(targetURL, source: .microphone)
+            return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            throw ParakeetTranscriptionError.transcriptionFailed(error.localizedDescription)
+        }
+    }
 
-        let trimmedCacheDirectory = configuration.cacheDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedCacheDirectory.isEmpty {
-            let cachePath = (trimmedCacheDirectory as NSString).expandingTildeInPath
-            try fm.createDirectory(atPath: cachePath, withIntermediateDirectories: true)
-            arguments.append(contentsOf: ["--cache-dir", cachePath])
+    func warmup(configuration: ParakeetConfiguration) async throws {
+        let manager = try await ensureManager(configuration: configuration)
+        let warmupURL = try makeWarmupAudioURL()
+
+        do {
+            _ = try await manager.transcribeStreaming(warmupURL, source: .microphone)
+        } catch {
+            throw ParakeetTranscriptionError.transcriptionFailed(error.localizedDescription)
+        }
+    }
+
+    private func ensureManager(configuration: ParakeetConfiguration) async throws -> AsrManager {
+        let key = configurationKey(configuration)
+        if let asrManager, activeConfigurationKey == key {
+            return asrManager
         }
 
-        arguments.append(audioFileURL.path)
+        do {
+            let cacheURL = URL(fileURLWithPath: configuration.cacheDirectory, isDirectory: true)
+            try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
 
-        let result = try runProcess(executablePath: cliPath, arguments: arguments)
-
-        guard result.exitCode == 0 else {
-            let details = result.stderr.isEmpty ? result.stdout : result.stderr
-            throw ParakeetTranscriptionError.transcriptionFailed(
-                exitCode: result.exitCode,
-                details: details.isEmpty ? "No error output from CLI" : details
+            let models = try await AsrModels.downloadAndLoad(
+                to: cacheURL,
+                configuration: AsrModels.defaultConfiguration(),
+                version: configuration.version
             )
-        }
 
-        return try transcriptText(
-            from: outputDir,
-            expectedStem: audioFileURL.deletingPathExtension().lastPathComponent,
-            processStdout: result.stdout,
-            processStderr: result.stderr
-        )
-    }
-
-    private struct ProcessResult {
-        let exitCode: Int32
-        let stdout: String
-        let stderr: String
-    }
-
-    private static func runProcess(executablePath: String, arguments: [String]) throws -> ProcessResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-        } catch {
-            throw ParakeetTranscriptionError.processLaunchFailed(error.localizedDescription)
-        }
-
-        process.waitUntilExit()
-
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-        let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        return ProcessResult(exitCode: process.terminationStatus, stdout: stdout, stderr: stderr)
-    }
-
-    private static func transcriptText(
-        from outputDir: URL,
-        expectedStem: String,
-        processStdout: String,
-        processStderr: String
-    ) throws -> String {
-        let fm = FileManager.default
-        let expectedURL = outputDir
-            .appendingPathComponent(expectedStem)
-            .appendingPathExtension("txt")
-
-        if let text = readTrimmedText(at: expectedURL) {
-            return text
-        }
-
-        let directoryFiles = (try? fm.contentsOfDirectory(at: outputDir, includingPropertiesForKeys: nil)) ?? []
-        let textFiles = directoryFiles.filter { $0.pathExtension.lowercased() == "txt" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-
-        if let bestMatch = textFiles.first(where: { $0.deletingPathExtension().lastPathComponent.contains(expectedStem) }) ?? textFiles.first,
-           let text = readTrimmedText(at: bestMatch)
-        {
-            return text
-        }
-
-        if let stdoutTranscript = normalizedPotentialTranscript(processStdout), !stdoutTranscript.isEmpty {
-            return stdoutTranscript
-        }
-
-        let fileList = directoryFiles.map(\.lastPathComponent).sorted().joined(separator: ", ")
-        let stderrSnippet = processStderr.isEmpty ? "No stderr output." : "stderr: \(processStderr)"
-        throw ParakeetTranscriptionError.transcriptMissing(
-            path: expectedURL.path,
-            details: "Output dir files: [\(fileList)]. \(stderrSnippet)"
-        )
-    }
-
-    private static func readTrimmedText(at fileURL: URL) -> String? {
-        guard let data = try? Data(contentsOf: fileURL),
-              let text = String(data: data, encoding: .utf8)
-        else {
-            return nil
-        }
-
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? nil : cleaned
-    }
-
-    private static func normalizedPotentialTranscript(_ stdout: String) -> String? {
-        guard !stdout.isEmpty else {
-            return nil
-        }
-
-        let cleaned = stdout
-            .split(separator: "\n")
-            .map(String.init)
-            .filter { line in
-                let lower = line.lowercased()
-                return !lower.contains("transcription complete") && !lower.contains("outputs saved in")
-            }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return cleaned.isEmpty ? nil : cleaned
-    }
-}
-
-private actor ParakeetWorker {
-    private var workerState: WorkerState?
-    private var nextRequestID = 1
-    private var recycleScheduled = false
-    private var lastRecycleAt = Date.distantPast
-    private var lastRSSCheckAt = Date.distantPast
-    private var lastRSSCheckPID: Int32 = 0
-    private var lastRSSCheckValue: UInt64?
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-    private let recycleRSSBytes = ParakeetWorker.envMegabytes(named: "KINSHASA_WORKER_RECYCLE_RSS_MB", defaultMB: 8_192)
-    private let hardRSSBytes = ParakeetWorker.envMegabytes(named: "KINSHASA_WORKER_HARD_RSS_MB", defaultMB: 10_240)
-    private let recycleCooldown: TimeInterval = 8
-    private let rssCheckMinInterval: TimeInterval = 0.75
-    private let timingEnabled = ProcessInfo.processInfo.environment["KINSHASA_TIMING"] == "1"
-
-    func prepare(configuration: ParakeetConfiguration) throws {
-        _ = try ensureWorker(configuration: configuration)
-    }
-
-    func transcribe(audioFileURL: URL, configuration: ParakeetConfiguration) throws -> String {
-        let state = try ensureWorker(configuration: configuration)
-        let requestID = nextRequestID
-        nextRequestID += 1
-
-        let request = WorkerRequest(id: requestID, command: "transcribe", audioPath: audioFileURL.path)
-        let encoded = try encoder.encode(request)
-        try writeLine(encoded, to: state.stdin)
-
-        while true {
-            let message = try readMessage(from: state.stdout)
-            switch message.type {
-            case "result":
-                guard message.id == requestID else {
-                    continue
-                }
-                scheduleRecycleIfNeeded(configuration: configuration, reason: "post-transcribe")
-                return (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            case "error":
-                guard message.id == nil || message.id == requestID else {
-                    continue
-                }
-                throw ParakeetTranscriptionError.transcriptionFailed(
-                    exitCode: 1,
-                    details: message.message ?? "Unknown worker error."
+            let manager = AsrManager(
+                config: ASRConfig(
+                    sampleRate: 16_000,
+                    tdtConfig: .default,
+                    streamingEnabled: true,
+                    streamingThreshold: 1
                 )
-            case "fatal":
-                throw ParakeetTranscriptionError.transcriptionFailed(
-                    exitCode: 1,
-                    details: message.message ?? "Worker failed while preparing model."
-                )
-            case "ready", "bye":
-                continue
-            default:
-                continue
-            }
+            )
+            try await manager.initialize(models: models)
+
+            asrManager = manager
+            activeConfigurationKey = key
+            return manager
+        } catch {
+            throw ParakeetTranscriptionError.modelPreparationFailed(error.localizedDescription)
         }
     }
 
-    func warmup(configuration: ParakeetConfiguration) throws {
-        let state = try ensureWorker(configuration: configuration)
-        let requestID = nextRequestID
-        nextRequestID += 1
+    private func clipAudioIfNeeded(sourceURL: URL, startSeconds: TimeInterval) throws -> URL? {
+        do {
+            let inputFile = try AVAudioFile(forReading: sourceURL)
+            let inputFormat = inputFile.processingFormat
+            let startFrame = AVAudioFramePosition(startSeconds * inputFormat.sampleRate)
 
-        let request = WorkerRequest(id: requestID, command: "warmup", audioPath: "")
-        let encoded = try encoder.encode(request)
-        try writeLine(encoded, to: state.stdin)
+            guard startFrame < inputFile.length else {
+                return nil
+            }
 
-        while true {
-            let message = try readMessage(from: state.stdout)
-            switch message.type {
-            case "warmed":
-                guard message.id == requestID else {
-                    continue
+            inputFile.framePosition = max(0, startFrame)
+
+            let outputURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("coreml-tail-\(UUID().uuidString)")
+                .appendingPathExtension("wav")
+
+            let outputFile = try AVAudioFile(
+                forWriting: outputURL,
+                settings: inputFile.fileFormat.settings,
+                commonFormat: inputFormat.commonFormat,
+                interleaved: inputFormat.isInterleaved
+            )
+
+            let chunkSize: AVAudioFrameCount = 4_096
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: chunkSize) else {
+                throw ParakeetTranscriptionError.audioTrimFailed("Unable to allocate audio buffer.")
+            }
+
+            while inputFile.framePosition < inputFile.length {
+                let remaining = inputFile.length - inputFile.framePosition
+                let framesToRead = AVAudioFrameCount(min(Int64(chunkSize), remaining))
+                try inputFile.read(into: buffer, frameCount: framesToRead)
+                guard buffer.frameLength > 0 else {
+                    break
                 }
-                scheduleRecycleIfNeeded(configuration: configuration, reason: "post-warmup")
-                return
-            case "error":
-                guard message.id == nil || message.id == requestID else {
-                    continue
-                }
-                throw ParakeetTranscriptionError.transcriptionFailed(
-                    exitCode: 1,
-                    details: message.message ?? "Unknown worker warmup error."
-                )
-            case "fatal":
-                throw ParakeetTranscriptionError.transcriptionFailed(
-                    exitCode: 1,
-                    details: message.message ?? "Worker failed while warming."
-                )
-            case "ready", "bye":
-                continue
-            default:
-                continue
+                try outputFile.write(from: buffer)
             }
-        }
-    }
 
-    func reset(configuration: ParakeetConfiguration) throws {
-        stopWorkerIfNeeded()
-        _ = try ensureWorker(configuration: configuration)
-    }
-
-    private func ensureWorker(configuration: ParakeetConfiguration) throws -> WorkerState {
-        if let workerState,
-           workerState.matches(configuration: configuration),
-           workerState.process.isRunning
-        {
-            if shouldHardRecycle(workerState) {
-                logTiming("worker recycle=hard rss=\(formatBytes(residentMemoryBytes(forPID: workerState.process.processIdentifier) ?? 0))")
-                stopWorkerIfNeeded()
-            } else {
-                scheduleRecycleIfNeeded(configuration: configuration, reason: "pre-request")
-                return workerState
-            }
-        }
-
-        if let workerState,
-           workerState.matches(configuration: configuration),
-           workerState.process.isRunning
-        {
-            return workerState
-        }
-
-        stopWorkerIfNeeded()
-        let newWorker = try startWorker(configuration: configuration)
-        workerState = newWorker
-        return newWorker
-    }
-
-    private func startWorker(configuration: ParakeetConfiguration) throws -> WorkerState {
-        let fm = FileManager.default
-        let cliPath = (configuration.cliPath as NSString).expandingTildeInPath
-        guard fm.isExecutableFile(atPath: cliPath) else {
-            throw ParakeetTranscriptionError.cliNotFound(path: cliPath)
-        }
-
-        let binDir = URL(fileURLWithPath: cliPath).deletingLastPathComponent()
-        let pythonPath = binDir.appendingPathComponent("python").path
-        guard fm.isExecutableFile(atPath: pythonPath) else {
-            throw ParakeetTranscriptionError.cliNotFound(path: pythonPath)
-        }
-
-        guard let scriptURL = Bundle.module.url(forResource: "parakeet_worker", withExtension: "py") else {
-            throw ParakeetTranscriptionError.workerScriptMissing
-        }
-
-        let cachePath = (configuration.cacheDirectory as NSString).expandingTildeInPath
-        if !cachePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try fm.createDirectory(atPath: cachePath, withIntermediateDirectories: true)
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = [
-            scriptURL.path,
-            "--model", configuration.model,
-            "--cache-dir", cachePath,
-        ]
-
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = [
-            env["PATH"],
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "\(NSHomeDirectory())/.local/bin",
-        ]
-        .compactMap { $0 }
-        .joined(separator: ":")
-        process.environment = env
-
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        let stderrTailBuffer = PipeTailBuffer()
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty else {
-                handle.readabilityHandler = nil
-                return
-            }
-            stderrTailBuffer.append(data)
-        }
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
+            return outputURL
+        } catch let error as ParakeetTranscriptionError {
+            throw error
         } catch {
-            throw ParakeetTranscriptionError.processLaunchFailed(error.localizedDescription)
-        }
-
-        let state = WorkerState(
-            process: process,
-            stdin: stdinPipe.fileHandleForWriting,
-            stdout: stdoutPipe.fileHandleForReading,
-            stderr: stderrPipe.fileHandleForReading,
-            stderrTailBuffer: stderrTailBuffer,
-            configuration: configuration
-        )
-
-        while true {
-            let readyMessage = try readMessage(from: state.stdout)
-            switch readyMessage.type {
-            case "ready":
-                return state
-            case "fatal", "error":
-                let errorText = readyMessage.message ?? readPipeTail(state)
-                stopWorker(state: state)
-                throw ParakeetTranscriptionError.workerProtocol("Worker failed to initialize. \(errorText)")
-            default:
-                continue
-            }
+            throw ParakeetTranscriptionError.audioTrimFailed(error.localizedDescription)
         }
     }
 
-    private func stopWorkerIfNeeded() {
-        guard let state = workerState else {
-            return
+    private func makeWarmupAudioURL() throws -> URL {
+        if let warmupAudioURL {
+            return warmupAudioURL
         }
 
-        stopWorker(state: state)
-        workerState = nil
-        lastRSSCheckPID = 0
-        lastRSSCheckValue = nil
-        lastRSSCheckAt = .distantPast
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("coreml-warmup-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+
+        let sampleRate = 16_000
+        let channels: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let bytesPerSample = Int(bitsPerSample / 8)
+        let seconds = 1
+        let sampleCount = sampleRate * seconds
+        let dataSize = sampleCount * Int(channels) * bytesPerSample
+
+        var wav = Data()
+        wav.reserveCapacity(44 + dataSize)
+
+        wav.append("RIFF".data(using: .ascii)!)
+        wav.appendUInt32LE(UInt32(36 + dataSize))
+        wav.append("WAVE".data(using: .ascii)!)
+        wav.append("fmt ".data(using: .ascii)!)
+        wav.appendUInt32LE(16)
+        wav.appendUInt16LE(1)
+        wav.appendUInt16LE(channels)
+        wav.appendUInt32LE(UInt32(sampleRate))
+        wav.appendUInt32LE(UInt32(sampleRate * Int(channels) * bytesPerSample))
+        wav.appendUInt16LE(UInt16(Int(channels) * bytesPerSample))
+        wav.appendUInt16LE(bitsPerSample)
+        wav.append("data".data(using: .ascii)!)
+        wav.appendUInt32LE(UInt32(dataSize))
+        wav.append(Data(repeating: 0, count: dataSize))
+
+        try wav.write(to: outputURL)
+        warmupAudioURL = outputURL
+        return outputURL
     }
 
-    private func shouldHardRecycle(_ state: WorkerState) -> Bool {
-        guard let rss = residentMemoryBytes(forPID: state.process.processIdentifier),
-              rss >= hardRSSBytes
-        else {
-            return false
-        }
-
-        return Date().timeIntervalSince(lastRecycleAt) >= recycleCooldown
-    }
-
-    private func scheduleRecycleIfNeeded(configuration: ParakeetConfiguration, reason: String) {
-        guard !recycleScheduled,
-              Date().timeIntervalSince(lastRecycleAt) >= recycleCooldown,
-              let state = workerState,
-              state.matches(configuration: configuration),
-              state.process.isRunning,
-              let rss = residentMemoryBytes(forPID: state.process.processIdentifier),
-              rss >= recycleRSSBytes
-        else {
-            return
-        }
-
-        recycleScheduled = true
-        let copiedConfiguration = configuration
-        let observedRSS = rss
-        Task(priority: .utility) {
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            self.performScheduledRecycle(configuration: copiedConfiguration, reason: reason, observedRSS: observedRSS)
-        }
-    }
-
-    private func performScheduledRecycle(configuration: ParakeetConfiguration, reason: String, observedRSS: UInt64) {
-        recycleScheduled = false
-
-        guard Date().timeIntervalSince(lastRecycleAt) >= recycleCooldown,
-              let state = workerState,
-              state.matches(configuration: configuration),
-              state.process.isRunning,
-              let currentRSS = residentMemoryBytes(forPID: state.process.processIdentifier),
-              currentRSS >= recycleRSSBytes
-        else {
-            return
-        }
-
-        logTiming(
-            "worker recycle=soft reason=\(reason) rss_observed=\(formatBytes(observedRSS)) rss_current=\(formatBytes(currentRSS))"
-        )
-
-        do {
-            try reset(configuration: configuration)
-            lastRecycleAt = Date()
-        } catch {
-            logTiming("worker recycle failed reason=\(reason) error=\(error.localizedDescription)")
-        }
-    }
-
-    private func residentMemoryBytes(forPID pid: Int32) -> UInt64? {
-        guard pid > 0 else {
-            return nil
-        }
-
-        let now = Date()
-        if lastRSSCheckPID == pid,
-           now.timeIntervalSince(lastRSSCheckAt) < rssCheckMinInterval
-        {
-            return lastRSSCheckValue
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-o", "rss=", "-p", "\(pid)"]
-
-        let stdoutPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            lastRSSCheckPID = pid
-            lastRSSCheckValue = nil
-            lastRSSCheckAt = now
-            return nil
-        }
-
-        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let text = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !text.isEmpty
-        else {
-            lastRSSCheckPID = pid
-            lastRSSCheckValue = nil
-            lastRSSCheckAt = now
-            return nil
-        }
-
-        guard let rssKB = text.split(separator: " ").compactMap({ UInt64($0) }).first else {
-            lastRSSCheckPID = pid
-            lastRSSCheckValue = nil
-            lastRSSCheckAt = now
-            return nil
-        }
-
-        let rssBytes = rssKB * 1024
-        lastRSSCheckPID = pid
-        lastRSSCheckValue = rssBytes
-        lastRSSCheckAt = now
-        return rssBytes
-    }
-
-    private static func envMegabytes(named key: String, defaultMB: UInt64) -> UInt64 {
-        guard let raw = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let parsed = UInt64(raw),
-              parsed > 0
-        else {
-            return defaultMB * 1_048_576
-        }
-
-        return parsed * 1_048_576
-    }
-
-    private func formatBytes(_ bytes: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
-    }
-
-    private func logTiming(_ message: String) {
-        guard timingEnabled else {
-            return
-        }
-        NSLog("[PipelineTiming] \(message)")
-    }
-
-    private func stopWorker(state: WorkerState) {
-        state.stderr.readabilityHandler = nil
-
-        if state.process.isRunning {
-            let shutdownRequest = WorkerRequest(id: 0, command: "shutdown", audioPath: "")
-            if let data = try? encoder.encode(shutdownRequest) {
-                try? writeLine(data, to: state.stdin)
-            }
-            state.process.terminate()
-        }
-
-        try? state.stdin.close()
-        try? state.stdout.close()
-        try? state.stderr.close()
-    }
-
-    private func writeLine(_ data: Data, to handle: FileHandle) throws {
-        var payload = data
-        payload.append(0x0A)
-        do {
-            try handle.write(contentsOf: payload)
-        } catch {
-            stopWorkerIfNeeded()
-            throw ParakeetTranscriptionError.workerProtocol("Failed to send request to worker: \(error.localizedDescription)")
-        }
-    }
-
-    private func readMessage(from handle: FileHandle) throws -> WorkerMessage {
-        var skippedNoiseLineCount = 0
-
-        while true {
-            let rawLine = try readLine(from: handle)
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard !line.isEmpty else {
-                continue
-            }
-
-            guard let data = line.data(using: .utf8) else {
-                skippedNoiseLineCount += 1
-                if skippedNoiseLineCount >= 40 {
-                    throw ParakeetTranscriptionError.workerProtocol("Worker emitted repeated non-UTF8 output.")
-                }
-                continue
-            }
-
-            if let message = try? decoder.decode(WorkerMessage.self, from: data) {
-                return message
-            }
-
-            skippedNoiseLineCount += 1
-            if skippedNoiseLineCount >= 40 {
-                throw ParakeetTranscriptionError.workerProtocol("Too many unexpected worker lines. Last line: \(line)")
-            }
-        }
-    }
-
-    private func readLine(from handle: FileHandle) throws -> String {
-        var buffer = Data()
-
-        while true {
-            guard let chunk = try handle.read(upToCount: 1), !chunk.isEmpty else {
-                let stderrTail = workerState.map { readPipeTail($0) } ?? "No stderr."
-                stopWorkerIfNeeded()
-                throw ParakeetTranscriptionError.workerProtocol("Worker exited unexpectedly. \(stderrTail)")
-            }
-
-            if chunk[0] == 0x0A {
-                break
-            }
-
-            buffer.append(chunk)
-        }
-
-        return String(data: buffer, encoding: .utf8) ?? ""
-    }
-
-    private func readPipeTail(_ state: WorkerState) -> String {
-        state.stderrTailBuffer.description
+    private func configurationKey(_ configuration: ParakeetConfiguration) -> String {
+        "\(configuration.model)|\(configuration.cacheDirectory)|\(configuration.version)"
     }
 }
 
-private struct WorkerState {
-    let process: Process
-    let stdin: FileHandle
-    let stdout: FileHandle
-    let stderr: FileHandle
-    let stderrTailBuffer: PipeTailBuffer
-    let configuration: ParakeetConfiguration
-
-    func matches(configuration: ParakeetConfiguration) -> Bool {
-        normalized(configuration.cliPath) == normalized(self.configuration.cliPath)
-            && configuration.model == self.configuration.model
-            && normalized(configuration.cacheDirectory) == normalized(self.configuration.cacheDirectory)
+private extension Data {
+    mutating func appendUInt16LE(_ value: UInt16) {
+        var little = value.littleEndian
+        Swift.withUnsafeBytes(of: &little) { append(contentsOf: $0) }
     }
 
-    private func normalized(_ path: String) -> String {
-        (path as NSString).expandingTildeInPath.trimmingCharacters(in: .whitespacesAndNewlines)
+    mutating func appendUInt32LE(_ value: UInt32) {
+        var little = value.littleEndian
+        Swift.withUnsafeBytes(of: &little) { append(contentsOf: $0) }
     }
-}
-
-private final class PipeTailBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var buffer = Data()
-    private let maxBytes: Int
-
-    init(maxBytes: Int = 32 * 1024) {
-        self.maxBytes = max(1, maxBytes)
-    }
-
-    func append(_ data: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        buffer.append(data)
-        if buffer.count > maxBytes {
-            buffer.removeFirst(buffer.count - maxBytes)
-        }
-    }
-
-    var description: String {
-        lock.lock()
-        let snapshot = buffer
-        lock.unlock()
-
-        guard let text = String(data: snapshot, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !text.isEmpty
-        else {
-            return "No stderr."
-        }
-
-        return "stderr: \(text)"
-    }
-}
-
-private struct WorkerRequest: Encodable {
-    let id: Int
-    let command: String
-    let audioPath: String
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case command
-        case audioPath = "audio_path"
-    }
-}
-
-private struct WorkerMessage: Decodable {
-    let type: String
-    let id: Int?
-    let text: String?
-    let message: String?
 }

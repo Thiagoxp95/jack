@@ -154,6 +154,9 @@ final class DictationController: ObservableObject {
     private var riveObservedPeakLevel: Double = 0.25
     private var lastRivePulseAt: Date?
     private var holdReleaseMissingSince: Date?
+    /// Set synchronously on `.startRecording`/`.stopRecording` so the intent
+    /// survives the gap while `beginRecording()` is awaiting async setup.
+    private var wantRecording = false
     private var isAdjustingIndicatorSize = false
     private var localKeyCaptureMonitor: Any?
     private var globalKeyCaptureMonitor: Any?
@@ -292,7 +295,7 @@ final class DictationController: ObservableObject {
         }
         shortcutMonitor.onVoiceNoteSwitchKeyPressed = { [weak self] in
             Task { @MainActor [weak self] in
-                self?.switchRecordingOutputToVoiceNote()
+                self?.toggleRecordingOutputMode()
             }
         }
 
@@ -370,6 +373,10 @@ final class DictationController: ObservableObject {
 
     var notesDirectoryPathText: String {
         noteService.notesDirectoryPath()
+    }
+
+    func loadAllNotes() -> [VoiceNote] {
+        noteService.loadAllNotes()
     }
 
     var recordingOutputModeText: String {
@@ -625,31 +632,36 @@ final class DictationController: ObservableObject {
         switch action {
         case .toggleRecording:
             if isRecording {
+                wantRecording = false
                 stopRecordingAndTranscribe()
             } else {
+                wantRecording = true
                 Task {
                     await beginRecording()
                 }
             }
         case .startRecording:
+            wantRecording = true
             Task {
                 await beginRecording()
             }
         case .stopRecording:
-            stopRecordingAndTranscribe()
+            wantRecording = false
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            if isRecording {
+                stopRecordingAndTranscribe()
+            }
+            // If beginRecording() is still in its async setup, the wantRecording
+            // flag being false will cause it to stop immediately after starting.
         }
     }
 
-    private func switchRecordingOutputToVoiceNote() {
+    private func toggleRecordingOutputMode() {
         guard isRecording, !isTranscribing else {
             return
         }
 
-        guard recordingOutputMode != .voiceNote else {
-            return
-        }
-
-        recordingOutputMode = .voiceNote
+        recordingOutputMode = recordingOutputMode == .voiceNote ? .paste : .voiceNote
         statusText = listeningStatusText(isLive: false)
         showBubble(message: listeningBubbleMessage(), isRecording: true)
     }
@@ -700,15 +712,27 @@ final class DictationController: ObservableObject {
             return
         }
 
+        // A stop request may have arrived while we were awaiting async setup.
+        guard wantRecording else {
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            return
+        }
+
         do {
             try audioCapture.startRecording()
             isRecording = true
             recordingOutputMode = .paste
-            shortcutMonitor.setVoiceNoteSwitchArmed(true)
             latestLiveTranscription = nil
             liveTranscriptionInFlight = false
             liveSnapshotInFlightDuration = nil
             startHoldReleaseWatchdogIfNeeded()
+
+            // Double-check: a stop may have arrived between startRecording and now.
+            guard wantRecording else {
+                stopRecordingAndTranscribe()
+                return
+            }
+
             statusText = listeningStatusText(isLive: false)
             showBubble(message: listeningBubbleMessage(), isRecording: true)
             startRiveReactiveLoopIfNeeded()
@@ -726,7 +750,18 @@ final class DictationController: ObservableObject {
             return
         }
 
+        // Always restore volume ducking when leaving the recording state,
+        // regardless of which path we take (success, error, or early return).
+        wantRecording = false
+        isRecording = false
+        duckingService.restoreIfNeeded()
+
         guard let configuration = parakeetConfiguration else {
+            stopLiveTranscriptionLoop()
+            stopHoldReleaseWatchdog()
+            stopRiveReactiveLoop(resetInputs: true)
+            shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            recordingOutputMode = .paste
             handleError("Speech model is still preparing. Try again in a few seconds.")
             return
         }
@@ -736,13 +771,11 @@ final class DictationController: ObservableObject {
             let recordedFile = stoppedRecording.url
             let finalDuration = stoppedRecording.duration
 
-            isRecording = false
             isTranscribing = true
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: false)
-            duckingService.restoreIfNeeded()
             statusText = "Transcribing..."
             showBubble(message: "Transcribing...", isRecording: false, isTranscribing: true)
 
@@ -875,9 +908,9 @@ final class DictationController: ObservableObject {
         } catch {
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
             recordingOutputMode = .paste
+            stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
-            duckingService.restoreIfNeeded()
             handleError(error.localizedDescription)
         }
     }
@@ -964,8 +997,10 @@ final class DictationController: ObservableObject {
             stopRiveReactiveLoop(resetInputs: true)
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
             recordingOutputMode = .paste
-            duckingService.restoreIfNeeded()
         }
+        // Always restore ducking as a safety net, regardless of recording state.
+        // restoreIfNeeded() is idempotent (no-op when savedState is nil).
+        duckingService.restoreIfNeeded()
         statusText = message
         showTransientBubble(message: "Error", duration: 1.6)
     }
@@ -1243,6 +1278,7 @@ final class DictationController: ObservableObject {
             message: "Indicator Preview",
             isRecording: true,
             isTranscribing: false,
+            isNoteMode: false,
             riveAssetPath: preferredRiveAssetPath(),
             htmlIndicatorMarkup: preferredCustomSVGMarkup(),
             useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
@@ -1320,6 +1356,7 @@ final class DictationController: ObservableObject {
             message: message,
             isRecording: isRecording,
             isTranscribing: isTranscribing,
+            isNoteMode: recordingOutputMode == .voiceNote,
             riveAssetPath: riveAssetPathIfEnabled(forRecordingState: isRecording),
             htmlIndicatorMarkup: (isRecording || isTranscribing) ? preferredCustomSVGMarkup() : nil,
             useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
@@ -1332,6 +1369,7 @@ final class DictationController: ObservableObject {
             message: message,
             isRecording: false,
             isTranscribing: false,
+            isNoteMode: false,
             riveAssetPath: nil,
             htmlIndicatorMarkup: nil,
             useBuiltInWaveIndicator: false

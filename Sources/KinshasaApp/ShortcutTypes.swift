@@ -48,6 +48,38 @@ enum ShortcutMode: String, CaseIterable, Identifiable {
             return "Double Tap"
         }
     }
+
+    var iconName: String {
+        switch self {
+        case .toggle: return "arrow.triangle.2.circlepath"
+        case .hold: return "hand.tap.fill"
+        case .doubleTap: return "hand.tap"
+        }
+    }
+
+    var shortDescription: String {
+        switch self {
+        case .toggle: return "Press to start, press to stop"
+        case .hold: return "Hold to record, release to stop"
+        case .doubleTap: return "Double-tap to toggle"
+        }
+    }
+}
+
+enum RecordingOutputMode: String, CaseIterable, Identifiable {
+    case paste
+    case voiceNote
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .paste:
+            return "Paste"
+        case .voiceNote:
+            return "Voice Note"
+        }
+    }
 }
 
 enum ShortcutEvent: Equatable {

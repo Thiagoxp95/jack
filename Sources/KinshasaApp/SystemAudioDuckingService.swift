@@ -1,5 +1,8 @@
 import CoreAudio
 import Foundation
+import os.log
+
+private let duckingLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Kinshasa", category: "ducking")
 
 final class SystemAudioDuckingService {
     private enum DuckingMode {
@@ -28,8 +31,11 @@ final class SystemAudioDuckingService {
         }
 
         guard let savedState else {
+            duckingLog.warning("applyDucking: could not capture audio state")
             return false
         }
+
+        duckingLog.info("applyDucking: reduction=\(reduction)% mode=\(Self.modeLabel(savedState.mode))")
 
         if apply(savedState: savedState, reductionPercent: reduction) {
             return true
@@ -37,10 +43,12 @@ final class SystemAudioDuckingService {
 
         // Some output devices expose no writable CoreAudio volume; AppleScript usually still works.
         if case .appleScript = savedState.mode {
+            duckingLog.warning("applyDucking: AppleScript apply failed")
             return false
         }
 
         guard let appleScriptState = captureAppleScriptState() else {
+            duckingLog.warning("applyDucking: CoreAudio failed, AppleScript fallback unavailable")
             return false
         }
 
@@ -50,21 +58,40 @@ final class SystemAudioDuckingService {
 
     func restoreIfNeeded() {
         guard let savedState else {
+            duckingLog.debug("restoreIfNeeded: no saved state, skipping")
             return
         }
 
+        duckingLog.info("restoreIfNeeded: restoring mode=\(Self.modeLabel(savedState.mode))")
+
+        var restored = false
         switch savedState.mode {
         case let .master(original):
-            _ = writeVolume(deviceID: savedState.deviceID, element: kAudioObjectPropertyElementMain, value: original)
+            restored = writeVolume(deviceID: savedState.deviceID, element: kAudioObjectPropertyElementMain, value: original)
         case let .channels(channels):
+            restored = true
             for channel in channels {
-                _ = writeVolume(deviceID: savedState.deviceID, element: channel.element, value: channel.original)
+                if !writeVolume(deviceID: savedState.deviceID, element: channel.element, value: channel.original) {
+                    restored = false
+                }
             }
         case let .appleScript(originalPercent):
-            _ = setAppleScriptOutputVolume(originalPercent)
+            restored = setAppleScriptOutputVolume(originalPercent)
+        }
+
+        if !restored {
+            duckingLog.error("restoreIfNeeded: volume write failed, mode=\(Self.modeLabel(savedState.mode))")
         }
 
         self.savedState = nil
+    }
+
+    private static func modeLabel(_ mode: DuckingMode) -> String {
+        switch mode {
+        case let .master(original): return "master(\(original))"
+        case let .channels(ch): return "channels(\(ch.count))"
+        case let .appleScript(pct): return "appleScript(\(pct)%)"
+        }
     }
 
     private func captureCurrentState() -> SavedState? {

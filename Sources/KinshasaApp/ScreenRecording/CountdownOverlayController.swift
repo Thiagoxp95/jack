@@ -1,9 +1,12 @@
 import AppKit
+import os
 import SwiftUI
 
 // MARK: - CountdownView
 
 private struct CountdownView: View {
+    var onComplete: @MainActor () -> Void
+
     @State private var currentNumber = 3
     @State private var numberScale: CGFloat = 0.5
     @State private var numberOpacity: Double = 0
@@ -59,7 +62,10 @@ private struct CountdownView: View {
                 backgroundOpacity = 0
             }
 
-            try? await Task.sleep(for: .milliseconds(200))
+            try? await Task.sleep(for: .milliseconds(250))
+
+            // Signal the controller that animation is done
+            onComplete()
         }
     }
 }
@@ -71,10 +77,29 @@ final class CountdownOverlayController {
 
     private var window: NSWindow?
 
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.kinshasa",
+        category: "CountdownOverlay"
+    )
+
     // MARK: - Show
 
+    /// Shows the countdown overlay and waits for animation to complete.
+    /// After this returns the window is hidden but NOT destroyed.
+    /// Call `cleanup()` later to release resources.
     func show() async {
-        guard let screen = NSScreen.main else { return }
+        let mainScreen = NSScreen.main
+        let firstScreen = NSScreen.screens.first
+        let screen = mainScreen ?? firstScreen
+
+        Self.logger.fault("[CDN-01] show: NSScreen.main=\(mainScreen != nil), screens.first=\(firstScreen != nil), NSApp.isHidden=\(NSApp.isHidden)")
+
+        guard let screen else {
+            Self.logger.fault("[CDN-01] show: NO SCREEN AVAILABLE, aborting")
+            return
+        }
+
+        Self.logger.fault("[CDN-02] show: creating window for screen \(screen.frame.debugDescription)")
 
         let window = NSWindow(
             contentRect: screen.frame,
@@ -82,6 +107,7 @@ final class CountdownOverlayController {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
@@ -89,15 +115,34 @@ final class CountdownOverlayController {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.ignoresMouseEvents = true
 
-        window.contentView = NSHostingView(rootView: CountdownView())
-
         self.window = window
-        window.orderFrontRegardless()
 
-        // Wait for the full countdown animation (~3.2 seconds)
-        try? await Task.sleep(for: .milliseconds(3200))
+        Self.logger.fault("[CDN-03] show: window created, level=\(window.level.rawValue), calling orderFrontRegardless. NSApp.isHidden=\(NSApp.isHidden)")
 
-        window.close()
+        // Wait for the SwiftUI countdown animation to signal completion
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let view = CountdownView {
+                continuation.resume()
+            }
+            window.contentView = NSHostingView(rootView: view)
+            window.orderFrontRegardless()
+
+            Self.logger.fault("[CDN-04] show: orderFrontRegardless called. isVisible=\(window.isVisible), isOnActiveSpace=\(window.isOnActiveSpace), NSApp.isHidden=\(NSApp.isHidden), windowNumber=\(window.windowNumber)")
+        }
+
+        Self.logger.fault("[CDN-05] show: animation done, hiding window")
+
+        // Animation done — just hide. Don't tear down yet.
+        window.orderOut(nil)
+    }
+
+    // MARK: - Cleanup
+
+    /// Releases the window and hosting view. Safe to call at any time.
+    func cleanup() {
+        guard let window else { return }
+        window.contentView = nil
+        window.orderOut(nil)
         self.window = nil
     }
 }

@@ -21,6 +21,14 @@ MENU_BAR_APP=${MENU_BAR_APP:-0}
 SIGNING_MODE=${SIGNING_MODE:-}
 APP_IDENTITY=${APP_IDENTITY:-}
 
+# Prefer a stable signing identity when available, unless ad-hoc was explicitly requested.
+if [[ -z "$APP_IDENTITY" && "$SIGNING_MODE" != "adhoc" ]]; then
+  if command -v security >/dev/null 2>&1; then
+    APP_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+      | awk '/[0-9]+\) [0-9A-F]{40} / { print $2; exit }')
+  fi
+fi
+
 if [[ -f "$ROOT/version.env" ]]; then
   source "$ROOT/version.env"
 else
@@ -182,16 +190,30 @@ if [[ ! -f "$APP_ENTITLEMENTS" ]]; then
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Add entitlements here if needed. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>
 PLIST
 fi
 
+# For hardened runtime development builds, keep microphone entitlement present
+# so TCC microphone authorization can be granted for this signed app identity.
+ENABLE_AUDIO_INPUT_ENTITLEMENT=${ENABLE_AUDIO_INPUT_ENTITLEMENT:-1}
+if [[ "$ENABLE_AUDIO_INPUT_ENTITLEMENT" == "1" ]]; then
+  if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.audio-input' "$APP_ENTITLEMENTS" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c 'Set :com.apple.security.device.audio-input true' "$APP_ENTITLEMENTS" >/dev/null
+  else
+    /usr/libexec/PlistBuddy -c 'Add :com.apple.security.device.audio-input bool true' "$APP_ENTITLEMENTS" >/dev/null
+  fi
+fi
+
 if [[ "$SIGNING_MODE" == "adhoc" || -z "$APP_IDENTITY" ]]; then
   CODESIGN_ARGS=(--force --sign "-")
+  echo "Signing mode: ad-hoc"
 else
   CODESIGN_ARGS=(--force --timestamp --options runtime --sign "$APP_IDENTITY")
+  echo "Signing mode: identity ($APP_IDENTITY)"
 fi
 
 # Sign embedded frameworks and their nested binaries before the app bundle.

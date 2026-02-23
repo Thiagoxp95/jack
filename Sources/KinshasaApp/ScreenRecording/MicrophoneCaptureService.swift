@@ -55,12 +55,18 @@ final class MicrophoneCaptureService {
             throw MicrophoneCaptureError.alreadyRecording
         }
 
+        // Record as Linear PCM — zero encoder priming delay.
+        // AAC encoding adds ~2048 samples (~43ms at 48kHz) of silent priming
+        // at the file start, which desynchronizes mic audio from the webcam
+        // video during editor playback. PCM has no such delay.
+        // The export pipeline re-encodes to AAC when building the final file.
         let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 48_000,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 128_000,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsFloatKey: false,
         ]
 
         let recorder: AVAudioRecorder
