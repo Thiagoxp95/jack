@@ -1,3 +1,4 @@
+import ClerkKit
 import SwiftUI
 
 struct ContentView: View {
@@ -5,7 +6,7 @@ struct ContentView: View {
     @Bindable var recordingController: RecordingSessionController
     @State private var selectedSection: SettingsSection = .overview
     @State private var isLoadingSetup = false
-    private let setupWindow = SetupWindowController()
+    @State private var setupWindow = SetupWindowController()
 
     var body: some View {
         NavigationSplitView {
@@ -16,10 +17,38 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationTitle("Actionfy")
             .safeAreaInset(edge: .bottom) {
-                Button("Open Setup Wizard") {
-                    controller.showOnboardingWizard()
+                VStack(alignment: .leading, spacing: 8) {
+                    Button("Open Setup Wizard") {
+                        controller.showOnboardingWizard()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Divider()
+
+                    if let user = Clerk.shared.user {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let firstName = user.firstName, let lastName = user.lastName {
+                                Text("\(firstName) \(lastName)")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                            if let email = user.emailAddresses.first?.emailAddress {
+                                Text(email)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+
+                    Button("Sign Out", role: .destructive) {
+                        Task {
+                            try? await Clerk.shared.auth.signOut()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
                 }
-                .buttonStyle(.borderedProminent)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -51,6 +80,8 @@ struct ContentView: View {
             audioModelSection
         case .screenRecording:
             screenRecordingSection
+        case .organization:
+            organizationSection
         case .advanced:
             advancedSection
         }
@@ -406,6 +437,19 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var organizationSection: some View {
+        if let org = Clerk.shared.user?.organizationMemberships?.first?.organization {
+            OrganizationSettingsView(organization: org)
+        } else {
+            settingsCard(title: "No Organization", subtitle: "You are not a member of any organization.") {
+                Text("Create or join an organization to manage members and settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var advancedSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             settingsCard(title: "Diagnostics", subtitle: "Detailed runtime information.") {
@@ -511,6 +555,7 @@ private extension ContentView {
         case shortcuts
         case audioModel
         case screenRecording
+        case organization
         case advanced
 
         var id: String { rawValue }
@@ -527,6 +572,8 @@ private extension ContentView {
                 return "Audio & Model"
             case .screenRecording:
                 return "Screen Recording"
+            case .organization:
+                return "Organization"
             case .advanced:
                 return "Advanced"
             }
@@ -544,6 +591,8 @@ private extension ContentView {
                 return "Recording volume behavior and model warm-up settings."
             case .screenRecording:
                 return "Capture and edit recordings."
+            case .organization:
+                return "Manage your organization, members, and invitations."
             case .advanced:
                 return "Detailed runtime diagnostics and identity information."
             }
@@ -561,6 +610,8 @@ private extension ContentView {
                 return "waveform"
             case .screenRecording:
                 return "record.circle"
+            case .organization:
+                return "building.2"
             case .advanced:
                 return "wrench.and.screwdriver"
             }
