@@ -225,6 +225,11 @@ private struct AuthenticatedRootView: View {
         )
             .frame(minWidth: 640, minHeight: 460)
             .task {
+                // Ensure Convex client is ready before child views need it
+                if authController.convexClient == nil {
+                    authController.initializeConvex(deploymentUrl: AppConfig.convexDeploymentUrl)
+                    await authController.authenticateConvex()
+                }
                 await controller.initialize()
                 await recordingController.initialize()
                 spaceController.refreshSpaces()
