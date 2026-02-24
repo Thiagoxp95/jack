@@ -11,16 +11,24 @@ final class NoteSyncService {
     }
 
     func uploadNote(
-        organizationId: String,
+        organizationId: String?,
         text: String,
         dayStamp: String,
         timestamp: String
     ) async throws {
-        try await client.mutation("notes:create", with: [
-            "organizationId": organizationId,
-            "text": text,
-            "dayStamp": dayStamp,
-            "timestamp": timestamp,
-        ])
+        if let orgId = organizationId {
+            try await client.mutation("notes:create", with: [
+                "organizationId": orgId,
+                "text": text,
+                "dayStamp": dayStamp,
+                "timestamp": timestamp,
+            ])
+        } else {
+            try await client.mutation("notes:create", with: [
+                "text": text,
+                "dayStamp": dayStamp,
+                "timestamp": timestamp,
+            ])
+        }
     }
 }

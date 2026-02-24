@@ -4,17 +4,59 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var controller: DictationController
     @Bindable var recordingController: RecordingSessionController
+    var spaceController: SpaceController
+    var authController: AuthController
     @State private var selectedSection: SettingsSection = .overview
     @State private var isLoadingSetup = false
     @State private var setupWindow = SetupWindowController()
+    @State private var showCreateSpace = false
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selectedSection) { section in
-                Label(section.title, systemImage: section.systemImage)
-                    .tag(section)
+            VStack(spacing: 0) {
+                // Space selector dropdown
+                Menu {
+                    ForEach(spaceController.availableSpaces) { space in
+                        Button {
+                            Task { await spaceController.switchSpace(to: space) }
+                        } label: {
+                            Label(
+                                space.name,
+                                systemImage: space.isPersonal ? "person.fill" : "building.2.fill"
+                            )
+                        }
+                    }
+                    Divider()
+                    Button {
+                        showCreateSpace = true
+                    } label: {
+                        Label("Create Space", systemImage: "plus")
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: spaceController.activeSpace.isPersonal ? "person.fill" : "building.2.fill")
+                            .foregroundStyle(.secondary)
+                        Text(spaceController.activeSpace.name)
+                            .font(.headline)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+
+                // Existing section list
+                List(SettingsSection.allCases, selection: $selectedSection) { section in
+                    Label(section.title, systemImage: section.systemImage)
+                        .tag(section)
+                }
+                .listStyle(.sidebar)
             }
-            .listStyle(.sidebar)
             .navigationTitle("Actionfy")
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -65,6 +107,16 @@ struct ContentView: View {
         .sheet(isPresented: $controller.shouldShowOnboardingWizard) {
             OnboardingWizardView(controller: controller)
         }
+        .sheet(isPresented: $showCreateSpace) {
+            CreateOrganizationView { org in
+                showCreateSpace = false
+                spaceController.refreshSpaces()
+                Task {
+                    let newSpace = Space(id: org.id, name: org.name, isPersonal: false)
+                    await spaceController.switchSpace(to: newSpace)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -80,8 +132,8 @@ struct ContentView: View {
             audioModelSection
         case .screenRecording:
             screenRecordingSection
-        case .organization:
-            organizationSection
+        case .spaceSettings:
+            spaceSettingsSection
         case .advanced:
             advancedSection
         }
@@ -254,6 +306,18 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
+        .contextMenu {
+            Menu("Move to...") {
+                ForEach(spaceController.availableSpaces) { space in
+                    Button(space.name) {
+                        // Note: VoiceNote is loaded from local markdown files and does not
+                        // have a Convex document ID yet. The actual moveToSpace call will
+                        // need to wait until notes are loaded from Convex.
+                        // TODO: Wire up actual move when VoiceNote has Convex ID
+                    }
+                }
+            }
+        }
     }
 
     private func formatDayHeader(_ dayStamp: String) -> String {
@@ -438,7 +502,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var organizationSection: some View {
+    private var spaceSettingsSection: some View {
         if let org = Clerk.shared.user?.organizationMemberships?.first?.organization {
             OrganizationSettingsView(organization: org)
         } else {
@@ -555,7 +619,7 @@ private extension ContentView {
         case shortcuts
         case audioModel
         case screenRecording
-        case organization
+        case spaceSettings
         case advanced
 
         var id: String { rawValue }
@@ -572,8 +636,8 @@ private extension ContentView {
                 return "Audio & Model"
             case .screenRecording:
                 return "Screen Recording"
-            case .organization:
-                return "Organization"
+            case .spaceSettings:
+                return "Space Settings"
             case .advanced:
                 return "Advanced"
             }
@@ -591,8 +655,8 @@ private extension ContentView {
                 return "Recording volume behavior and model warm-up settings."
             case .screenRecording:
                 return "Capture and edit recordings."
-            case .organization:
-                return "Manage your organization, members, and invitations."
+            case .spaceSettings:
+                return "Manage your space, members, and invitations."
             case .advanced:
                 return "Detailed runtime diagnostics and identity information."
             }
@@ -610,7 +674,7 @@ private extension ContentView {
                 return "waveform"
             case .screenRecording:
                 return "record.circle"
-            case .organization:
+            case .spaceSettings:
                 return "building.2"
             case .advanced:
                 return "wrench.and.screwdriver"

@@ -13,7 +13,7 @@ final class RecordingSyncService {
     /// Uploads a recording's video file to Convex storage and creates the
     /// associated metadata record.
     func uploadRecording(
-        organizationId: String,
+        organizationId: String?,
         title: String,
         duration: Double,
         videoFileURL: URL
@@ -37,11 +37,18 @@ final class RecordingSyncService {
         }
 
         // 3. Create the recording metadata in the database.
-        try await client.mutation("recordings:create", with: [
-            "organizationId": organizationId,
-            "title": title,
-            "duration": duration,
-        ])
+        if let orgId = organizationId {
+            try await client.mutation("recordings:create", with: [
+                "organizationId": orgId,
+                "title": title,
+                "duration": duration,
+            ])
+        } else {
+            try await client.mutation("recordings:create", with: [
+                "title": title,
+                "duration": duration,
+            ])
+        }
     }
 }
 

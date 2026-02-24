@@ -10,6 +10,7 @@ import SwiftUI
 struct AuthGateView: View {
     @Environment(Clerk.self) private var clerk
     @State private var authController = AuthController()
+    @State private var spaceController = SpaceController()
     @State private var loadFailed = false
     @State private var isRetrying = false
     @State private var diagnosticMessage = ""
@@ -29,7 +30,7 @@ struct AuthGateView: View {
                     initializeConvexIfNeeded()
                 })
             } else {
-                AuthenticatedRootView(authController: authController)
+                AuthenticatedRootView(authController: authController, spaceController: spaceController)
             }
         }
         .animation(.default, value: clerk.isLoaded)
@@ -210,16 +211,23 @@ struct AuthGateView: View {
 /// ``ContentView``.
 private struct AuthenticatedRootView: View {
     let authController: AuthController
+    let spaceController: SpaceController
 
     @StateObject private var controller = DictationController()
     @State private var recordingController = RecordingSessionController()
 
     var body: some View {
-        ContentView(controller: controller, recordingController: recordingController)
+        ContentView(
+            controller: controller,
+            recordingController: recordingController,
+            spaceController: spaceController,
+            authController: authController
+        )
             .frame(minWidth: 640, minHeight: 460)
             .task {
                 await controller.initialize()
                 await recordingController.initialize()
+                spaceController.refreshSpaces()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 controller.applicationWillTerminate()
