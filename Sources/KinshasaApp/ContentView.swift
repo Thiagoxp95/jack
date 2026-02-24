@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var selectedSection: SettingsSection = .overview
     @State private var isLoadingSetup = false
     @State private var setupWindow = SetupWindowController()
+    @State private var recordingsWindow = RecordingsLibraryWindowController()
     @State private var showCreateSpace = false
 
     var body: some View {
@@ -60,6 +61,17 @@ struct ContentView: View {
             .navigationTitle("Actionfy")
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        recordingsWindow.show(
+                            spaceController: spaceController,
+                            authController: authController
+                        )
+                    } label: {
+                        Label("Recordings Library", systemImage: "square.grid.2x2")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+
                     Button("Open Setup Wizard") {
                         controller.showOnboardingWizard()
                     }
