@@ -15,18 +15,48 @@ export default defineSchema({
     .index("by_clerkId", ["clerkId"])
     .index("by_email", ["email"]),
 
+  spaces: defineTable({
+    name: v.string(),
+    ownerId: v.id("users"),
+    createdAt: v.number(),
+  }).index("by_owner", ["ownerId"]),
+
+  space_members: defineTable({
+    spaceId: v.id("spaces"),
+    userId: v.id("users"),
+    role: v.union(v.literal("owner"), v.literal("member")),
+    joinedAt: v.number(),
+  })
+    .index("by_space", ["spaceId"])
+    .index("by_user", ["userId"])
+    .index("by_space_user", ["spaceId", "userId"]),
+
+  space_invitations: defineTable({
+    spaceId: v.id("spaces"),
+    invitedByUserId: v.id("users"),
+    email: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("declined"),
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_space", ["spaceId"])
+    .index("by_email", ["email"]),
+
   notes: defineTable({
-    organizationId: v.optional(v.string()),
+    spaceId: v.optional(v.id("spaces")),
     userId: v.optional(v.id("users")),
     text: v.string(),
     dayStamp: v.string(),
     timestamp: v.string(),
   })
-    .index("by_org", ["organizationId"])
-    .index("by_org_user", ["organizationId", "userId"]),
+    .index("by_space", ["spaceId"])
+    .index("by_space_user", ["spaceId", "userId"]),
 
   recordings: defineTable({
-    organizationId: v.optional(v.string()),
+    spaceId: v.optional(v.id("spaces")),
     userId: v.optional(v.id("users")),
     title: v.optional(v.string()),
     duration: v.number(),
@@ -43,7 +73,7 @@ export default defineSchema({
     transcriptionStatus: v.optional(v.string()),
     chunkStorageIds: v.optional(v.array(v.string())),
   })
-    .index("by_org", ["organizationId"])
-    .index("by_org_user", ["organizationId", "userId"])
+    .index("by_space", ["spaceId"])
+    .index("by_space_user", ["spaceId", "userId"])
     .index("by_share_token", ["shareToken"]),
 });

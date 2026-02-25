@@ -2,18 +2,10 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 export const list = query({
-  args: { organizationId: v.optional(v.string()) },
+  args: { spaceId: v.optional(v.id("spaces")) },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
-
-    if (args.organizationId) {
-      return await ctx.db
-        .query("notes")
-        .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
-        .order("desc")
-        .collect();
-    }
 
     const user = await ctx.db
       .query("users")
@@ -21,10 +13,28 @@ export const list = query({
       .unique();
     if (!user) return [];
 
+    if (args.spaceId) {
+      // Verify membership
+      const membership = await ctx.db
+        .query("space_members")
+        .withIndex("by_space_user", (q) =>
+          q.eq("spaceId", args.spaceId!).eq("userId", user._id),
+        )
+        .unique();
+      if (!membership) throw new Error("Not a member of this space");
+
+      return await ctx.db
+        .query("notes")
+        .withIndex("by_space", (q) => q.eq("spaceId", args.spaceId))
+        .order("desc")
+        .collect();
+    }
+
+    // Personal notes (no space)
     return await ctx.db
       .query("notes")
-      .withIndex("by_org_user", (q) =>
-        q.eq("organizationId", undefined).eq("userId", user._id)
+      .withIndex("by_space_user", (q) =>
+        q.eq("spaceId", undefined).eq("userId", user._id),
       )
       .order("desc")
       .collect();
@@ -33,7 +43,7 @@ export const list = query({
 
 export const create = mutation({
   args: {
-    organizationId: v.optional(v.string()),
+    spaceId: v.optional(v.id("spaces")),
     text: v.string(),
     dayStamp: v.string(),
     timestamp: v.string(),
@@ -48,8 +58,18 @@ export const create = mutation({
       .unique();
     if (!user) throw new Error("User not found. Call syncUser first.");
 
+    if (args.spaceId) {
+      const membership = await ctx.db
+        .query("space_members")
+        .withIndex("by_space_user", (q) =>
+          q.eq("spaceId", args.spaceId!).eq("userId", user._id),
+        )
+        .unique();
+      if (!membership) throw new Error("Not a member of this space");
+    }
+
     return await ctx.db.insert("notes", {
-      organizationId: args.organizationId,
+      spaceId: args.spaceId,
       userId: user._id,
       text: args.text,
       dayStamp: args.dayStamp,
@@ -70,7 +90,7 @@ export const remove = mutation({
 export const moveToSpace = mutation({
   args: {
     noteId: v.id("notes"),
-    targetOrganizationId: v.optional(v.string()),
+    targetSpaceId: v.optional(v.id("spaces")),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -88,8 +108,18 @@ export const moveToSpace = mutation({
       throw new Error("Not authorized to move this note");
     }
 
+    if (args.targetSpaceId) {
+      const membership = await ctx.db
+        .query("space_members")
+        .withIndex("by_space_user", (q) =>
+          q.eq("spaceId", args.targetSpaceId!).eq("userId", user._id),
+        )
+        .unique();
+      if (!membership) throw new Error("Not a member of the target space");
+    }
+
     await ctx.db.patch(args.noteId, {
-      organizationId: args.targetOrganizationId,
+      spaceId: args.targetSpaceId,
     });
   },
 });
