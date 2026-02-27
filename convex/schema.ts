@@ -76,4 +76,40 @@ export default defineSchema({
     .index("by_space", ["spaceId"])
     .index("by_space_user", ["spaceId", "userId"])
     .index("by_share_token", ["shareToken"]),
+
+  todoLists: defineTable({
+    spaceId: v.optional(v.id("spaces")),
+    userId: v.id("users"),
+    name: v.string(),
+    color: v.optional(v.string()),
+    sortOrder: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_space", ["spaceId"])
+    .index("by_space_user", ["spaceId", "userId"]),
+
+  todos: defineTable({
+    spaceId: v.optional(v.id("spaces")),
+    userId: v.id("users"),
+    title: v.string(),
+    description: v.optional(v.string()),
+    status: v.union(v.literal("todo"), v.literal("in_progress"), v.literal("done")),
+    priority: v.union(v.literal("none"), v.literal("low"), v.literal("medium"), v.literal("high")),
+    listId: v.optional(v.id("todoLists")),
+    tags: v.optional(v.array(v.string())),
+    dueDate: v.optional(v.string()),
+    dueTime: v.optional(v.string()),
+    reminders: v.optional(v.array(v.object({
+      at: v.number(),
+      scheduledFunctionId: v.optional(v.id("_scheduled_functions")),
+      delivered: v.optional(v.boolean()),
+    }))),
+    completedAt: v.optional(v.number()),
+    rawTranscription: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_space", ["spaceId"])
+    .index("by_space_user", ["spaceId", "userId"])
+    .index("by_list", ["listId"])
+    .index("by_status", ["status"]),
 });
