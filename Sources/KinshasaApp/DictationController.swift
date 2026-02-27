@@ -1,7 +1,39 @@
 import ApplicationServices
 import AppKit
 import Foundation
+import os.log
+import ServiceManagement
 import UniformTypeIdentifiers
+
+private let slackLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Kinshasa", category: "slackMute")
+
+enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
+    case parakeetV2 = "parakeet-v2"
+    case parakeetV3 = "parakeet-v3"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .parakeetV2: return "Parakeet v2 (English)"
+        case .parakeetV3: return "Parakeet v3 (Multilingual)"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .parakeetV2: return "Optimized for English-only transcription"
+        case .parakeetV3: return "Supports multiple languages"
+        }
+    }
+
+    var modelIdentifier: String {
+        switch self {
+        case .parakeetV2: return "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+        case .parakeetV3: return "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+        }
+    }
+}
 
 @MainActor
 final class DictationController: ObservableObject {
@@ -29,10 +61,14 @@ final class DictationController: ObservableObject {
         }
     }
 
-    @Published private(set) var invocationKeyCode: Int64
+    @Published private(set) var invocationShortcut: InvocationShortcut
     @Published private(set) var voiceNoteSwitchKeyCode: Int64
+    @Published private(set) var screenRecordingShortcut: InvocationShortcut?
+    @Published private(set) var todoSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
     @Published var isCapturingVoiceNoteSwitchKey = false
+    @Published var isCapturingScreenRecordingKey = false
+    @Published var isCapturingTodoSwitchKey = false
     @Published var statusText: String
     @Published var lastTranscript: String
     @Published var isRecording = false
@@ -43,6 +79,71 @@ final class DictationController: ObservableObject {
     @Published var microphoneGranted = false
     @Published private(set) var hasCompletedOnboarding: Bool
     @Published var shouldShowOnboardingWizard: Bool
+    @Published var escapeToCancelEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(escapeToCancelEnabled, forKey: DefaultsKey.escapeToCancelEnabled)
+            shortcutMonitor.escapeToCancelEnabled = escapeToCancelEnabled
+        }
+    }
+    @Published var launchAtLoginEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(launchAtLoginEnabled, forKey: DefaultsKey.launchAtLogin)
+            if launchAtLoginEnabled {
+                try? SMAppService.mainApp.register()
+            } else {
+                try? SMAppService.mainApp.unregister()
+            }
+        }
+    }
+    @Published var showInDock: Bool {
+        didSet {
+            guard showInDock || showInStatusBar else {
+                showInDock = true
+                return
+            }
+            UserDefaults.standard.set(showInDock, forKey: DefaultsKey.showInDock)
+            NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+        }
+    }
+    @Published var showInStatusBar: Bool {
+        didSet {
+            guard showInStatusBar || showInDock else {
+                showInStatusBar = true
+                return
+            }
+            UserDefaults.standard.set(showInStatusBar, forKey: DefaultsKey.showInStatusBar)
+            NotificationCenter.default.post(name: .statusBarVisibilityChanged, object: nil, userInfo: ["visible": showInStatusBar])
+        }
+    }
+    @Published var soundEffectsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(soundEffectsEnabled, forKey: DefaultsKey.soundEffectsEnabled)
+        }
+    }
+    @Published var hapticFeedbackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(hapticFeedbackEnabled, forKey: DefaultsKey.hapticFeedbackEnabled)
+        }
+    }
+    @Published var autoCopyToClipboard: Bool {
+        didSet {
+            UserDefaults.standard.set(autoCopyToClipboard, forKey: DefaultsKey.autoCopyToClipboard)
+        }
+    }
+    @Published var wordReplacements: [WordReplacement] {
+        didSet {
+            if let data = try? JSONEncoder().encode(wordReplacements) {
+                UserDefaults.standard.set(data, forKey: DefaultsKey.wordReplacementsJSON)
+            }
+        }
+    }
+    @Published var microphonePriorityUIDs: [String] {
+        didSet {
+            if let data = try? JSONEncoder().encode(microphonePriorityUIDs) {
+                UserDefaults.standard.set(data, forKey: DefaultsKey.microphonePriorityUIDs)
+            }
+        }
+    }
     @Published var duckingEnabled: Bool {
         didSet {
             UserDefaults.standard.set(duckingEnabled, forKey: DefaultsKey.duckingEnabled)
@@ -59,6 +160,11 @@ final class DictationController: ObservableObject {
 
             UserDefaults.standard.set(clamped, forKey: DefaultsKey.duckingAmountPercent)
             syncDuckingForCurrentSession()
+        }
+    }
+    @Published var slackMuteEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(slackMuteEnabled, forKey: DefaultsKey.slackMuteEnabled)
         }
     }
     @Published var keepModelWarmEnabled: Bool {
@@ -109,23 +215,24 @@ final class DictationController: ObservableObject {
             syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: true)
         }
     }
-    @Published var floatingIndicatorSizePercent: Double {
-        didSet {
-            let clamped = min(max(floatingIndicatorSizePercent, 18), 140)
-            if clamped != floatingIndicatorSizePercent {
-                floatingIndicatorSizePercent = clamped
-                return
-            }
-            UserDefaults.standard.set(clamped, forKey: DefaultsKey.floatingIndicatorSizePercent)
-            syncFloatingIndicatorPresentationForCurrentSession(previewIfIdle: isAdjustingIndicatorSize)
-        }
-    }
+    private let floatingIndicatorSizePercent: Double = 38
     @Published private(set) var keepModelWarmStatus: String
     @Published var lastShortcutEventAt: Date?
     @Published var lastTranscriptionLatency: TimeInterval?
     @Published var lastTranscriptionBackend: String?
     @Published var appMode: AppMode = .dictation
     @Published private(set) var recordingOutputMode: RecordingOutputMode = .paste
+    @Published private(set) var lastNoteSavedAt: Date?
+    @Published private(set) var lastTodoSavedAt: Date?
+    @Published var selectedTranscriptionModel: TranscriptionModelChoice {
+        didSet {
+            UserDefaults.standard.set(selectedTranscriptionModel.rawValue, forKey: DefaultsKey.transcriptionModel)
+            if oldValue != selectedTranscriptionModel {
+                parakeetConfiguration = nil
+                Task { _ = await prepareParakeetIfNeeded(showReadyStatus: true) }
+            }
+        }
+    }
 
     private var initialized = false
     private var interpreter: ShortcutInterpreter
@@ -135,10 +242,18 @@ final class DictationController: ObservableObject {
     private let pasteService = PasteService()
     private let noteService = NoteService()
     private let duckingService = SystemAudioDuckingService()
+    private let slackMuteService = SlackMuteService()
     private let bubble = FloatingBubbleController()
+    var spaceController: SpaceController? {
+        didSet { syncSpaceAppearance() }
+    }
     private let bootstrapper = LocalParakeetBootstrapper()
     private var parakeetConfiguration: ParakeetConfiguration?
-    private let parakeetModel: String
+    private var parakeetModel: String {
+        ProcessInfo.processInfo.environment["KINSHASA_COREML_MODEL"]
+            ?? ProcessInfo.processInfo.environment["PARAKEET_MODEL"]
+            ?? selectedTranscriptionModel.modelIdentifier
+    }
     private var bubbleHideTask: Task<Void, Never>?
     private var liveTranscriptionLoopTask: Task<Void, Never>?
     private var riveReactiveLoopTask: Task<Void, Never>?
@@ -153,19 +268,23 @@ final class DictationController: ObservableObject {
     private var previousRiveLevel: Double = 0
     private var riveObservedPeakLevel: Double = 0.25
     private var lastRivePulseAt: Date?
+    /// Counts consecutive ticks where raw level is below the voice gate.
+    /// After enough quiet ticks, the level decays smoothly to zero.
+    private var silenceTickCount: Int = 0
     private var holdReleaseMissingSince: Date?
     /// Set synchronously on `.startRecording`/`.stopRecording` so the intent
     /// survives the gap while `beginRecording()` is awaiting async setup.
     private var wantRecording = false
-    private var isAdjustingIndicatorSize = false
     private var localKeyCaptureMonitor: Any?
     private var globalKeyCaptureMonitor: Any?
     private var keyCaptureTarget: KeyCaptureTarget?
+    private var captureAccumulatedModifiers: NSEvent.ModifierFlags = []
+    private var captureDebounceTimer: Timer?
 
     private let liveSnapshotMinDuration: TimeInterval = 0.75
     private let liveSnapshotInterval: TimeInterval = 0.80
     private let liveStreamingWindowDuration: TimeInterval = 1.65
-    private let riveReactivePollInterval: TimeInterval = 0.05
+    private let riveReactivePollInterval: TimeInterval = 0.03
     private let riveReactivePulseThreshold: Double = 0.14
     private let riveReactivePulseCooldown: TimeInterval = 0.40
     private let keepModelWarmInterval: TimeInterval = 45
@@ -185,11 +304,25 @@ final class DictationController: ObservableObject {
 
     private enum DefaultsKey {
         static let mode = "shortcut_mode"
-        static let invocationKeyCode = "shortcut_invocation_key_code"
+        static let invocationKeyCode = "shortcut_invocation_key_code" // Legacy
+        static let invocationShortcutJSON = "invocation_shortcut_json"
         static let voiceNoteSwitchKeyCode = "voice_note_switch_key_code"
+        static let todoSwitchKeyCode = "todo_switch_key_code"
+        static let screenRecordingKeyCode = "screen_recording_key_code" // Legacy
+        static let screenRecordingShortcutJSON = "screen_recording_shortcut_json"
         static let onboardingCompleted = "onboarding_completed"
+        static let escapeToCancelEnabled = "escape_to_cancel_enabled"
+        static let launchAtLogin = "launch_at_login"
+        static let showInDock = "show_in_dock"
+        static let showInStatusBar = "show_in_status_bar"
+        static let soundEffectsEnabled = "sound_effects_enabled"
+        static let hapticFeedbackEnabled = "haptic_feedback_enabled"
+        static let autoCopyToClipboard = "auto_copy_to_clipboard"
+        static let wordReplacementsJSON = "word_replacements_json"
+        static let microphonePriorityUIDs = "microphone_priority_uids"
         static let duckingEnabled = "ducking_enabled"
         static let duckingAmountPercent = "ducking_amount_percent"
+        static let slackMuteEnabled = "slack_mute_enabled"
         static let keepModelWarmEnabled = "keep_model_warm_enabled"
         static let keepModelWarmOnlyOnPower = "keep_model_warm_only_on_power"
         static let riveIndicatorEnabled = "rive_indicator_enabled"
@@ -199,11 +332,14 @@ final class DictationController: ObservableObject {
         static let builtInWaveIndicatorEnabled = "built_in_wave_indicator_enabled"
         static let floatingIndicatorPosition = "floating_indicator_position"
         static let floatingIndicatorSizePercent = "floating_indicator_size_percent"
+        static let transcriptionModel = "transcription_model"
     }
 
     private enum KeyCaptureTarget {
         case invocation
         case voiceNoteSwitch
+        case screenRecording
+        case todoSwitch
     }
 
     nonisolated static func inferOnboardingCompletion(
@@ -230,12 +366,21 @@ final class DictationController: ObservableObject {
         let initialMicrophoneGranted = audioCapture.microphonePermissionGranted
 
         let initialMode = ShortcutMode(rawValue: defaults.string(forKey: DefaultsKey.mode) ?? "") ?? .toggle
-        let initialInvocationKeyCode: Int64
-        if let stored = defaults.object(forKey: DefaultsKey.invocationKeyCode) as? Int {
-            initialInvocationKeyCode = Int64(stored)
+
+        // Migrate invocation shortcut from legacy key code
+        let initialInvocationShortcut: InvocationShortcut
+        if let jsonData = defaults.data(forKey: DefaultsKey.invocationShortcutJSON),
+           let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
+            initialInvocationShortcut = decoded
+        } else if let legacyCode = defaults.object(forKey: DefaultsKey.invocationKeyCode) as? Int {
+            initialInvocationShortcut = InvocationShortcut.fromLegacyKeyCode(Int64(legacyCode))
+            if let data = try? JSONEncoder().encode(initialInvocationShortcut) {
+                defaults.set(data, forKey: DefaultsKey.invocationShortcutJSON)
+            }
         } else {
-            initialInvocationKeyCode = InvocationKey.defaultKeyCode
+            initialInvocationShortcut = .default
         }
+
         let initialVoiceNoteSwitchKeyCode: Int64
         if let stored = defaults.object(forKey: DefaultsKey.voiceNoteSwitchKeyCode) as? Int {
             initialVoiceNoteSwitchKeyCode = Int64(stored)
@@ -243,12 +388,59 @@ final class DictationController: ObservableObject {
             initialVoiceNoteSwitchKeyCode = 0 // A
         }
 
+        let initialTodoSwitchKeyCode: Int64
+        if let stored = defaults.object(forKey: DefaultsKey.todoSwitchKeyCode) as? Int {
+            initialTodoSwitchKeyCode = Int64(stored)
+        } else {
+            initialTodoSwitchKeyCode = 17 // T key
+        }
+
+        // Migrate screen recording shortcut from legacy key code
+        let initialScreenRecordingShortcut: InvocationShortcut?
+        if let jsonData = defaults.data(forKey: DefaultsKey.screenRecordingShortcutJSON),
+           let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
+            initialScreenRecordingShortcut = decoded
+        } else if let legacyCode = defaults.object(forKey: DefaultsKey.screenRecordingKeyCode) as? Int {
+            initialScreenRecordingShortcut = InvocationShortcut.fromLegacyKeyCode(Int64(legacyCode))
+            if let data = try? JSONEncoder().encode(initialScreenRecordingShortcut) {
+                defaults.set(data, forKey: DefaultsKey.screenRecordingShortcutJSON)
+            }
+        } else {
+            initialScreenRecordingShortcut = nil
+        }
+
         mode = initialMode
-        invocationKeyCode = initialInvocationKeyCode
+        invocationShortcut = initialInvocationShortcut
         voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
+        todoSwitchKeyCode = initialTodoSwitchKeyCode
+        screenRecordingShortcut = initialScreenRecordingShortcut
+
+        escapeToCancelEnabled = defaults.object(forKey: DefaultsKey.escapeToCancelEnabled) as? Bool ?? false
+        launchAtLoginEnabled = defaults.object(forKey: DefaultsKey.launchAtLogin) as? Bool ?? false
+        showInDock = defaults.object(forKey: DefaultsKey.showInDock) as? Bool ?? true
+        showInStatusBar = defaults.object(forKey: DefaultsKey.showInStatusBar) as? Bool ?? true
+        soundEffectsEnabled = defaults.object(forKey: DefaultsKey.soundEffectsEnabled) as? Bool ?? false
+        hapticFeedbackEnabled = defaults.object(forKey: DefaultsKey.hapticFeedbackEnabled) as? Bool ?? false
+        autoCopyToClipboard = defaults.object(forKey: DefaultsKey.autoCopyToClipboard) as? Bool ?? true
+
+        if let wrData = defaults.data(forKey: DefaultsKey.wordReplacementsJSON),
+           let decoded = try? JSONDecoder().decode([WordReplacement].self, from: wrData) {
+            wordReplacements = decoded
+        } else {
+            wordReplacements = []
+        }
+
+        if let mpData = defaults.data(forKey: DefaultsKey.microphonePriorityUIDs),
+           let decoded = try? JSONDecoder().decode([String].self, from: mpData) {
+            microphonePriorityUIDs = decoded
+        } else {
+            microphonePriorityUIDs = []
+        }
+
         duckingEnabled = defaults.object(forKey: DefaultsKey.duckingEnabled) as? Bool ?? false
         let storedDuckingAmount = defaults.object(forKey: DefaultsKey.duckingAmountPercent) as? Double ?? 40
         duckingAmountPercent = min(max(storedDuckingAmount, 0), 90)
+        slackMuteEnabled = defaults.object(forKey: DefaultsKey.slackMuteEnabled) as? Bool ?? false
         keepModelWarmEnabled = defaults.object(forKey: DefaultsKey.keepModelWarmEnabled) as? Bool ?? false
         keepModelWarmOnlyOnPower = defaults.object(forKey: DefaultsKey.keepModelWarmOnlyOnPower) as? Bool ?? true
         let defaultRiveAssetPath = Self.defaultListeningRiveAssetPath()
@@ -259,8 +451,6 @@ final class DictationController: ObservableObject {
         builtInWaveIndicatorEnabled = defaults.object(forKey: DefaultsKey.builtInWaveIndicatorEnabled) as? Bool ?? false
         let rawPosition = defaults.string(forKey: DefaultsKey.floatingIndicatorPosition) ?? FloatingIndicatorPosition.centerTop.rawValue
         floatingIndicatorPosition = FloatingIndicatorPosition(rawValue: rawPosition) ?? .centerTop
-        let storedIndicatorSize = defaults.object(forKey: DefaultsKey.floatingIndicatorSizePercent) as? Double ?? 35
-        floatingIndicatorSizePercent = min(max(storedIndicatorSize, 18), 140)
         let inferredOnboardingCompleted = Self.inferOnboardingCompletion(
             defaults: defaults,
             accessibilityGranted: initialAccessibilityGranted,
@@ -274,15 +464,17 @@ final class DictationController: ObservableObject {
         statusText = "Preparing CoreML speech model..."
         lastTranscript = ""
 
-        parakeetModel = ProcessInfo.processInfo.environment["KINSHASA_COREML_MODEL"]
-            ?? ProcessInfo.processInfo.environment["PARAKEET_MODEL"]
-            ?? "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+        let storedModelRaw = defaults.string(forKey: DefaultsKey.transcriptionModel) ?? ""
+        selectedTranscriptionModel = TranscriptionModelChoice(rawValue: storedModelRaw) ?? .parakeetV2
 
         accessibilityGranted = initialAccessibilityGranted
         keyboardMonitoringGranted = initialKeyboardMonitoringGranted
         microphoneGranted = initialMicrophoneGranted
-        shortcutMonitor.setInvocationKeyCode(initialInvocationKeyCode)
+        shortcutMonitor.setInvocationShortcut(initialInvocationShortcut)
         shortcutMonitor.setVoiceNoteSwitchKeyCode(initialVoiceNoteSwitchKeyCode)
+        shortcutMonitor.setTodoSwitchKeyCode(initialTodoSwitchKeyCode)
+        shortcutMonitor.setScreenRecordingShortcut(initialScreenRecordingShortcut)
+        shortcutMonitor.escapeToCancelEnabled = escapeToCancelEnabled
 
         if defaults.object(forKey: DefaultsKey.onboardingCompleted) == nil, inferredOnboardingCompleted {
             defaults.set(true, forKey: DefaultsKey.onboardingCompleted)
@@ -296,6 +488,26 @@ final class DictationController: ObservableObject {
         shortcutMonitor.onVoiceNoteSwitchKeyPressed = { [weak self] in
             Task { @MainActor [weak self] in
                 self?.toggleRecordingOutputMode()
+            }
+        }
+        shortcutMonitor.onTodoSwitchKeyPressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.setTodoMode()
+            }
+        }
+        shortcutMonitor.onSpaceCycleKeyPressed = { [weak self] direction in
+            Task { @MainActor [weak self] in
+                self?.cycleSpace(direction: direction)
+            }
+        }
+        shortcutMonitor.onScreenRecordingKeyPressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleScreenRecordingShortcut()
+            }
+        }
+        shortcutMonitor.onEscapePressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.cancelRecording()
             }
         }
 
@@ -346,7 +558,7 @@ final class DictationController: ObservableObject {
     }
 
     var invocationKeyDisplayName: String {
-        InvocationKey.displayName(for: invocationKeyCode)
+        invocationShortcut.displayName
     }
 
     var allRequiredPermissionsGranted: Bool {
@@ -357,12 +569,22 @@ final class DictationController: ObservableObject {
         InvocationKey.displayName(for: voiceNoteSwitchKeyCode)
     }
 
+    var todoSwitchKeyDisplayName: String {
+        InvocationKey.displayName(for: todoSwitchKeyCode)
+    }
+
+    var screenRecordingKeyDisplayName: String {
+        screenRecordingShortcut?.displayName ?? "Not Set"
+    }
+
     func showOnboardingWizard() {
         shouldShowOnboardingWizard = true
     }
 
     func dismissOnboardingWizard() {
+        hasCompletedOnboarding = true
         shouldShowOnboardingWizard = false
+        UserDefaults.standard.set(true, forKey: DefaultsKey.onboardingCompleted)
     }
 
     func completeOnboardingWizard() {
@@ -405,9 +627,6 @@ final class DictationController: ObservableObject {
         return "\(trimmed.count) chars"
     }
 
-    var floatingIndicatorSizeText: String {
-        "\(Int(floatingIndicatorSizePercent.rounded()))%"
-    }
 
     var keepModelWarmStatusText: String {
         guard keepModelWarmEnabled else {
@@ -433,7 +652,7 @@ final class DictationController: ObservableObject {
     }
 
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
             return
         }
 
@@ -456,7 +675,7 @@ final class DictationController: ObservableObject {
     }
 
     func startVoiceNoteSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
             return
         }
 
@@ -476,6 +695,34 @@ final class DictationController: ObservableObject {
         keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
         statusText = "Voice Note key capture canceled."
+    }
+
+    func startScreenRecordingKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+            return
+        }
+
+        keyCaptureTarget = .screenRecording
+        isCapturingScreenRecordingKey = true
+        statusText = "Press a key for the quick screen recording shortcut."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelScreenRecordingKeyCapture() {
+        guard isCapturingScreenRecordingKey else {
+            return
+        }
+
+        isCapturingScreenRecordingKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Screen recording key capture canceled."
+    }
+
+    func clearScreenRecordingKey() {
+        screenRecordingShortcut = nil
+        shortcutMonitor.setScreenRecordingShortcut(nil)
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.screenRecordingShortcutJSON)
     }
 
     func requestKeyboardPrompt() {
@@ -564,15 +811,6 @@ final class DictationController: ObservableObject {
         customSVGIndicatorMarkup = ""
     }
 
-    func setFloatingIndicatorSizeEditing(_ editing: Bool) {
-        isAdjustingIndicatorSize = editing
-        if editing {
-            showIndicatorPreview()
-        } else {
-            scheduleIndicatorPreviewHide(delay: 0.6)
-        }
-    }
-
     func openInputMonitoringSettings() {
         openSettingsURL("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
     }
@@ -594,6 +832,7 @@ final class DictationController: ObservableObject {
         riveReactiveLoopTask = nil
         stopHoldReleaseWatchdog()
         shortcutMonitor.setVoiceNoteSwitchArmed(false)
+        shortcutMonitor.setTodoSwitchArmed(false)
         keepModelWarmTask?.cancel()
         keepModelWarmTask = nil
         indicatorPreviewHideTask?.cancel()
@@ -619,7 +858,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
             return
         }
 
@@ -648,12 +887,20 @@ final class DictationController: ObservableObject {
         case .stopRecording:
             wantRecording = false
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             if isRecording {
                 stopRecordingAndTranscribe()
             }
             // If beginRecording() is still in its async setup, the wantRecording
             // flag being false will cause it to stop immediately after starting.
         }
+    }
+
+    private func handleScreenRecordingShortcut() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+            return
+        }
+        NotificationCenter.default.post(name: .toggleScreenRecording, object: nil)
     }
 
     private func toggleRecordingOutputMode() {
@@ -666,12 +913,50 @@ final class DictationController: ObservableObject {
         showBubble(message: listeningBubbleMessage(), isRecording: true)
     }
 
+    private func setTodoMode() {
+        guard isRecording, !isTranscribing else {
+            return
+        }
+        recordingOutputMode = recordingOutputMode == .todo ? .paste : .todo
+        statusText = listeningStatusText(isLive: false)
+        showBubble(message: listeningBubbleMessage(), isRecording: true)
+    }
+
+    private func cycleSpace(direction: GlobalFnShortcutMonitor.SpaceCycleDirection) {
+        guard isRecording, !isTranscribing else {
+            return
+        }
+        guard let sc = spaceController else {
+            return
+        }
+
+        let spaces = sc.availableSpaces
+        guard spaces.count > 1 else {
+            return
+        }
+
+        let currentIndex = spaces.firstIndex(where: { $0.id == sc.activeSpace.id }) ?? 0
+        let nextIndex: Int
+        switch direction {
+        case .left:
+            nextIndex = (currentIndex - 1 + spaces.count) % spaces.count
+        case .right:
+            nextIndex = (currentIndex + 1) % spaces.count
+        }
+
+        let nextSpace = spaces[nextIndex]
+        sc.switchSpace(to: nextSpace)
+        syncSpaceAppearance()
+    }
+
     private func listeningBubbleMessage() -> String {
         switch recordingOutputMode {
         case .paste:
             return "Listening..."
         case .voiceNote:
             return "Listening (Note Mode)..."
+        case .todo:
+            return "Listening (Todo Mode)..."
         }
     }
 
@@ -685,6 +970,10 @@ final class DictationController: ObservableObject {
             return "Listening... (note mode)"
         case (.voiceNote, true):
             return "Listening... (live, note mode)"
+        case (.todo, false):
+            return "Listening... (todo mode)"
+        case (.todo, true):
+            return "Listening... (todo mode, live)"
         }
     }
 
@@ -715,12 +1004,17 @@ final class DictationController: ObservableObject {
         // A stop request may have arrived while we were awaiting async setup.
         guard wantRecording else {
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             return
         }
 
         do {
             try audioCapture.startRecording()
             isRecording = true
+            shortcutMonitor.isRecordingForSpaceCycle = true
+            shortcutMonitor.isCurrentlyRecording = true
+            playSoundEffect()
+            performHaptic()
             recordingOutputMode = .paste
             latestLiveTranscription = nil
             liveTranscriptionInFlight = false
@@ -737,9 +1031,11 @@ final class DictationController: ObservableObject {
             showBubble(message: listeningBubbleMessage(), isRecording: true)
             startRiveReactiveLoopIfNeeded()
             applyDuckingIfNeeded()
+            muteSlackIfNeeded()
             startLiveTranscriptionLoop(configuration: configuration)
         } catch {
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             recordingOutputMode = .paste
             handleError(error.localizedDescription)
         }
@@ -754,13 +1050,22 @@ final class DictationController: ObservableObject {
         // regardless of which path we take (success, error, or early return).
         wantRecording = false
         isRecording = false
+        shortcutMonitor.isRecordingForSpaceCycle = false
+        shortcutMonitor.isCurrentlyRecording = false
+        playSoundEffect()
+        performHaptic()
         duckingService.restoreIfNeeded()
+        let slackService = slackMuteService
+        DispatchQueue.global(qos: .userInitiated).async {
+            slackService.restoreIfNeeded()
+        }
 
         guard let configuration = parakeetConfiguration else {
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             recordingOutputMode = .paste
             handleError("Speech model is still preparing. Try again in a few seconds.")
             return
@@ -773,11 +1078,12 @@ final class DictationController: ObservableObject {
 
             isTranscribing = true
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
-            stopRiveReactiveLoop(resetInputs: false)
+            stopRiveReactiveLoop(resetInputs: true)
             statusText = "Transcribing..."
-            showBubble(message: "Transcribing...", isRecording: false, isTranscribing: true)
+            bubble.hide()
 
             Task(priority: .userInitiated) {
                 let startedAt = Date()
@@ -900,19 +1206,59 @@ final class DictationController: ObservableObject {
                     }
                 } catch {
                     await MainActor.run {
-                        handleError(error.localizedDescription)
+                        // Don't call handleError here — it would re-show the
+                        // bubble via showTransientBubble after it was already
+                        // hidden in stopRecordingAndTranscribe.
                         isTranscribing = false
+                        recordingOutputMode = .paste
+                        statusText = "No speech detected."
+                        bubble.hide()
                     }
                 }
             }
         } catch {
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             recordingOutputMode = .paste
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
             handleError(error.localizedDescription)
         }
+    }
+
+    func cancelRecording() {
+        guard isRecording else { return }
+
+        wantRecording = false
+        isRecording = false
+        shortcutMonitor.isRecordingForSpaceCycle = false
+        shortcutMonitor.isCurrentlyRecording = false
+        duckingService.restoreIfNeeded()
+        let slackService = slackMuteService
+        DispatchQueue.global(qos: .userInitiated).async {
+            slackService.restoreIfNeeded()
+        }
+        _ = try? audioCapture.stopRecording() // Discard audio
+        stopLiveTranscriptionLoop()
+        stopHoldReleaseWatchdog()
+        stopRiveReactiveLoop(resetInputs: true)
+        shortcutMonitor.setVoiceNoteSwitchArmed(false)
+        shortcutMonitor.setTodoSwitchArmed(false)
+        recordingOutputMode = .paste
+        statusText = "Recording cancelled."
+        showTransientBubble(message: "Cancelled", duration: 0.8)
+        playSoundEffect()
+    }
+
+    private func playSoundEffect() {
+        guard soundEffectsEnabled else { return }
+        NSSound(named: "Tink")?.play()
+    }
+
+    private func performHaptic() {
+        guard hapticFeedbackEnabled else { return }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
     private func prepareParakeetIfNeeded(showReadyStatus: Bool) async -> Bool {
@@ -947,20 +1293,26 @@ final class DictationController: ObservableObject {
     private func handleTranscriptionResult(_ text: String) {
         isTranscribing = false
 
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
             recordingOutputMode = .paste
             statusText = "No speech detected."
-            showTransientBubble(message: "No speech detected")
+            bubble.hide()
             return
         }
 
+        let cleaned = wordReplacements.isEmpty ? trimmed : WordReplacementEngine.apply(wordReplacements, to: trimmed)
         lastTranscript = cleaned
 
         switch recordingOutputMode {
         case .paste:
             let pasteStartedAt = Date()
-            let didPaste = pasteService.copyAndPaste(cleaned)
+            let didPaste: Bool
+            if autoCopyToClipboard {
+                didPaste = pasteService.copyAndPaste(cleaned)
+            } else {
+                didPaste = pasteService.pasteWithoutCopying(cleaned)
+            }
             let pasteLatency = Date().timeIntervalSince(pasteStartedAt)
             logPipelineTiming(
                 String(
@@ -973,19 +1325,25 @@ final class DictationController: ObservableObject {
 
             if didPaste {
                 statusText = "Transcribed and pasted."
-                bubble.hide()
             } else {
                 statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
-                showTransientBubble(message: "Copied")
             }
+            // The indicator was already hidden when recording stopped;
+            // don't re-show it with a transient bubble.
+            bubble.hide()
         case .voiceNote:
             do {
                 let fileURL = try noteService.appendVoiceNote(cleaned)
                 statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
-                showTransientBubble(message: "Saved to note")
+                Task { await syncNoteToConvex(text: cleaned) }
             } catch {
                 handleError("Could not save voice note. \(error.localizedDescription)")
             }
+            bubble.hide()
+        case .todo:
+            statusText = "Creating todo..."
+            Task { await syncTodoToConvex(text: cleaned) }
+            bubble.hide()
         }
 
         recordingOutputMode = .paste
@@ -996,6 +1354,7 @@ final class DictationController: ObservableObject {
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
             shortcutMonitor.setVoiceNoteSwitchArmed(false)
+            shortcutMonitor.setTodoSwitchArmed(false)
             recordingOutputMode = .paste
         }
         // Always restore ducking as a safety net, regardless of recording state.
@@ -1003,6 +1362,53 @@ final class DictationController: ObservableObject {
         duckingService.restoreIfNeeded()
         statusText = message
         showTransientBubble(message: "Error", duration: 1.6)
+    }
+
+    private func syncNoteToConvex(text: String) async {
+        let now = Date()
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+
+        do {
+            let token = try await ConvexHTTPClient.getToken()
+            var args: [String: Any] = [
+                "text": text,
+                "dayStamp": dayFormatter.string(from: now),
+                "timestamp": timeFormatter.string(from: now),
+            ]
+            if let spaceId = spaceController?.currentSpaceId {
+                args["spaceId"] = spaceId
+            }
+            _ = try await ConvexHTTPClient.mutation(
+                function: "notes:create",
+                args: args,
+                token: token
+            )
+            lastNoteSavedAt = now
+        } catch {
+            NSLog("[DictationController] Failed to sync note to Convex: %@", String(describing: error))
+        }
+    }
+
+    private func syncTodoToConvex(text: String) async {
+        do {
+            let token = try await ConvexHTTPClient.getToken()
+            var args: [String: Any] = ["rawText": text]
+            if let spaceId = spaceController?.currentSpaceId {
+                args["spaceId"] = spaceId
+            }
+            _ = try await ConvexHTTPClient.action(
+                function: "todos:processAndCreate",
+                args: args,
+                token: token
+            )
+            lastTodoSavedAt = Date()
+            statusText = "Todo created."
+        } catch {
+            handleError("Could not create todo. \(error.localizedDescription)")
+        }
     }
 
     private func markOnboardingCompleteIfReady() {
@@ -1021,6 +1427,17 @@ final class DictationController: ObservableObject {
         }
 
         _ = duckingService.applyDucking(reductionPercent: duckingAmountPercent)
+    }
+
+    private func muteSlackIfNeeded() {
+        slackLog.info("muteSlackIfNeeded: slackMuteEnabled=\(self.slackMuteEnabled)")
+        guard slackMuteEnabled else { return }
+        // Run on a background thread to avoid blocking the main thread
+        // (the mute toggle uses usleep for timing, which would freeze the UI).
+        let service = slackMuteService
+        DispatchQueue.global(qos: .userInitiated).async {
+            service.muteIfInCall()
+        }
     }
 
     private func syncDuckingForCurrentSession() {
@@ -1071,7 +1488,13 @@ final class DictationController: ObservableObject {
             return
         }
 
-        let isPressed = shortcutMonitor.isInvocationKeyCurrentlyPressed()
+        // Use hardware-only check, NOT isInvocationKeyCurrentlyPressed().
+        // The event-tap's internal isInvocationKeyPressed flag can get stuck
+        // when handleFlagsChanged's HID cross-check suppresses a genuine
+        // key-up event (observed especially when Slack is open and sending
+        // synthetic keystrokes). The whole point of this watchdog is to catch
+        // missed key-up events, so it must bypass event-tap tracking.
+        let isPressed = shortcutMonitor.isInvocationKeyPhysicallyPressed()
         if isPressed {
             holdReleaseMissingSince = nil
             return
@@ -1088,6 +1511,10 @@ final class DictationController: ObservableObject {
             return
         }
 
+        // Clear the stale internal flag so the next key-down is recognized
+        // correctly (otherwise handleFlagsChanged would see keyDown == isInvocationKeyPressed
+        // and suppress it).
+        shortcutMonitor.resetInvocationKeyState()
         stopRecordingAndTranscribe()
     }
 
@@ -1118,6 +1545,7 @@ final class DictationController: ObservableObject {
         previousRiveLevel = 0
         riveObservedPeakLevel = 0.25
         lastRivePulseAt = nil
+        silenceTickCount = 0
         if riveAssetPathIfEnabled(forRecordingState: true) != nil {
             bubble.updateRiveReactiveInputs(listening: true, level: 0, shouldPulse: false)
         }
@@ -1149,6 +1577,7 @@ final class DictationController: ObservableObject {
         previousRiveLevel = 0
         riveObservedPeakLevel = 0.25
         lastRivePulseAt = nil
+        silenceTickCount = 0
 
         if resetInputs {
             bubble.updateRiveReactiveInputs(listening: false, level: 0, shouldPulse: false)
@@ -1163,12 +1592,29 @@ final class DictationController: ObservableObject {
         }
 
         let rawLevel = audioCapture.currentInputLevelNormalized()
-        riveObservedPeakLevel = max(riveObservedPeakLevel * 0.996, rawLevel)
+        riveObservedPeakLevel = max(riveObservedPeakLevel * 0.985, rawLevel)
         let leveled = min(max(rawLevel / max(riveObservedPeakLevel, 0.15), 0), 1)
 
-        let alpha = leveled > smoothedRiveLevel ? 0.46 : 0.20
-        smoothedRiveLevel += (leveled - smoothedRiveLevel) * alpha
-        let level = smoothedRiveLevel < 0.02 ? 0 : smoothedRiveLevel
+        // Heavy smoothing for gentle VU-meter feel.
+        // Track consecutive quiet ticks; after a sustained silence period,
+        // smoothly decay to zero (no abrupt snap).
+        if leveled < 0.10 {
+            silenceTickCount += 1
+            // ~5 ticks at 30ms = ~150ms of confirmed silence before decaying.
+            // Decay smoothly rather than snapping to zero.
+            if silenceTickCount >= 5 {
+                smoothedRiveLevel *= 0.80 // Smooth exponential decay
+                if smoothedRiveLevel < 0.01 {
+                    smoothedRiveLevel = 0
+                }
+            }
+            // During the grace period (< 5 ticks), hold the current level
+            // to avoid cutting off between syllables.
+        } else {
+            silenceTickCount = 0
+            smoothedRiveLevel += (leveled - smoothedRiveLevel) * 0.15
+        }
+        let level = smoothedRiveLevel
 
         let now = Date()
         let crossedThreshold = previousRiveLevel <= riveReactivePulseThreshold && level > riveReactivePulseThreshold
@@ -1284,9 +1730,7 @@ final class DictationController: ObservableObject {
             useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
         )
 
-        if !isAdjustingIndicatorSize {
-            scheduleIndicatorPreviewHide(delay: 0.9)
-        }
+        scheduleIndicatorPreviewHide(delay: 0.9)
     }
 
     private func scheduleIndicatorPreviewHide(delay: TimeInterval) {
@@ -1348,7 +1792,16 @@ final class DictationController: ObservableObject {
         return FileManager.default.fileExists(atPath: downloadsCandidate) ? downloadsCandidate : ""
     }
 
+    private func syncSpaceAppearance() {
+        guard let sc = spaceController else { return }
+        bubble.setSpaceAppearance(
+            color: sc.activeSpaceColor.nsColor,
+            icon: sc.activeSpaceIcon
+        )
+    }
+
     private func showBubble(message: String, isRecording: Bool, isTranscribing: Bool = false) {
+        syncSpaceAppearance()
         indicatorPreviewHideTask?.cancel()
         indicatorPreviewHideTask = nil
         bubbleHideTask?.cancel()
@@ -1357,6 +1810,7 @@ final class DictationController: ObservableObject {
             isRecording: isRecording,
             isTranscribing: isTranscribing,
             isNoteMode: recordingOutputMode == .voiceNote,
+            isTodoMode: recordingOutputMode == .todo,
             riveAssetPath: riveAssetPathIfEnabled(forRecordingState: isRecording),
             htmlIndicatorMarkup: (isRecording || isTranscribing) ? preferredCustomSVGMarkup() : nil,
             useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
@@ -1364,6 +1818,7 @@ final class DictationController: ObservableObject {
     }
 
     private func showTransientBubble(message: String, duration: TimeInterval = 0.95) {
+        syncSpaceAppearance()
         bubbleHideTask?.cancel()
         bubble.show(
             message: message,
@@ -1445,40 +1900,117 @@ final class DictationController: ObservableObject {
             return
         }
 
-        if event.type == .keyDown, event.isARepeat {
+        let capturedKeyCode = Int64(event.keyCode)
+
+        if event.type == .flagsChanged {
+            // Accumulate modifier flags
+            if InvocationKey.isModifierKeyCode(capturedKeyCode) {
+                let flag = InvocationKey.modifierFlag(for: capturedKeyCode)
+                captureAccumulatedModifiers.insert(flag)
+            }
+
+            // Reset debounce timer for modifier-only shortcuts
+            captureDebounceTimer?.invalidate()
+            captureDebounceTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.finalizeCaptureAsModifierOnly()
+                }
+            }
             return
         }
 
-        let capturedKeyCode = Int64(event.keyCode)
-        switch keyCaptureTarget {
+        if event.type == .keyDown {
+            if event.isARepeat { return }
+
+            // A non-modifier key was pressed — finalize as modifier+key or single key
+            captureDebounceTimer?.invalidate()
+            captureDebounceTimer = nil
+
+            let shortcut = InvocationShortcut(
+                primaryKeyCode: capturedKeyCode,
+                modifiers: captureAccumulatedModifiers.rawValue
+            )
+            finalizeCapturedShortcut(shortcut, for: keyCaptureTarget)
+        }
+    }
+
+    private func finalizeCaptureAsModifierOnly() {
+        guard let keyCaptureTarget else { return }
+        guard !captureAccumulatedModifiers.isEmpty else { return }
+
+        let shortcut = InvocationShortcut(primaryKeyCode: nil, modifiers: captureAccumulatedModifiers.rawValue)
+        finalizeCapturedShortcut(shortcut, for: keyCaptureTarget)
+    }
+
+    private func finalizeCapturedShortcut(_ shortcut: InvocationShortcut, for target: KeyCaptureTarget) {
+        guard shortcut.isValid else {
+            statusText = "Invalid shortcut. Try again."
+            return
+        }
+
+        captureAccumulatedModifiers = []
+        captureDebounceTimer?.invalidate()
+        captureDebounceTimer = nil
+
+        switch target {
         case .invocation:
-            setInvocationKeyCode(capturedKeyCode)
+            setInvocationShortcut(shortcut)
             statusText = "Invocation key set to \(invocationKeyDisplayName)."
         case .voiceNoteSwitch:
-            guard capturedKeyCode != invocationKeyCode else {
-                statusText = "Voice Note key must be different from invocation key."
+            if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
+                setVoiceNoteSwitchKeyCode(primaryKey)
+                statusText = "Voice Note key set to \(voiceNoteSwitchKeyDisplayName)."
+            } else {
+                statusText = "Voice Note key must be a single key."
                 return
             }
-            setVoiceNoteSwitchKeyCode(capturedKeyCode)
-            statusText = "Voice Note key set to \(voiceNoteSwitchKeyDisplayName)."
+        case .screenRecording:
+            setScreenRecordingShortcut(shortcut)
+            statusText = "Screen recording key set to \(screenRecordingKeyDisplayName)."
+        case .todoSwitch:
+            if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
+                setTodoSwitchKeyCode(primaryKey)
+                statusText = "Todo key set to \(todoSwitchKeyDisplayName)."
+            } else {
+                statusText = "Todo key must be a single key."
+                return
+            }
         }
 
         isCapturingInvocationKey = false
         isCapturingVoiceNoteSwitchKey = false
+        isCapturingScreenRecordingKey = false
+        isCapturingTodoSwitchKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
     }
 
-    private func setInvocationKeyCode(_ keyCode: Int64) {
-        invocationKeyCode = keyCode
-        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.invocationKeyCode)
-        shortcutMonitor.setInvocationKeyCode(keyCode)
+    private func setInvocationShortcut(_ shortcut: InvocationShortcut) {
+        invocationShortcut = shortcut
+        if let data = try? JSONEncoder().encode(shortcut) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.invocationShortcutJSON)
+        }
+        shortcutMonitor.setInvocationShortcut(shortcut)
     }
 
     private func setVoiceNoteSwitchKeyCode(_ keyCode: Int64) {
         voiceNoteSwitchKeyCode = keyCode
         UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.voiceNoteSwitchKeyCode)
         shortcutMonitor.setVoiceNoteSwitchKeyCode(keyCode)
+    }
+
+    private func setScreenRecordingShortcut(_ shortcut: InvocationShortcut) {
+        screenRecordingShortcut = shortcut
+        if let data = try? JSONEncoder().encode(shortcut) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.screenRecordingShortcutJSON)
+        }
+        shortcutMonitor.setScreenRecordingShortcut(shortcut)
+    }
+
+    private func setTodoSwitchKeyCode(_ keyCode: Int64) {
+        todoSwitchKeyCode = keyCode
+        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.todoSwitchKeyCode)
+        shortcutMonitor.setTodoSwitchKeyCode(keyCode)
     }
 
     private func startLiveTranscriptionLoop(configuration: ParakeetConfiguration) {

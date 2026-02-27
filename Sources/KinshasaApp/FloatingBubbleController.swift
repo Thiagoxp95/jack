@@ -1,42 +1,34 @@
 import AppKit
 import Foundation
 
-// MARK: - SiriOrbView
+// MARK: - PillIndicatorView
 
-/// A circular glowing orb with voice-reactive animations.
-/// Layers (back to front):
-///   1. Radial glow — space color, voice-reactive opacity & scale
-///   2. Dark glass orb body — black @ 0.7, circular, thin white border
-///   3. Rotating conic gradient — space color shades, voice-reactive rotation speed
-///   4. Space icon — SF Symbol or emoji, voice-reactive brightness
-private final class SiriOrbView: NSView {
-    // Layers
-    private let glowLayer = CAGradientLayer()
-    private let orbLayer = CALayer()
-    private let gradientLayer = CAGradientLayer()
-    private let gradientMaskLayer = CAShapeLayer()
+/// Floating pill indicator: space icon on the left, Slack-style vertical voice bars on the right.
+/// Solid black background with full-pill corner radius.
+private final class PillIndicatorView: NSView {
 
-    // Icon views — one visible at a time
-    private let iconImageView = NSImageView()    // SF Symbol
-    private let iconEmojiLabel = NSTextField(labelWithString: "")  // Emoji
-
-    // State
-    private var spaceColor: NSColor = .systemBlue
-    private var currentIsNoteMode = false
-    private var savedSpaceIcon: SpaceIcon?
-
-    // Voice-reactive smoothing
-    private var displayedLevel: CGFloat = 0
-    private var displayedIconLevel: CGFloat = 0
-    private var lastLevelUpdateUptime: TimeInterval?
-    private var gradientAngle: CGFloat = 0
-
-    // Animation timer (30 FPS)
-    private var animationTimer: Timer?
-
-    // Target level set by the controller
-    private var targetLevel: CGFloat = 0
+    // Voice state
+    private var volumeLevel: CGFloat = 0
+    private var targetVolume: CGFloat = 0
     private var isActive = false
+    private var animationTime: CGFloat = 0
+
+    // Voice bar layers (vertical bars like Slack)
+    private let barCount = 5
+    private var barLayers: [CALayer] = []
+
+    // Background
+    private let bgLayer = CALayer()
+
+    // Space icon
+    private let iconImageView = NSImageView()
+    private let iconEmojiLabel = NSTextField(labelWithString: "")
+    private var currentMode: Int = 0  // 0=space, 1=note, 2=todo
+    private var savedSpaceIcon: SpaceIcon?
+    private var spaceColor: NSColor = .systemBlue
+
+    // Animation timer
+    private var displayTimer: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -53,39 +45,17 @@ private final class SiriOrbView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        // 1. Radial glow layer
-        glowLayer.type = .radial
-        glowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        glowLayer.endPoint = CGPoint(x: 1.0, y: 1.0)
-        updateGlowColors()
-        glowLayer.opacity = 0.3
-        layer?.addSublayer(glowLayer)
+        // Solid black pill background
+        bgLayer.backgroundColor = NSColor.black.cgColor
+        bgLayer.masksToBounds = true
+        layer?.addSublayer(bgLayer)
 
-        // 2. Orb body
-        orbLayer.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
-        orbLayer.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
-        orbLayer.borderWidth = 0.5
-        layer?.addSublayer(orbLayer)
-
-        // 3. Conic gradient overlay
-        gradientLayer.type = .conic
-        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
-        updateGradientColors()
-        gradientLayer.opacity = 0.6
-        gradientLayer.mask = gradientMaskLayer
-        gradientMaskLayer.fillColor = NSColor.white.cgColor
-        layer?.addSublayer(gradientLayer)
-
-        // 4. Icon views
-        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        // Space icon (SF Symbol)
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
-        iconImageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
-        iconImageView.contentTintColor = NSColor.white.withAlphaComponent(0.35)
+        iconImageView.contentTintColor = .white
         addSubview(iconImageView)
 
-        iconEmojiLabel.translatesAutoresizingMaskIntoConstraints = false
-        iconEmojiLabel.font = NSFont.systemFont(ofSize: 22)
+        // Space icon (emoji)
         iconEmojiLabel.textColor = .white
         iconEmojiLabel.backgroundColor = .clear
         iconEmojiLabel.isBezeled = false
@@ -95,221 +65,186 @@ private final class SiriOrbView: NSView {
         iconEmojiLabel.isHidden = true
         addSubview(iconEmojiLabel)
 
-        NSLayoutConstraint.activate([
-            iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconImageView.widthAnchor.constraint(equalToConstant: 24),
-            iconImageView.heightAnchor.constraint(equalToConstant: 24),
+        // Voice bars — thin vertical rounded rectangles
+        for _ in 0..<barCount {
+            let bar = CALayer()
+            bar.backgroundColor = NSColor.white.withAlphaComponent(0.5).cgColor
+            layer?.addSublayer(bar)
+            barLayers.append(bar)
+        }
 
-            iconEmojiLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconEmojiLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-
-        // Set default icon
+        // Default icon
         if let img = NSImage(systemSymbolName: "building.2.fill", accessibilityDescription: "Space") {
             iconImageView.image = img
         }
-
-        startAnimationTimer()
     }
 
     // MARK: - Layout
 
     override func layout() {
         super.layout()
-        updateLayerFrames()
+        layoutElements()
     }
 
-    private func updateLayerFrames() {
-        let bounds = self.bounds
-        guard bounds.width > 1, bounds.height > 1 else { return }
+    private func layoutElements() {
+        let h = bounds.height
+        let w = bounds.width
+        guard h > 0, w > 0 else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        // The orb sits centered in the view.
-        // The view includes glow padding on all sides.
-        let orbDiameter = min(bounds.width, bounds.height) * (1.0 / 1.8)
-        let orbRadius = orbDiameter / 2
-        let orbOrigin = CGPoint(
-            x: bounds.midX - orbRadius,
-            y: bounds.midY - orbRadius
+        // Background
+        bgLayer.frame = bounds
+        bgLayer.cornerRadius = h / 2
+
+        // Icon on the left
+        let iconSize = round(h * 0.45)
+        let iconX = round(h * 0.32)
+        let iconY = round((h - iconSize) / 2)
+        iconImageView.frame = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
+        iconImageView.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: round(iconSize * 0.85), weight: .semibold
         )
-        let orbRect = CGRect(origin: orbOrigin, size: CGSize(width: orbDiameter, height: orbDiameter))
+        iconEmojiLabel.frame = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
+        iconEmojiLabel.font = NSFont.systemFont(ofSize: round(iconSize * 0.9))
 
-        // Glow fills the entire view
-        glowLayer.frame = bounds
+        // Voice bars on the right
+        let barWidth = round(h * 0.07)
+        let barGap = round(h * 0.09)
+        let barCorner = barWidth / 2
+        let minBarH = round(h * 0.12)
+        let totalBarsWidth = CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barGap
+        let barsEndX = w - round(h * 0.35)
+        let barsStartX = barsEndX - totalBarsWidth
+        let barCenterY = h / 2
 
-        // Orb body
-        orbLayer.frame = orbRect
-        orbLayer.cornerRadius = orbRadius
-
-        // Conic gradient — same size as orb
-        gradientLayer.frame = orbRect
-        gradientMaskLayer.frame = gradientLayer.bounds
-        let maskPath = CGPath(ellipseIn: CGRect(origin: .zero, size: orbRect.size), transform: nil)
-        gradientMaskLayer.path = maskPath
+        for (i, bar) in barLayers.enumerated() {
+            let x = barsStartX + CGFloat(i) * (barWidth + barGap)
+            bar.frame = NSRect(x: x, y: barCenterY - minBarH / 2, width: barWidth, height: minBarH)
+            bar.cornerRadius = barCorner
+        }
 
         CATransaction.commit()
     }
 
-    // MARK: - Public API
+    // MARK: - Animation
 
-    func update(isRecording: Bool, isTranscribing: Bool, isNoteMode: Bool, level: Double, shouldPulse: Bool) {
-        let normalizedLevel = max(0, min(1, CGFloat(level)))
-        isActive = isRecording || isTranscribing
-
-        // Detect note mode transitions
-        if isNoteMode != currentIsNoteMode {
-            currentIsNoteMode = isNoteMode
-            if isNoteMode {
-                if let img = NSImage(systemSymbolName: "note.text", accessibilityDescription: "Note") {
-                    iconImageView.image = img
-                }
-                iconImageView.isHidden = false
-                iconEmojiLabel.isHidden = true
-            } else if let saved = savedSpaceIcon {
-                applyIcon(saved)
-            }
-            runPulseAnimation()
-        }
-
-        // Set target level for the animation timer to smooth
-        targetLevel = normalizedLevel
-
-        if shouldPulse {
-            runPulseAnimation()
-        }
-    }
-
-    func updateSpaceAppearance(color: NSColor, icon: SpaceIcon) {
-        spaceColor = color
-        savedSpaceIcon = icon
-        updateGlowColors()
-        updateGradientColors()
-
-        guard !currentIsNoteMode else { return }
-        applyIcon(icon)
-    }
-
-    func stopAnimationTimer() {
-        animationTimer?.invalidate()
-        animationTimer = nil
-    }
-
-    func ensureAnimationTimer() {
-        guard animationTimer == nil else { return }
-        startAnimationTimer()
-    }
-
-    // MARK: - Animation Timer
-
-    private func startAnimationTimer() {
-        animationTimer?.invalidate()
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+    func startAnimating() {
+        guard displayTimer == nil else { return }
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.tick()
             }
         }
     }
 
-    private func tick() {
-        let now = ProcessInfo.processInfo.systemUptime
-        let dt: CGFloat
-        if let last = lastLevelUpdateUptime {
-            dt = max(1.0 / 180.0, min(0.1, CGFloat(now - last)))
-        } else {
-            dt = 1.0 / 60.0
-        }
-        lastLevelUpdateUptime = now
-
-        // Voice level smoothing
-        let clamped = max(0, min(1, targetLevel))
-        let gated: CGFloat = clamped <= 0.07 ? 0 : (clamped - 0.07) / 0.93
-        let target: CGFloat = isActive ? pow(gated, 0.8) : 0
-
-        if target == 0 && displayedLevel < 0.005 {
-            displayedLevel = 0
-        } else {
-            let tau: CGFloat = 0.008
-            let alpha = 1 - exp(-dt / max(0.001, tau))
-            displayedLevel += (target - displayedLevel) * alpha
-        }
-
-        // Icon brightness smoothing (same tau)
-        let iconTarget: CGFloat = isActive ? pow(gated, 1.4) : 0
-        if iconTarget == 0 && displayedIconLevel < 0.005 {
-            displayedIconLevel = 0
-        } else {
-            let tau: CGFloat = 0.008
-            let alpha = 1 - exp(-dt / max(0.001, tau))
-            displayedIconLevel += (iconTarget - displayedIconLevel) * alpha
-        }
-
-        // Rotate conic gradient
-        let idleRotationSpeed: CGFloat = 0.015
-        let peakRotationSpeed: CGFloat = 0.08
-        let rotationSpeed = idleRotationSpeed + (peakRotationSpeed - idleRotationSpeed) * displayedLevel
-        gradientAngle += rotationSpeed
-        if gradientAngle > .pi * 2 {
-            gradientAngle -= .pi * 2
-        }
-
-        applyAnimatedState()
+    func stopAnimating() {
+        displayTimer?.invalidate()
+        displayTimer = nil
     }
 
-    private func applyAnimatedState() {
+    private func tick() {
+        animationTime += 1.0 / 60.0
+        if animationTime > 1000 { animationTime -= 1000 }
+
+        // Smooth volume toward target
+        let lerpSpeed: CGFloat = 0.15
+        volumeLevel += (targetVolume - volumeLevel) * lerpSpeed
+        if volumeLevel < 0.005 { volumeLevel = 0 }
+
+        let h = bounds.height
+        guard h > 0 else { return }
+
+        let barWidth = round(h * 0.07)
+        let barGap = round(h * 0.09)
+        let barCorner = barWidth / 2
+        let minBarH = round(h * 0.12)
+        let maxBarH = h * 0.65
+        let barCenterY = h / 2
+
+        let totalBarsWidth = CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barGap
+        let barsEndX = bounds.width - round(h * 0.35)
+        let barsStartX = barsEndX - totalBarsWidth
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        // Glow: opacity 0.3 idle -> 0.8 speaking, scale 1.0 -> 1.15
-        let glowOpacity = Float(0.3 + displayedLevel * 0.5)
-        glowLayer.opacity = glowOpacity
-        let glowScale: CGFloat = 1.0 + displayedLevel * 0.15
-        glowLayer.transform = CATransform3DMakeScale(glowScale, glowScale, 1)
+        for (i, bar) in barLayers.enumerated() {
+            // Each bar gets a different phase for the wave effect
+            let phase = CGFloat(i) * 1.1
+            // Bars animate at different frequencies for organic feel
+            let freq1: CGFloat = 3.5 + CGFloat(i) * 0.4
+            let freq2: CGFloat = 5.2 - CGFloat(i) * 0.3
 
-        // Conic gradient rotation
-        gradientLayer.transform = CATransform3DMakeRotation(gradientAngle, 0, 0, 1)
+            let wave = (sin(animationTime * freq1 + phase) + sin(animationTime * freq2 + phase * 0.7)) / 2.0
 
-        // Icon brightness
-        let baseAlpha: CGFloat = isActive ? 0.7 : 0.35
-        let iconAlpha = baseAlpha + displayedIconLevel * (1.0 - baseAlpha)
+            let idleBarH = minBarH + abs(wave) * h * 0.06
+            let activeBarH = minBarH + (maxBarH - minBarH) * volumeLevel * (0.5 + 0.5 * abs(wave))
+            let barH = isActive ? max(idleBarH, activeBarH) : idleBarH
 
-        iconImageView.contentTintColor = isActive
-            ? spaceColor.withAlphaComponent(iconAlpha)
-            : NSColor.white.withAlphaComponent(0.35)
-        iconEmojiLabel.alphaValue = isActive ? iconAlpha : 0.5
+            let x = barsStartX + CGFloat(i) * (barWidth + barGap)
+            bar.frame = NSRect(x: x, y: barCenterY - barH / 2, width: barWidth, height: barH)
+            bar.cornerRadius = barCorner
+        }
 
         CATransaction.commit()
     }
 
-    // MARK: - Colors
+    // MARK: - Public API
 
-    private func updateGlowColors() {
-        glowLayer.colors = [
-            spaceColor.withAlphaComponent(0.6).cgColor,
-            spaceColor.withAlphaComponent(0.2).cgColor,
-            NSColor.clear.cgColor,
-        ]
-        glowLayer.locations = [0.0, 0.4, 1.0]
+    func update(isRecording: Bool, isTranscribing: Bool, isNoteMode: Bool, isTodoMode: Bool, level: Double, shouldPulse: Bool) {
+        let normalizedLevel = max(0, min(1, CGFloat(level)))
+        isActive = isRecording || isTranscribing
+
+        // Mode icon swap
+        let newMode: Int = isTodoMode ? 2 : (isNoteMode ? 1 : 0)
+        if newMode != currentMode {
+            currentMode = newMode
+            if isTodoMode {
+                if let img = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Todo") {
+                    iconImageView.image = img
+                }
+                iconEmojiLabel.isHidden = true
+                iconImageView.isHidden = false
+            } else if isNoteMode {
+                if let img = NSImage(systemSymbolName: "note.text", accessibilityDescription: "Note") {
+                    iconImageView.image = img
+                }
+                iconEmojiLabel.isHidden = true
+                iconImageView.isHidden = false
+            } else if let saved = savedSpaceIcon {
+                applyIcon(saved)
+            }
+        }
+
+        // Voice gating
+        let gated: CGFloat = normalizedLevel <= 0.07 ? 0 : (normalizedLevel - 0.07) / 0.93
+        targetVolume = isActive ? pow(gated, 0.8) : 0
+
+        // Bar color: space color when active, dim white when idle
+        let barColor = isActive ? spaceColor : NSColor.white.withAlphaComponent(0.5)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for bar in barLayers {
+            bar.backgroundColor = barColor.cgColor
+        }
+        CATransaction.commit()
+
+        // Icon tint
+        iconImageView.contentTintColor = isActive
+            ? spaceColor
+            : NSColor.white.withAlphaComponent(0.7)
     }
 
-    private func updateGradientColors() {
-        // Space color + lighter/darker/accent variants
-        let lighter = spaceColor.blended(withFraction: 0.3, of: .white) ?? spaceColor
-        let darker = spaceColor.blended(withFraction: 0.3, of: .black) ?? spaceColor
-        let accent = spaceColor.blended(withFraction: 0.5, of: .cyan) ?? spaceColor
-
-        gradientLayer.colors = [
-            spaceColor.cgColor,
-            lighter.cgColor,
-            accent.cgColor,
-            darker.cgColor,
-            spaceColor.cgColor,
-        ]
+    func updateSpaceAppearance(color: NSColor, icon: SpaceIcon) {
+        spaceColor = color
+        savedSpaceIcon = icon
+        guard currentMode == 0 else { return }
+        applyIcon(icon)
     }
 
-    // MARK: - Icon
+    // MARK: - Private
 
     private func applyIcon(_ icon: SpaceIcon) {
         switch icon {
@@ -325,36 +260,23 @@ private final class SiriOrbView: NSView {
             iconEmojiLabel.isHidden = false
         }
     }
-
-    // MARK: - Pulse
-
-    private func runPulseAnimation() {
-        guard let layer = orbLayer.superlayer else { return }
-        orbLayer.removeAnimation(forKey: "orb-pulse")
-
-        let animation = CABasicAnimation(keyPath: "transform.scale")
-        animation.fromValue = 1.0
-        animation.toValue = 1.04
-        animation.duration = 0.12
-        animation.autoreverses = true
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        orbLayer.add(animation, forKey: "orb-pulse")
-        _ = layer // silence unused variable warning
-    }
 }
 
 // MARK: - FloatingBubbleController
 
 @MainActor
 final class FloatingBubbleController {
-    private let baseOrbDiameter: CGFloat = 72
+    /// Base pill dimensions at 100%. Default sizePercent (35%) yields ~32x77pt pill.
+    private let basePillHeight: CGFloat = 90
+    private let basePillWidth: CGFloat = 220
     private let bottomOffset: CGFloat = 48
 
     private var panel: NSPanel?
-    private var orbView: SiriOrbView?
+    private var pillView: PillIndicatorView?
     private var currentIsRecording = false
     private var currentIsTranscribing = false
     private var currentIsNoteMode = false
+    private var currentIsTodoMode = false
     private var currentLevel: Double = 0
     private var pendingSpaceColor: NSColor?
     private var pendingSpaceIcon: SpaceIcon?
@@ -370,7 +292,7 @@ final class FloatingBubbleController {
     func setSpaceAppearance(color: NSColor, icon: SpaceIcon) {
         pendingSpaceColor = color
         pendingSpaceIcon = icon
-        orbView?.updateSpaceAppearance(color: color, icon: icon)
+        pillView?.updateSpaceAppearance(color: color, icon: icon)
     }
 
     func show(
@@ -378,6 +300,7 @@ final class FloatingBubbleController {
         isRecording: Bool,
         isTranscribing: Bool,
         isNoteMode: Bool = false,
+        isTodoMode: Bool = false,
         riveAssetPath _: String?,
         htmlIndicatorMarkup _: String?,
         useBuiltInWaveIndicator _: Bool
@@ -385,31 +308,26 @@ final class FloatingBubbleController {
         currentIsRecording = isRecording
         currentIsTranscribing = isTranscribing
         currentIsNoteMode = isNoteMode
+        currentIsTodoMode = isTodoMode
 
         let panelSize = computePanelSize()
         let panel = ensurePanel(size: panelSize)
 
-        // Cancel any in-progress fade-out and restore full opacity
-        NSAnimationContext.beginGrouping()
-        NSAnimationContext.current.duration = 0
-        panel.animator().alphaValue = 1
-        NSAnimationContext.endGrouping()
         panel.alphaValue = 1
 
-        // Re-apply pending space appearance
         if let color = pendingSpaceColor, let icon = pendingSpaceIcon {
-            orbView?.updateSpaceAppearance(color: color, icon: icon)
+            pillView?.updateSpaceAppearance(color: color, icon: icon)
         }
 
-        // Resize and position
         resize(panel, size: panelSize)
         positionPanel(panel, size: panelSize)
 
-        orbView?.ensureAnimationTimer()
-        orbView?.update(
+        pillView?.startAnimating()
+        pillView?.update(
             isRecording: isRecording,
             isTranscribing: isTranscribing,
             isNoteMode: isNoteMode,
+            isTodoMode: isTodoMode,
             level: currentLevel,
             shouldPulse: false
         )
@@ -419,7 +337,7 @@ final class FloatingBubbleController {
 
     func hide() {
         guard let panel, panel.isVisible else { return }
-        orbView?.stopAnimationTimer()
+        pillView?.stopAnimating()
         panel.alphaValue = 0
         panel.orderOut(nil)
         panel.alphaValue = 1
@@ -444,24 +362,22 @@ final class FloatingBubbleController {
         currentIsRecording = listening
         currentIsTranscribing = transcribing
 
-        orbView?.update(
+        pillView?.update(
             isRecording: currentIsRecording,
             isTranscribing: currentIsTranscribing,
             isNoteMode: currentIsNoteMode,
+            isTodoMode: currentIsTodoMode,
             level: currentLevel,
             shouldPulse: shouldPulse
         )
     }
 
-    private func computeOrbDiameter() -> CGFloat {
-        baseOrbDiameter * CGFloat(sizePercent / 100.0)
-    }
-
     private func computePanelSize() -> NSSize {
-        let orbDiameter = computeOrbDiameter()
-        let glowPadding = orbDiameter * 0.4
-        let side = orbDiameter + glowPadding * 2
-        return NSSize(width: side, height: side)
+        let scale = CGFloat(sizePercent / 100.0)
+        return NSSize(
+            width: round(basePillWidth * scale),
+            height: round(basePillHeight * scale)
+        )
     }
 
     private func ensurePanel(size: NSSize) -> NSPanel {
@@ -475,20 +391,20 @@ final class FloatingBubbleController {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.ignoresMouseEvents = true
 
-        let orbView = SiriOrbView(frame: NSRect(origin: .zero, size: size))
-        panel.contentView = orbView
-        self.orbView = orbView
+        let pillView = PillIndicatorView(frame: NSRect(origin: .zero, size: size))
+        panel.contentView = pillView
+        self.pillView = pillView
         self.panel = panel
 
         if let color = pendingSpaceColor, let icon = pendingSpaceIcon {
-            orbView.updateSpaceAppearance(color: color, icon: icon)
+            pillView.updateSpaceAppearance(color: color, icon: icon)
         }
 
         return panel
@@ -502,7 +418,6 @@ final class FloatingBubbleController {
 
     private func positionPanel(_ panel: NSPanel, size: NSSize) {
         guard let screen = activeScreen() else { return }
-
         let visibleFrame = screen.visibleFrame
         let x = round(visibleFrame.midX - size.width / 2)
         let y = round(visibleFrame.origin.y + bottomOffset)
@@ -517,15 +432,9 @@ final class FloatingBubbleController {
     }
 
     private func activeScreen() -> NSScreen? {
-        if let panelScreen = panel?.screen {
-            return panelScreen
-        }
-        if let keyScreen = NSApp.keyWindow?.screen {
-            return keyScreen
-        }
-        if let main = NSScreen.main {
-            return main
-        }
+        if let panelScreen = panel?.screen { return panelScreen }
+        if let keyScreen = NSApp.keyWindow?.screen { return keyScreen }
+        if let main = NSScreen.main { return main }
         return NSScreen.screens.first
     }
 }

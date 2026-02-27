@@ -1,4 +1,90 @@
+import AppKit
 import Foundation
+
+// MARK: - InvocationShortcut
+
+struct InvocationShortcut: Codable, Equatable {
+    /// The primary (non-modifier) key code, or nil for modifier-only shortcuts (e.g. Ctrl+Shift+Cmd).
+    var primaryKeyCode: Int64?
+    /// Raw value of NSEvent.ModifierFlags (masked to device-independent bits).
+    var modifiers: UInt
+
+    var isValid: Bool {
+        if let keyCode = primaryKeyCode {
+            if InvocationKey.isStandaloneValidKeyCode(keyCode) || InvocationKey.isModifierKeyCode(keyCode) {
+                return true
+            }
+            // Regular keys require at least one modifier
+            return modifiers != 0
+        }
+        // Modifier-only: need at least one modifier
+        return modifiers != 0
+    }
+
+    var isModifierOnly: Bool {
+        if let keyCode = primaryKeyCode {
+            return InvocationKey.isModifierKeyCode(keyCode)
+        }
+        return true
+    }
+
+    var isSingleKey: Bool {
+        return modifiers == 0 && primaryKeyCode != nil
+    }
+
+    var displayName: String {
+        var parts: [String] = []
+        let flags = NSEvent.ModifierFlags(rawValue: modifiers)
+        if flags.contains(.control) { parts.append("^") }
+        if flags.contains(.option) { parts.append("\u{2325}") }
+        if flags.contains(.shift) { parts.append("\u{21E7}") }
+        if flags.contains(.command) { parts.append("\u{2318}") }
+        if flags.contains(.function) { parts.append("Fn") }
+
+        if let keyCode = primaryKeyCode {
+            if !InvocationKey.isModifierKeyCode(keyCode) {
+                parts.append(InvocationKey.displayName(for: keyCode))
+            } else if parts.isEmpty {
+                // Modifier-only shortcut using legacy single modifier key
+                parts.append(InvocationKey.displayName(for: keyCode))
+            }
+        }
+
+        return parts.joined(separator: "")
+    }
+
+    var nsModifierFlags: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: modifiers)
+    }
+
+    static let `default` = InvocationShortcut(primaryKeyCode: 63, modifiers: 0) // Fn/Globe
+
+    static func fromLegacyKeyCode(_ keyCode: Int64) -> InvocationShortcut {
+        if InvocationKey.isModifierKeyCode(keyCode) {
+            // For modifier keys, set both primaryKeyCode and the corresponding modifier flag
+            let flag = InvocationKey.modifierFlag(for: keyCode)
+            return InvocationShortcut(primaryKeyCode: keyCode, modifiers: flag.rawValue)
+        }
+        // Regular/standalone keys: no modifiers required for legacy migration
+        return InvocationShortcut(primaryKeyCode: keyCode, modifiers: 0)
+    }
+}
+
+// MARK: - WordReplacement
+
+struct WordReplacement: Codable, Identifiable, Equatable {
+    var id: UUID
+    var original: String
+    var replacement: String
+
+    init(id: UUID = UUID(), original: String, replacement: String) {
+        self.id = id
+        self.original = original
+        self.replacement = replacement
+    }
+}
+
+// MARK: - InvocationKey
 
 struct InvocationKey: Equatable {
     static let defaultKeyCode: Int64 = 63 // Fn/Globe
@@ -8,6 +94,35 @@ struct InvocationKey: Equatable {
             return name
         }
         return "Key \(keyCode)"
+    }
+
+    /// F1-F17, Fn/Globe, Escape — these can be used alone without modifiers.
+    static func isStandaloneValidKeyCode(_ keyCode: Int64) -> Bool {
+        // F-keys: F1(122), F2(120), F3(99), F4(118), F5(96), F6(97), F7(98), F8(100),
+        // F9(101), F10(109), F11(103), F12(111), F13(105), F14(107), F15(113), F16(106), F17(64)
+        let fKeys: Set<Int64> = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64]
+        if fKeys.contains(keyCode) { return true }
+        if keyCode == 63 { return true } // Fn/Globe
+        if keyCode == 53 { return true } // Escape
+        return false
+    }
+
+    /// Key codes 54-63 are modifier keys (Command, Shift, Option, Control, CapsLock, Fn).
+    static func isModifierKeyCode(_ keyCode: Int64) -> Bool {
+        return keyCode >= 54 && keyCode <= 63
+    }
+
+    /// Maps a modifier key code to its corresponding NSEvent.ModifierFlags.
+    static func modifierFlag(for keyCode: Int64) -> NSEvent.ModifierFlags {
+        switch keyCode {
+        case 55, 54: return .command
+        case 56, 60: return .shift
+        case 58, 61: return .option
+        case 59, 62: return .control
+        case 57: return .capsLock
+        case 63: return .function
+        default: return []
+        }
     }
 
     private static let knownKeyNames: [Int64: String] = [
@@ -69,6 +184,7 @@ enum ShortcutMode: String, CaseIterable, Identifiable {
 enum RecordingOutputMode: String, CaseIterable, Identifiable {
     case paste
     case voiceNote
+    case todo
 
     var id: String { rawValue }
 
@@ -78,6 +194,8 @@ enum RecordingOutputMode: String, CaseIterable, Identifiable {
             return "Paste"
         case .voiceNote:
             return "Voice Note"
+        case .todo:
+            return "Todo"
         }
     }
 }
