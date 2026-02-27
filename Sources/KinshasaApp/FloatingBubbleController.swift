@@ -1,241 +1,372 @@
 import AppKit
 import Foundation
 
-private final class NotchIndicatorContentView: NSView {
-    private let shellView = NSView()
-    private let micIconView = NSImageView()
-    private var currentIconSymbol = "mic.fill"
-    private let meterContainerView = NSView()
-    private var meterBars: [NSView] = []
-    private var meterBarHeightConstraints: [NSLayoutConstraint] = []
-    private var meterDisplayedLevel: CGFloat = 0
-    private var meterPerBarLevels: [CGFloat] = []
-    private var lastMeterUpdateUptime: TimeInterval?
+// MARK: - SiriOrbView
+
+/// A circular glowing orb with voice-reactive animations.
+/// Layers (back to front):
+///   1. Radial glow — space color, voice-reactive opacity & scale
+///   2. Dark glass orb body — black @ 0.7, circular, thin white border
+///   3. Rotating conic gradient — space color shades, voice-reactive rotation speed
+///   4. Space icon — SF Symbol or emoji, voice-reactive brightness
+private final class SiriOrbView: NSView {
+    // Layers
+    private let glowLayer = CAGradientLayer()
+    private let orbLayer = CALayer()
+    private let gradientLayer = CAGradientLayer()
+    private let gradientMaskLayer = CAShapeLayer()
+
+    // Icon views — one visible at a time
+    private let iconImageView = NSImageView()    // SF Symbol
+    private let iconEmojiLabel = NSTextField(labelWithString: "")  // Emoji
+
+    // State
+    private var spaceColor: NSColor = .systemBlue
+    private var currentIsNoteMode = false
+    private var savedSpaceIcon: SpaceIcon?
+
+    // Voice-reactive smoothing
+    private var displayedLevel: CGFloat = 0
+    private var displayedIconLevel: CGFloat = 0
+    private var lastLevelUpdateUptime: TimeInterval?
+    private var gradientAngle: CGFloat = 0
+
+    // Animation timer (30 FPS)
+    private var animationTimer: Timer?
+
+    // Target level set by the controller
+    private var targetLevel: CGFloat = 0
+    private var isActive = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        setupView()
+        setup()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func layout() {
-        super.layout()
-        shellView.layer?.shadowPath = CGPath(
-            roundedRect: shellView.bounds,
-            cornerWidth: shellView.layer?.cornerRadius ?? 0,
-            cornerHeight: shellView.layer?.cornerRadius ?? 0,
-            transform: nil
-        )
+    // MARK: - Setup
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        // 1. Radial glow layer
+        glowLayer.type = .radial
+        glowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        glowLayer.endPoint = CGPoint(x: 1.0, y: 1.0)
+        updateGlowColors()
+        glowLayer.opacity = 0.3
+        layer?.addSublayer(glowLayer)
+
+        // 2. Orb body
+        orbLayer.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+        orbLayer.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        orbLayer.borderWidth = 0.5
+        layer?.addSublayer(orbLayer)
+
+        // 3. Conic gradient overlay
+        gradientLayer.type = .conic
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+        updateGradientColors()
+        gradientLayer.opacity = 0.6
+        gradientLayer.mask = gradientMaskLayer
+        gradientMaskLayer.fillColor = NSColor.white.cgColor
+        layer?.addSublayer(gradientLayer)
+
+        // 4. Icon views
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        iconImageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
+        iconImageView.contentTintColor = NSColor.white.withAlphaComponent(0.35)
+        addSubview(iconImageView)
+
+        iconEmojiLabel.translatesAutoresizingMaskIntoConstraints = false
+        iconEmojiLabel.font = NSFont.systemFont(ofSize: 22)
+        iconEmojiLabel.textColor = .white
+        iconEmojiLabel.backgroundColor = .clear
+        iconEmojiLabel.isBezeled = false
+        iconEmojiLabel.isEditable = false
+        iconEmojiLabel.isSelectable = false
+        iconEmojiLabel.alignment = .center
+        iconEmojiLabel.isHidden = true
+        addSubview(iconEmojiLabel)
+
+        NSLayoutConstraint.activate([
+            iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconImageView.widthAnchor.constraint(equalToConstant: 24),
+            iconImageView.heightAnchor.constraint(equalToConstant: 24),
+
+            iconEmojiLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconEmojiLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        // Set default icon
+        if let img = NSImage(systemSymbolName: "building.2.fill", accessibilityDescription: "Space") {
+            iconImageView.image = img
+        }
+
+        startAnimationTimer()
     }
 
-    func update(message _: String, isRecording: Bool, isTranscribing: Bool, isNoteMode: Bool, level: Double, shouldPulse: Bool) {
-        let normalizedLevel = max(0, min(1, level))
-        let isActive = isRecording || isTranscribing
+    // MARK: - Layout
 
-        let targetSymbol = isNoteMode ? "note.text" : "mic.fill"
-        if currentIconSymbol != targetSymbol,
-           let newImage = NSImage(systemSymbolName: targetSymbol, accessibilityDescription: isNoteMode ? "Note" : "Microphone")
-        {
-            currentIconSymbol = targetSymbol
-            micIconView.image = newImage
+    override func layout() {
+        super.layout()
+        updateLayerFrames()
+    }
+
+    private func updateLayerFrames() {
+        let bounds = self.bounds
+        guard bounds.width > 1, bounds.height > 1 else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        // The orb sits centered in the view.
+        // The view includes glow padding on all sides.
+        let orbDiameter = min(bounds.width, bounds.height) * (1.0 / 1.8)
+        let orbRadius = orbDiameter / 2
+        let orbOrigin = CGPoint(
+            x: bounds.midX - orbRadius,
+            y: bounds.midY - orbRadius
+        )
+        let orbRect = CGRect(origin: orbOrigin, size: CGSize(width: orbDiameter, height: orbDiameter))
+
+        // Glow fills the entire view
+        glowLayer.frame = bounds
+
+        // Orb body
+        orbLayer.frame = orbRect
+        orbLayer.cornerRadius = orbRadius
+
+        // Conic gradient — same size as orb
+        gradientLayer.frame = orbRect
+        let maskPath = CGPath(ellipseIn: CGRect(origin: .zero, size: orbRect.size), transform: nil)
+        gradientMaskLayer.path = maskPath
+
+        CATransaction.commit()
+    }
+
+    // MARK: - Public API
+
+    func update(isRecording: Bool, isTranscribing: Bool, isNoteMode: Bool, level: Double, shouldPulse: Bool) {
+        let normalizedLevel = max(0, min(1, CGFloat(level)))
+        isActive = isRecording || isTranscribing
+
+        // Detect note mode transitions
+        if isNoteMode != currentIsNoteMode {
+            currentIsNoteMode = isNoteMode
+            if isNoteMode {
+                if let img = NSImage(systemSymbolName: "note.text", accessibilityDescription: "Note") {
+                    iconImageView.image = img
+                }
+                iconImageView.isHidden = false
+                iconEmojiLabel.isHidden = true
+            } else if let saved = savedSpaceIcon {
+                applyIcon(saved)
+            }
+            runPulseAnimation()
         }
 
-        if isRecording {
-            micIconView.contentTintColor = .systemRed
-        } else if isTranscribing {
-            micIconView.contentTintColor = .systemBlue
-        } else {
-            micIconView.contentTintColor = NSColor.white.withAlphaComponent(0.72)
-        }
-
-        meterContainerView.alphaValue = isActive ? 1 : 0.22
-        updateMeterBars(level: normalizedLevel, active: isActive)
+        // Set target level for the animation timer to smooth
+        targetLevel = normalizedLevel
 
         if shouldPulse {
             runPulseAnimation()
         }
     }
 
-    private func setupView() {
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
+    func updateSpaceAppearance(color: NSColor, icon: SpaceIcon) {
+        spaceColor = color
+        savedSpaceIcon = icon
+        updateGlowColors()
+        updateGradientColors()
 
-        shellView.wantsLayer = true
-        shellView.layer?.cornerRadius = 12
-        shellView.layer?.cornerCurve = .continuous
-        shellView.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        shellView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.94).cgColor
-        shellView.layer?.shadowColor = NSColor.black.cgColor
-        shellView.layer?.shadowOpacity = 0.26
-        shellView.layer?.shadowRadius = 10
-        shellView.layer?.shadowOffset = NSSize(width: 0, height: -1)
-
-        if let micImage = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Microphone") {
-            micIconView.image = micImage
-        }
-        micIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        micIconView.contentTintColor = NSColor.white.withAlphaComponent(0.72)
-        micIconView.imageScaling = .scaleProportionallyUpOrDown
-
-        meterContainerView.wantsLayer = true
-        meterContainerView.layer?.backgroundColor = NSColor.clear.cgColor
-
-        let barWidth: CGFloat = 2
-        let barSpacing: CGFloat = 5
-        let barCount = 7
-        let totalMeterWidth = (CGFloat(barCount) * barWidth) + (CGFloat(barCount - 1) * barSpacing)
-
-        for index in 0 ..< barCount {
-            let bar = NSView()
-            bar.wantsLayer = true
-            bar.layer?.cornerRadius = barWidth / 2
-            bar.layer?.cornerCurve = .continuous
-            bar.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.95).cgColor
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            meterContainerView.addSubview(bar)
-            meterBars.append(bar)
-
-            let height = bar.heightAnchor.constraint(equalToConstant: 3.2)
-            meterBarHeightConstraints.append(height)
-            NSLayoutConstraint.activate([
-                bar.leadingAnchor.constraint(
-                    equalTo: meterContainerView.leadingAnchor,
-                    constant: CGFloat(index) * (barWidth + barSpacing)
-                ),
-                bar.centerYAnchor.constraint(equalTo: meterContainerView.centerYAnchor),
-                bar.widthAnchor.constraint(equalToConstant: barWidth),
-                height,
-            ])
-        }
-        meterPerBarLevels = Array(repeating: 0, count: meterBars.count)
-
-        [shellView, micIconView, meterContainerView].forEach {
-            $0.translatesAutoresizingMaskIntoConstraints = false
-        }
-
-        addSubview(shellView)
-        shellView.addSubview(micIconView)
-        shellView.addSubview(meterContainerView)
-
-        NSLayoutConstraint.activate([
-            shellView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            shellView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            shellView.topAnchor.constraint(equalTo: topAnchor),
-            shellView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            micIconView.leadingAnchor.constraint(equalTo: shellView.leadingAnchor, constant: 14),
-            micIconView.centerYAnchor.constraint(equalTo: shellView.centerYAnchor),
-            micIconView.widthAnchor.constraint(equalToConstant: 14),
-            micIconView.heightAnchor.constraint(equalToConstant: 14),
-
-            meterContainerView.leadingAnchor.constraint(greaterThanOrEqualTo: micIconView.trailingAnchor, constant: 12),
-            meterContainerView.trailingAnchor.constraint(equalTo: shellView.trailingAnchor, constant: -14),
-            meterContainerView.centerYAnchor.constraint(equalTo: shellView.centerYAnchor),
-            meterContainerView.heightAnchor.constraint(equalToConstant: 14),
-            meterContainerView.widthAnchor.constraint(equalToConstant: totalMeterWidth),
-        ])
+        guard !currentIsNoteMode else { return }
+        applyIcon(icon)
     }
 
-    private func runPulseAnimation() {
-        guard let layer = shellView.layer else {
-            return
+    func stopAnimationTimer() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
+
+    // MARK: - Animation Timer
+
+    private func startAnimationTimer() {
+        animationTimer?.invalidate()
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.tick()
+            }
+        }
+    }
+
+    private func tick() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt: CGFloat
+        if let last = lastLevelUpdateUptime {
+            dt = max(1.0 / 180.0, min(0.1, CGFloat(now - last)))
+        } else {
+            dt = 1.0 / 60.0
+        }
+        lastLevelUpdateUptime = now
+
+        // Voice level smoothing
+        let clamped = max(0, min(1, targetLevel))
+        let gated: CGFloat = clamped <= 0.07 ? 0 : (clamped - 0.07) / 0.93
+        let target: CGFloat = isActive ? pow(gated, 0.8) : 0
+
+        if target == 0 && displayedLevel < 0.005 {
+            displayedLevel = 0
+        } else {
+            let tau: CGFloat = 0.008
+            let alpha = 1 - exp(-dt / max(0.001, tau))
+            displayedLevel += (target - displayedLevel) * alpha
         }
 
-        layer.removeAnimation(forKey: "notch-pulse")
+        // Icon brightness smoothing (same tau)
+        let iconTarget: CGFloat = isActive ? pow(gated, 1.4) : 0
+        if iconTarget == 0 && displayedIconLevel < 0.005 {
+            displayedIconLevel = 0
+        } else {
+            let tau: CGFloat = 0.008
+            let alpha = 1 - exp(-dt / max(0.001, tau))
+            displayedIconLevel += (iconTarget - displayedIconLevel) * alpha
+        }
+
+        // Rotate conic gradient
+        let idleRotationSpeed: CGFloat = 0.015
+        let peakRotationSpeed: CGFloat = 0.08
+        let rotationSpeed = idleRotationSpeed + (peakRotationSpeed - idleRotationSpeed) * displayedLevel
+        gradientAngle += rotationSpeed
+
+        applyAnimatedState()
+    }
+
+    private func applyAnimatedState() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        // Glow: opacity 0.3 idle -> 0.8 speaking, scale 1.0 -> 1.15
+        let glowOpacity = Float(0.3 + displayedLevel * 0.5)
+        glowLayer.opacity = glowOpacity
+        let glowScale: CGFloat = 1.0 + displayedLevel * 0.15
+        glowLayer.transform = CATransform3DMakeScale(glowScale, glowScale, 1)
+
+        // Conic gradient rotation
+        gradientLayer.transform = CATransform3DMakeRotation(gradientAngle, 0, 0, 1)
+
+        // Icon brightness
+        let baseAlpha: CGFloat = isActive ? 0.7 : 0.35
+        let iconAlpha = baseAlpha + displayedIconLevel * (1.0 - baseAlpha)
+
+        iconImageView.contentTintColor = isActive
+            ? spaceColor.withAlphaComponent(iconAlpha)
+            : NSColor.white.withAlphaComponent(0.35)
+        iconEmojiLabel.alphaValue = isActive ? iconAlpha : 0.5
+
+        CATransaction.commit()
+    }
+
+    // MARK: - Colors
+
+    private func updateGlowColors() {
+        glowLayer.colors = [
+            spaceColor.withAlphaComponent(0.6).cgColor,
+            spaceColor.withAlphaComponent(0.2).cgColor,
+            NSColor.clear.cgColor,
+        ]
+        glowLayer.locations = [0.0, 0.4, 1.0]
+    }
+
+    private func updateGradientColors() {
+        // Space color + lighter/darker/accent variants
+        let lighter = spaceColor.blended(withFraction: 0.3, of: .white) ?? spaceColor
+        let darker = spaceColor.blended(withFraction: 0.3, of: .black) ?? spaceColor
+        let accent = spaceColor.blended(withFraction: 0.5, of: .cyan) ?? spaceColor
+
+        gradientLayer.colors = [
+            spaceColor.cgColor,
+            lighter.cgColor,
+            accent.cgColor,
+            darker.cgColor,
+            spaceColor.cgColor,
+        ]
+    }
+
+    // MARK: - Icon
+
+    private func applyIcon(_ icon: SpaceIcon) {
+        switch icon {
+        case .symbol(let name):
+            if let img = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
+                iconImageView.image = img
+            }
+            iconImageView.isHidden = false
+            iconEmojiLabel.isHidden = true
+        case .emoji(let char):
+            iconEmojiLabel.stringValue = char
+            iconImageView.isHidden = true
+            iconEmojiLabel.isHidden = false
+        }
+    }
+
+    // MARK: - Pulse
+
+    private func runPulseAnimation() {
+        guard let layer = orbLayer.superlayer else { return }
+        orbLayer.removeAnimation(forKey: "orb-pulse")
 
         let animation = CABasicAnimation(keyPath: "transform.scale")
         animation.fromValue = 1.0
-        animation.toValue = 1.015
-        animation.duration = 0.10
+        animation.toValue = 1.04
+        animation.duration = 0.12
         animation.autoreverses = true
         animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(animation, forKey: "notch-pulse")
-    }
-
-    private func updateMeterBars(level: Double, active: Bool) {
-        let now = ProcessInfo.processInfo.systemUptime
-        let dt: CGFloat
-        if let lastMeterUpdateUptime {
-            dt = max(1 / 180, min(0.1, CGFloat(now - lastMeterUpdateUptime)))
-        } else {
-            dt = 1 / 60
-        }
-        lastMeterUpdateUptime = now
-
-        let clampedLevel = max(0, min(1, CGFloat(level)))
-        let noiseGate: CGFloat = 0.07
-        let gatedLevel: CGFloat
-        if clampedLevel <= noiseGate {
-            gatedLevel = 0
-        } else {
-            gatedLevel = (clampedLevel - noiseGate) / (1 - noiseGate)
-        }
-
-        let compressedLevel = pow(gatedLevel, 1.65)
-        let targetEnvelope: CGFloat = active ? compressedLevel : 0
-        let envelopeTau: CGFloat = targetEnvelope > meterDisplayedLevel ? 0.010 : 0.014
-        let envelopeAlpha = 1 - exp(-dt / max(0.001, envelopeTau))
-        meterDisplayedLevel += (targetEnvelope - meterDisplayedLevel) * envelopeAlpha
-        if targetEnvelope == 0, meterDisplayedLevel < 0.004 {
-            meterDisplayedLevel = 0
-        }
-
-        let baseHeight: CGFloat = 1.6
-        let maxHeight: CGFloat = 11.2
-        let perBarScale: [CGFloat] = [0.62, 0.80, 0.70, 0.92, 0.72, 0.82, 0.64]
-
-        for (index, constraint) in meterBarHeightConstraints.enumerated() {
-            let target = max(0, min(1, meterDisplayedLevel * perBarScale[index]))
-
-            let current = meterPerBarLevels[index]
-            let barTau: CGFloat = target > current ? 0.009 : 0.012
-            let barAlpha = 1 - exp(-dt / max(0.001, barTau))
-            let next = current + (target - current) * barAlpha
-            meterPerBarLevels[index] = (target == 0 && next < 0.004) ? 0 : next
-
-            let renderedLevel = meterPerBarLevels[index]
-            let targetHeight = baseHeight + (maxHeight - baseHeight) * renderedLevel
-            constraint.constant = max(baseHeight, active ? targetHeight : baseHeight)
-            meterBars[index].alphaValue = active ? (0.16 + renderedLevel * 0.84) : 0.16
-        }
+        orbLayer.add(animation, forKey: "orb-pulse")
+        _ = layer // silence unused variable warning
     }
 }
 
+// MARK: - FloatingBubbleController
+
 @MainActor
 final class FloatingBubbleController {
-    private struct NotchGeometry {
-        let centerX: CGFloat
-        let width: CGFloat
-        let height: CGFloat
-    }
-
-    private let indicatorHeightBoost: CGFloat = -3
-    private let fallbackPanelSize = NSSize(width: 220, height: 31)
-    private let minPanelWidth: CGFloat = 188
-    private let maxPanelWidth: CGFloat = 340
-    private let minPanelHeight: CGFloat = 32
-    private let maxPanelHeight: CGFloat = 40
-    private let expandCollapseDuration: TimeInterval = 0.22
+    private let baseOrbDiameter: CGFloat = 72
+    private let bottomOffset: CGFloat = 48
 
     private var panel: NSPanel?
-    private var contentView: NotchIndicatorContentView?
-    private var currentMessage = ""
+    private var orbView: SiriOrbView?
     private var currentIsRecording = false
     private var currentIsTranscribing = false
     private var currentIsNoteMode = false
     private var currentLevel: Double = 0
     private var hideWorkItem: DispatchWorkItem?
+    private var pendingSpaceColor: NSColor?
+    private var pendingSpaceIcon: SpaceIcon?
+    private var sizePercent: Double = 100
 
-    func setPresentation(position _: FloatingIndicatorPosition, sizePercent _: Double) {
-        // Unified notch indicator ignores custom placement/size and stays top-center.
+    // MARK: - Public API
+
+    func setPresentation(position _: FloatingIndicatorPosition, sizePercent: Double) {
+        self.sizePercent = sizePercent
         repositionIfVisible()
     }
 
+    func setSpaceAppearance(color: NSColor, icon: SpaceIcon) {
+        pendingSpaceColor = color
+        pendingSpaceIcon = icon
+        orbView?.updateSpaceAppearance(color: color, icon: icon)
+    }
+
     func show(
-        message: String,
+        message _: String,
         isRecording: Bool,
         isTranscribing: Bool,
         isNoteMode: Bool = false,
@@ -244,27 +375,31 @@ final class FloatingBubbleController {
         useBuiltInWaveIndicator _: Bool
     ) {
         cancelPendingHide()
-        currentMessage = message
         currentIsRecording = isRecording
         currentIsTranscribing = isTranscribing
         currentIsNoteMode = isNoteMode
 
-        let screen = activeScreen()
-        let isActive = isRecording || isTranscribing
-        let expandedSize = desiredSize(screen: screen, isActive: true)
-        let collapsedSize = desiredSize(screen: screen, isActive: false)
-        let targetSize = isActive ? expandedSize : collapsedSize
-        let panel = ensurePanel(size: targetSize)
-        let wasVisible = panel.isVisible
+        let panelSize = computePanelSize()
+        let panel = ensurePanel(size: panelSize)
 
-        if !wasVisible {
-            let initialSize = isActive ? collapsedSize : targetSize
-            resize(panel, size: initialSize)
-            position(panel, size: initialSize, on: screen)
+        // Cancel any in-progress fade-out and restore full opacity
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        panel.animator().alphaValue = 1
+        NSAnimationContext.endGrouping()
+        panel.alphaValue = 1
+
+        // Re-apply pending space appearance
+        if let color = pendingSpaceColor, let icon = pendingSpaceIcon {
+            orbView?.updateSpaceAppearance(color: color, icon: icon)
         }
 
-        contentView?.update(
-            message: message,
+        // Resize and position
+        let size = computePanelSize()
+        resize(panel, size: size)
+        positionPanel(panel, size: size)
+
+        orbView?.update(
             isRecording: isRecording,
             isTranscribing: isTranscribing,
             isNoteMode: isNoteMode,
@@ -273,55 +408,15 @@ final class FloatingBubbleController {
         )
 
         panel.orderFrontRegardless()
-
-        if isActive, !wasVisible {
-            animatePanelFrame(
-                panel,
-                size: targetSize,
-                on: screen,
-                duration: expandCollapseDuration,
-                timingFunction: CAMediaTimingFunction(name: .easeOut)
-            )
-            return
-        }
-
-        if shouldAnimateSizeChange(from: panel.frame.size, to: targetSize) {
-            let timing = targetSize.width >= panel.frame.size.width
-                ? CAMediaTimingFunction(name: .easeOut)
-                : CAMediaTimingFunction(name: .easeIn)
-            animatePanelFrame(
-                panel,
-                size: targetSize,
-                on: screen,
-                duration: expandCollapseDuration,
-                timingFunction: timing
-            )
-        } else {
-            position(panel, size: targetSize, on: screen)
-        }
     }
 
     func hide() {
-        guard let panel, panel.isVisible else {
-            return
-        }
-
+        guard let panel, panel.isVisible else { return }
         cancelPendingHide()
-        let screen = panel.screen ?? activeScreen()
-        let collapsedSize = desiredSize(screen: screen, isActive: false)
-        animatePanelFrame(
-            panel,
-            size: collapsedSize,
-            on: screen,
-            duration: expandCollapseDuration,
-            timingFunction: CAMediaTimingFunction(name: .easeIn)
-        )
 
-        let workItem = DispatchWorkItem { [weak panel] in
-            panel?.orderOut(nil)
-        }
-        hideWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + expandCollapseDuration, execute: workItem)
+        panel.alphaValue = 0
+        panel.orderOut(nil)
+        panel.alphaValue = 1
     }
 
     func updateRiveReactiveInputs(listening: Bool, level: Double, shouldPulse: Bool) {
@@ -336,32 +431,14 @@ final class FloatingBubbleController {
         applyReactiveUpdate(listening: listening, transcribing: transcribing, level: level, shouldPulse: shouldPulse)
     }
 
+    // MARK: - Private
+
     private func applyReactiveUpdate(listening: Bool, transcribing: Bool, level: Double, shouldPulse: Bool) {
         currentLevel = max(0, min(1, level))
         currentIsRecording = listening
         currentIsTranscribing = transcribing
 
-        if let panel, panel.isVisible {
-            let screen = panel.screen ?? activeScreen()
-            let size = desiredSize(screen: screen)
-            if shouldAnimateSizeChange(from: panel.frame.size, to: size) {
-                let timing = size.width >= panel.frame.size.width
-                    ? CAMediaTimingFunction(name: .easeOut)
-                    : CAMediaTimingFunction(name: .easeIn)
-                animatePanelFrame(
-                    panel,
-                    size: size,
-                    on: screen,
-                    duration: expandCollapseDuration,
-                    timingFunction: timing
-                )
-            } else {
-                position(panel, size: size, on: screen)
-            }
-        }
-
-        contentView?.update(
-            message: currentMessage,
+        orbView?.update(
             isRecording: currentIsRecording,
             isTranscribing: currentIsTranscribing,
             isNoteMode: currentIsNoteMode,
@@ -370,40 +447,19 @@ final class FloatingBubbleController {
         )
     }
 
-    private func desiredSize(screen: NSScreen? = nil, isActive: Bool? = nil) -> NSSize {
-        guard let screen else {
-            return fallbackPanelSize
-        }
+    private func computeOrbDiameter() -> CGFloat {
+        baseOrbDiameter * CGFloat(sizePercent / 100.0)
+    }
 
-        guard let notchGeometry = notchGeometry(on: screen) else {
-            return fallbackPanelSize
-        }
-
-        let active = isActive ?? (currentIsRecording || currentIsTranscribing)
-        let horizontalExpansion: CGFloat = if active {
-            50
-        } else {
-            0
-        }
-
-        let shellWidth = min(
-            max(notchGeometry.width + (horizontalExpansion * 2), minPanelWidth),
-            maxPanelWidth
-        )
-        let shellHeight = min(
-            max(
-                notchGeometry.height + (active ? 3 : 2) + indicatorHeightBoost,
-                minPanelHeight
-            ),
-            maxPanelHeight
-        )
-        return NSSize(width: shellWidth, height: shellHeight)
+    private func computePanelSize() -> NSSize {
+        let orbDiameter = computeOrbDiameter()
+        let glowPadding = orbDiameter * 0.4
+        let side = orbDiameter + glowPadding * 2
+        return NSSize(width: side, height: side)
     }
 
     private func ensurePanel(size: NSSize) -> NSPanel {
-        if let panel {
-            return panel
-        }
+        if let panel { return panel }
 
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -420,10 +476,15 @@ final class FloatingBubbleController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.ignoresMouseEvents = true
 
-        let contentView = NotchIndicatorContentView(frame: NSRect(origin: .zero, size: size))
-        panel.contentView = contentView
-        self.contentView = contentView
+        let orbView = SiriOrbView(frame: NSRect(origin: .zero, size: size))
+        panel.contentView = orbView
+        self.orbView = orbView
         self.panel = panel
+
+        if let color = pendingSpaceColor, let icon = pendingSpaceIcon {
+            orbView.updateSpaceAppearance(color: color, icon: icon)
+        }
+
         return panel
     }
 
@@ -433,55 +494,20 @@ final class FloatingBubbleController {
         panel.contentView?.frame = NSRect(origin: .zero, size: size)
     }
 
-    private func position(_ panel: NSPanel, size: NSSize, on preferredScreen: NSScreen? = nil) {
-        guard let screen = preferredScreen ?? activeScreen() else {
-            return
-        }
+    private func positionPanel(_ panel: NSPanel, size: NSSize) {
+        guard let screen = activeScreen() else { return }
 
-        panel.setFrameOrigin(frame(for: size, on: screen).origin)
+        let visibleFrame = screen.visibleFrame
+        let x = round(visibleFrame.midX - size.width / 2)
+        let y = round(visibleFrame.origin.y + bottomOffset)
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     private func repositionIfVisible() {
-        guard let panel, panel.isVisible else {
-            return
-        }
-
-        let screen = panel.screen ?? activeScreen()
-        let size = desiredSize(screen: screen)
+        guard let panel, panel.isVisible else { return }
+        let size = computePanelSize()
         resize(panel, size: size)
-        position(panel, size: size, on: screen)
-    }
-
-    private func frame(for size: NSSize, on screen: NSScreen) -> NSRect {
-        let frame = screen.frame
-        let centerX = notchGeometry(on: screen)?.centerX ?? frame.midX
-        let x = centerX - (size.width / 2)
-        let y = frame.maxY - size.height
-        return NSRect(x: x, y: y, width: size.width, height: size.height).integral
-    }
-
-    private func animatePanelFrame(
-        _ panel: NSPanel,
-        size: NSSize,
-        on preferredScreen: NSScreen?,
-        duration: TimeInterval,
-        timingFunction: CAMediaTimingFunction
-    ) {
-        guard let screen = preferredScreen ?? activeScreen() else {
-            resize(panel, size: size)
-            return
-        }
-
-        let targetFrame = frame(for: size, on: screen)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = duration
-            context.timingFunction = timingFunction
-            panel.animator().setFrame(targetFrame, display: true)
-        }
-    }
-
-    private func shouldAnimateSizeChange(from current: NSSize, to target: NSSize) -> Bool {
-        abs(current.width - target.width) > 0.5 || abs(current.height - target.height) > 0.5
+        positionPanel(panel, size: size)
     }
 
     private func cancelPendingHide() {
@@ -493,35 +519,12 @@ final class FloatingBubbleController {
         if let panelScreen = panel?.screen {
             return panelScreen
         }
-
         if let keyScreen = NSApp.keyWindow?.screen {
             return keyScreen
         }
-
         if let main = NSScreen.main {
             return main
         }
-
         return NSScreen.screens.first
-    }
-
-    private func notchGeometry(on screen: NSScreen) -> NotchGeometry? {
-        guard
-            let leftArea = screen.auxiliaryTopLeftArea,
-            let rightArea = screen.auxiliaryTopRightArea,
-            !leftArea.isEmpty,
-            !rightArea.isEmpty
-        else {
-            return nil
-        }
-
-        let notchWidth = screen.frame.width - leftArea.width - rightArea.width
-        let notchHeight = max(leftArea.height, rightArea.height)
-        guard notchWidth > 0, notchHeight > 0 else {
-            return nil
-        }
-
-        let notchCenterX = leftArea.maxX + (notchWidth / 2)
-        return NotchGeometry(centerX: notchCenterX, width: notchWidth, height: notchHeight)
     }
 }
