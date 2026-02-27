@@ -543,10 +543,16 @@ Your job:
 - Extract priority if mentioned (urgent/critical = high, important = medium, low priority = low, otherwise none).
 - Extract tags from hashtags or explicit tag mentions.
 - Extract a list name if the user says "add to <list>" or "put in <list>".
-- If the user mentions a reminder (e.g. "remind me 10 minutes before", "remind me at 9am"), include it.
+- If the user mentions a reminder (e.g. "remind me 10 minutes before", "remind me at 9am", "remind me in 5 minutes"), include it.
+  - For relative reminders like "remind me in X minutes/hours", compute the absolute ISO datetime from the current time and use absoluteTime.
+  - For reminders relative to a due date (e.g. "remind me 10 minutes before"), use offsetMinutes.
+  - IMPORTANT: "remind me in 2 minutes" means absoluteTime = current time + 2 minutes. Always set absoluteTime for time-relative reminders.
+- If the user says "remind me in X minutes" without specifying a separate due date/time, still set dueDate to today and dueTime to the computed time (current time + X minutes).
 - Output valid JSON matching the schema.`,
       prompt: args.rawText,
     });
+
+    console.log("[processAndCreate] LLM parsed:", JSON.stringify(parsed));
 
     // Resolve listName to listId
     let listId: string | undefined;
@@ -588,16 +594,16 @@ Your job:
 
         if (r.absoluteTime) {
           at = new Date(r.absoluteTime).getTime();
-        } else if (
-          r.offsetMinutes !== undefined &&
-          parsed.dueDate
-        ) {
+        } else if (r.offsetMinutes !== undefined && parsed.dueDate) {
           // Compute from dueDate + dueTime
           const dueDateTimeStr = parsed.dueTime
             ? `${parsed.dueDate}T${parsed.dueTime}:00`
             : `${parsed.dueDate}T09:00:00`;
           const dueTimestamp = new Date(dueDateTimeStr).getTime();
           at = dueTimestamp - r.offsetMinutes * 60 * 1000;
+        } else if (r.offsetMinutes !== undefined) {
+          // No due date — treat offset as "from now"
+          at = Date.now() + r.offsetMinutes * 60 * 1000;
         }
 
         if (at && !isNaN(at)) {
