@@ -146,6 +146,7 @@ private final class SiriOrbView: NSView {
 
         // Conic gradient — same size as orb
         gradientLayer.frame = orbRect
+        gradientMaskLayer.frame = gradientLayer.bounds
         let maskPath = CGPath(ellipseIn: CGRect(origin: .zero, size: orbRect.size), transform: nil)
         gradientMaskLayer.path = maskPath
 
@@ -196,12 +197,17 @@ private final class SiriOrbView: NSView {
         animationTimer = nil
     }
 
+    func ensureAnimationTimer() {
+        guard animationTimer == nil else { return }
+        startAnimationTimer()
+    }
+
     // MARK: - Animation Timer
 
     private func startAnimationTimer() {
         animationTimer?.invalidate()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
                 self?.tick()
             }
         }
@@ -245,6 +251,9 @@ private final class SiriOrbView: NSView {
         let peakRotationSpeed: CGFloat = 0.08
         let rotationSpeed = idleRotationSpeed + (peakRotationSpeed - idleRotationSpeed) * displayedLevel
         gradientAngle += rotationSpeed
+        if gradientAngle > .pi * 2 {
+            gradientAngle -= .pi * 2
+        }
 
         applyAnimatedState()
     }
@@ -347,7 +356,6 @@ final class FloatingBubbleController {
     private var currentIsTranscribing = false
     private var currentIsNoteMode = false
     private var currentLevel: Double = 0
-    private var hideWorkItem: DispatchWorkItem?
     private var pendingSpaceColor: NSColor?
     private var pendingSpaceIcon: SpaceIcon?
     private var sizePercent: Double = 100
@@ -374,7 +382,6 @@ final class FloatingBubbleController {
         htmlIndicatorMarkup _: String?,
         useBuiltInWaveIndicator _: Bool
     ) {
-        cancelPendingHide()
         currentIsRecording = isRecording
         currentIsTranscribing = isTranscribing
         currentIsNoteMode = isNoteMode
@@ -395,10 +402,10 @@ final class FloatingBubbleController {
         }
 
         // Resize and position
-        let size = computePanelSize()
-        resize(panel, size: size)
-        positionPanel(panel, size: size)
+        resize(panel, size: panelSize)
+        positionPanel(panel, size: panelSize)
 
+        orbView?.ensureAnimationTimer()
         orbView?.update(
             isRecording: isRecording,
             isTranscribing: isTranscribing,
@@ -412,8 +419,7 @@ final class FloatingBubbleController {
 
     func hide() {
         guard let panel, panel.isVisible else { return }
-        cancelPendingHide()
-
+        orbView?.stopAnimationTimer()
         panel.alphaValue = 0
         panel.orderOut(nil)
         panel.alphaValue = 1
@@ -508,11 +514,6 @@ final class FloatingBubbleController {
         let size = computePanelSize()
         resize(panel, size: size)
         positionPanel(panel, size: size)
-    }
-
-    private func cancelPendingHide() {
-        hideWorkItem?.cancel()
-        hideWorkItem = nil
     }
 
     private func activeScreen() -> NSScreen? {
