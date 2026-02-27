@@ -86,9 +86,10 @@ final class TodoListController {
                 args[key] = value
             }
 
+            nonisolated(unsafe) let sendableArgs = args
             _ = try await ConvexHTTPClient.mutation(
                 function: "todos:update",
-                args: args,
+                args: sendableArgs,
                 token: token
             )
         } catch {

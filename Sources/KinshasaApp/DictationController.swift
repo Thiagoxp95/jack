@@ -61,6 +61,11 @@ final class DictationController: ObservableObject {
         }
     }
 
+    @Published var shortcutType: ShortcutType {
+        didSet {
+            UserDefaults.standard.set(shortcutType.rawValue, forKey: DefaultsKey.shortcutType)
+        }
+    }
     @Published private(set) var invocationShortcut: InvocationShortcut
     @Published private(set) var voiceNoteSwitchKeyCode: Int64
     @Published private(set) var screenRecordingShortcut: InvocationShortcut?
@@ -304,6 +309,7 @@ final class DictationController: ObservableObject {
 
     private enum DefaultsKey {
         static let mode = "shortcut_mode"
+        static let shortcutType = "shortcut_type"
         static let invocationKeyCode = "shortcut_invocation_key_code" // Legacy
         static let invocationShortcutJSON = "invocation_shortcut_json"
         static let voiceNoteSwitchKeyCode = "voice_note_switch_key_code"
@@ -410,6 +416,12 @@ final class DictationController: ObservableObject {
         }
 
         mode = initialMode
+        // Infer shortcut type from existing shortcut if not persisted
+        if let storedType = ShortcutType(rawValue: defaults.string(forKey: DefaultsKey.shortcutType) ?? "") {
+            shortcutType = storedType
+        } else {
+            shortcutType = initialInvocationShortcut.isSingleKey || initialInvocationShortcut.isModifierOnly ? .singleKey : .combination
+        }
         invocationShortcut = initialInvocationShortcut
         voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
         todoSwitchKeyCode = initialTodoSwitchKeyCode
@@ -717,6 +729,28 @@ final class DictationController: ObservableObject {
         keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
         statusText = "Screen recording key capture canceled."
+    }
+
+    func startTodoSwitchKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+            return
+        }
+
+        keyCaptureTarget = .todoSwitch
+        isCapturingTodoSwitchKey = true
+        statusText = "Press the key to switch to Todo mode while recording."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelTodoSwitchKeyCapture() {
+        guard isCapturingTodoSwitchKey else {
+            return
+        }
+
+        isCapturingTodoSwitchKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Todo key capture canceled."
     }
 
     func clearScreenRecordingKey() {
@@ -1902,6 +1936,25 @@ final class DictationController: ObservableObject {
 
         let capturedKeyCode = Int64(event.keyCode)
 
+        // Single-key mode for invocation: accept any key immediately, no modifier accumulation
+        if keyCaptureTarget == .invocation, shortcutType == .singleKey {
+            if event.type == .flagsChanged {
+                // Modifier key pressed — use it as the single key
+                if InvocationKey.isModifierKeyCode(capturedKeyCode) {
+                    let shortcut = InvocationShortcut(primaryKeyCode: capturedKeyCode, modifiers: 0)
+                    finalizeCapturedShortcut(shortcut, for: keyCaptureTarget)
+                }
+                return
+            }
+            if event.type == .keyDown {
+                if event.isARepeat { return }
+                let shortcut = InvocationShortcut(primaryKeyCode: capturedKeyCode, modifiers: 0)
+                finalizeCapturedShortcut(shortcut, for: keyCaptureTarget)
+            }
+            return
+        }
+
+        // Combination mode: accumulate modifiers, finalize on regular key press
         if event.type == .flagsChanged {
             // Accumulate modifier flags
             if InvocationKey.isModifierKeyCode(capturedKeyCode) {
