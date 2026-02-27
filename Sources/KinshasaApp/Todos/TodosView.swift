@@ -259,33 +259,46 @@ struct TodoRowView: View {
 
                 Spacer()
 
-                // Due date
-                if let dueDateText = formattedDueDate {
-                    Text(dueDateText)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(isDueSoon ? .red : .secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isDueSoon ? Color.red.opacity(0.1) : Color.secondary.opacity(0.1))
-                        )
+                // Reminder bell
+                if let reminders = todo.reminders, !reminders.isEmpty {
+                    Image(systemName: "bell.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .help("Has \(reminders.count) reminder(s)")
                 }
 
-                // Delete button (visible when expanded)
-                if isExpanded {
-                    Button(role: .destructive) {
-                        Task {
-                            await controller.deleteTodo(todoId: todo.id)
+                // Due date + time
+                if let dueDateText = formattedDueDate {
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                            .font(.caption2)
+                        Text(dueDateText)
+                            .font(.caption2.weight(.medium))
+                        if let dueTime = todo.dueTime, !dueTime.isEmpty {
+                            Text(dueTime)
+                                .font(.caption2.weight(.medium))
                         }
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
-                            .foregroundStyle(.red)
                     }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
+                    .foregroundStyle(isDueSoon ? .red : .secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(isDueSoon ? Color.red.opacity(0.1) : Color.secondary.opacity(0.1))
+                    )
                 }
+
+                // Delete button
+                Button(role: .destructive) {
+                    Task {
+                        await controller.deleteTodo(todoId: todo.id)
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.5))
+                }
+                .buttonStyle(.plain)
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -451,6 +464,36 @@ struct TodoDetailView: View {
                     )
                 }
                 .buttonStyle(.plain)
+            }
+
+            // Due date/time + reminders
+            if todo.dueDate != nil || (todo.reminders != nil && !todo.reminders!.isEmpty) {
+                HStack(spacing: 12) {
+                    if let dueDate = todo.dueDate {
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.caption2)
+                            Text(dueDate)
+                                .font(.caption.weight(.medium))
+                            if let dueTime = todo.dueTime, !dueTime.isEmpty {
+                                Text("at \(dueTime)")
+                                    .font(.caption.weight(.medium))
+                            }
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if let reminders = todo.reminders, !reminders.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bell.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                            Text("\(reminders.count) reminder(s)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
             }
 
             // Tags
