@@ -428,7 +428,7 @@ final class SubtitleChunkerTests: XCTestCase {
     }
 
     func testChunkSingleWordReturnsOneLine() {
-        let timings = [WordTiming(word: "hello", startTime: 0.5, endTime: 1.0, confidence: 0.9)]
+        let timings = [WordTiming(word: " hello", startTime: 0.5, endTime: 1.0, confidence: 0.9)]
         let lines = SubtitleChunker.chunk(wordTimings: timings)
         XCTAssertEqual(lines.count, 1)
         XCTAssertEqual(lines[0].words.count, 1)
@@ -436,11 +436,12 @@ final class SubtitleChunkerTests: XCTestCase {
     }
 
     func testChunkBreaksAtLongPause() {
+        // Space-prefixed tokens (as FluidAudio emits)
         let timings = [
-            WordTiming(word: "hello", startTime: 0.0, endTime: 0.4, confidence: 0.9),
-            WordTiming(word: "world", startTime: 0.5, endTime: 0.9, confidence: 0.9),
-            WordTiming(word: "this", startTime: 1.4, endTime: 1.8, confidence: 0.9),
-            WordTiming(word: "works", startTime: 1.9, endTime: 2.3, confidence: 0.9),
+            WordTiming(word: " hello", startTime: 0.0, endTime: 0.4, confidence: 0.9),
+            WordTiming(word: " world", startTime: 0.5, endTime: 0.9, confidence: 0.9),
+            WordTiming(word: " this", startTime: 1.4, endTime: 1.8, confidence: 0.9),
+            WordTiming(word: " works", startTime: 1.9, endTime: 2.3, confidence: 0.9),
         ]
         let lines = SubtitleChunker.chunk(wordTimings: timings, maxWordsPerLine: 10, pauseThreshold: 0.3)
         XCTAssertEqual(lines.count, 2)
@@ -452,7 +453,7 @@ final class SubtitleChunkerTests: XCTestCase {
         var timings: [WordTiming] = []
         for i in 0..<12 {
             let start = Double(i) * 0.5
-            timings.append(WordTiming(word: "word\(i)", startTime: start, endTime: start + 0.4, confidence: 0.9))
+            timings.append(WordTiming(word: " word\(i)", startTime: start, endTime: start + 0.4, confidence: 0.9))
         }
         let lines = SubtitleChunker.chunk(wordTimings: timings, maxWordsPerLine: 8)
         XCTAssertEqual(lines.count, 2)
@@ -462,25 +463,88 @@ final class SubtitleChunkerTests: XCTestCase {
 
     func testChunkLineTimesMatchWordBoundaries() {
         let timings = [
-            WordTiming(word: "hello", startTime: 1.0, endTime: 1.5, confidence: 0.9),
-            WordTiming(word: "world", startTime: 1.6, endTime: 2.1, confidence: 0.85),
+            WordTiming(word: " hello", startTime: 1.0, endTime: 1.5, confidence: 0.9),
+            WordTiming(word: " world", startTime: 1.6, endTime: 2.1, confidence: 0.85),
         ]
         let lines = SubtitleChunker.chunk(wordTimings: timings)
         XCTAssertEqual(lines[0].sourceStart, 1.0)
         XCTAssertEqual(lines[0].sourceEnd, 2.1)
     }
 
-    func testChunkFiltersEmptyTokens() {
+    // MARK: - Sub-word token merging
+
+    func testMergeSubWordTokensIntoWords() {
+        // "This is a test" as BPE tokens: " This" " is" " a" " t" "est"
         let timings = [
-            WordTiming(word: "", startTime: 0.0, endTime: 0.1, confidence: 0.5),
-            WordTiming(word: "hello", startTime: 0.2, endTime: 0.5, confidence: 0.9),
-            WordTiming(word: " ", startTime: 0.6, endTime: 0.7, confidence: 0.3),
-            WordTiming(word: "world", startTime: 0.7, endTime: 1.1, confidence: 0.85),
+            WordTiming(word: " This", startTime: 0.0, endTime: 0.3, confidence: 0.9),
+            WordTiming(word: " is", startTime: 0.3, endTime: 0.5, confidence: 0.9),
+            WordTiming(word: " a", startTime: 0.5, endTime: 0.6, confidence: 0.9),
+            WordTiming(word: " t", startTime: 0.6, endTime: 0.7, confidence: 0.8),
+            WordTiming(word: "est", startTime: 0.7, endTime: 0.9, confidence: 0.8),
+        ]
+        let merged = SubtitleChunker.mergeTokensIntoWords(timings)
+        XCTAssertEqual(merged.count, 4)
+        XCTAssertEqual(merged[0].word, "This")
+        XCTAssertEqual(merged[1].word, "is")
+        XCTAssertEqual(merged[2].word, "a")
+        XCTAssertEqual(merged[3].word, "test")
+        // "test" should span from the start of " t" to the end of "est"
+        XCTAssertEqual(merged[3].startTime, 0.6)
+        XCTAssertEqual(merged[3].endTime, 0.9)
+    }
+
+    func testMergeMultipleSubWordTokens() {
+        // "testing" as BPE tokens: " t" "est" "ing"
+        let timings = [
+            WordTiming(word: " t", startTime: 0.0, endTime: 0.1, confidence: 0.9),
+            WordTiming(word: "est", startTime: 0.1, endTime: 0.2, confidence: 0.8),
+            WordTiming(word: "ing", startTime: 0.2, endTime: 0.4, confidence: 0.85),
+        ]
+        let merged = SubtitleChunker.mergeTokensIntoWords(timings)
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].word, "testing")
+        XCTAssertEqual(merged[0].startTime, 0.0)
+        XCTAssertEqual(merged[0].endTime, 0.4)
+    }
+
+    func testMergeAveragesConfidence() {
+        let timings = [
+            WordTiming(word: " t", startTime: 0.0, endTime: 0.1, confidence: 0.8),
+            WordTiming(word: "est", startTime: 0.1, endTime: 0.2, confidence: 1.0),
+        ]
+        let merged = SubtitleChunker.mergeTokensIntoWords(timings)
+        XCTAssertEqual(merged[0].confidence, 0.9, accuracy: 0.001)
+    }
+
+    func testMergeSentencePieceMarker() {
+        // Using ▁ (U+2581) SentencePiece marker
+        let timings = [
+            WordTiming(word: "\u{2581}hello", startTime: 0.0, endTime: 0.5, confidence: 0.9),
+            WordTiming(word: "\u{2581}world", startTime: 0.6, endTime: 1.0, confidence: 0.85),
+        ]
+        let merged = SubtitleChunker.mergeTokensIntoWords(timings)
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged[0].word, "hello")
+        XCTAssertEqual(merged[1].word, "world")
+    }
+
+    func testChunkWithSubWordTokensProducesCorrectWords() {
+        // Full sentence: "This is a test, testing 1, 2, 3"
+        let timings = [
+            WordTiming(word: " This", startTime: 0.0, endTime: 0.3, confidence: 0.9),
+            WordTiming(word: " is", startTime: 0.3, endTime: 0.5, confidence: 0.9),
+            WordTiming(word: " a", startTime: 0.5, endTime: 0.6, confidence: 0.9),
+            WordTiming(word: " t", startTime: 0.6, endTime: 0.7, confidence: 0.8),
+            WordTiming(word: "est", startTime: 0.7, endTime: 0.9, confidence: 0.8),
+            WordTiming(word: ",", startTime: 0.9, endTime: 0.95, confidence: 0.9),
+            WordTiming(word: " t", startTime: 1.0, endTime: 1.1, confidence: 0.8),
+            WordTiming(word: "est", startTime: 1.1, endTime: 1.2, confidence: 0.8),
+            WordTiming(word: "ing", startTime: 1.2, endTime: 1.4, confidence: 0.85),
+            WordTiming(word: " 1", startTime: 1.5, endTime: 1.6, confidence: 0.9),
         ]
         let lines = SubtitleChunker.chunk(wordTimings: timings)
-        XCTAssertEqual(lines[0].words.count, 2)
-        XCTAssertEqual(lines[0].words[0].text, "hello")
-        XCTAssertEqual(lines[0].words[1].text, "world")
+        let allWords = lines.flatMap { $0.words.map(\.text) }
+        XCTAssertEqual(allWords, ["This", "is", "a", "test,", "testing", "1"])
     }
 }
 
