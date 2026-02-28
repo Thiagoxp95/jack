@@ -366,7 +366,8 @@ struct VideoEditorView: View {
                 // Subtitle preview overlay
                 if editor.subtitleConfig.enabled,
                    !editor.subtitleLines.isEmpty {
-                    let subtitleTime = editor.isPlaying ? editor.smoothTime : editor.currentTime
+                    let editedTime = editor.isPlaying ? editor.smoothTime : editor.currentTime
+                    let subtitleTime = editor.sourceTime(forEditedTime: editedTime)
                     subtitlePreviewOverlay(
                         at: subtitleTime,
                         previewSize: previewSize
@@ -474,6 +475,8 @@ struct VideoEditorView: View {
         currentTime: TimeInterval,
         fontSize: CGFloat
     ) -> some View {
+        let activeColor = Color(nsColor: NSColor(hex: editor.subtitleConfig.activeColor) ?? .white)
+        let inactiveColor = Color(nsColor: NSColor(hex: editor.subtitleConfig.inactiveColor) ?? .gray)
         HStack(spacing: 0) {
             ForEach(Array(line.words.enumerated()), id: \.element.id) { index, word in
                 if index > 0 {
@@ -481,16 +484,16 @@ struct VideoEditorView: View {
                         .font(.system(size: fontSize, weight: .semibold))
                         .foregroundStyle(
                             currentTime >= word.startTime
-                                ? Color.white
-                                : Color.gray
+                                ? activeColor
+                                : inactiveColor
                         )
                 }
                 Text(word.text)
                     .font(.system(size: fontSize, weight: .semibold))
                     .foregroundStyle(
                         currentTime >= word.startTime
-                            ? Color.white
-                            : Color.gray
+                            ? activeColor
+                            : inactiveColor
                     )
             }
         }
@@ -1437,9 +1440,12 @@ struct VideoEditorView: View {
                 get: { line.words.map(\.text).joined(separator: " ") },
                 set: { newText in
                     let newWords = newText.split(separator: " ", omittingEmptySubsequences: true)
-                    for (index, word) in line.words.enumerated() {
+                    // Update existing words, delete extras
+                    for (index, word) in line.words.enumerated().reversed() {
                         if index < newWords.count {
                             editor.updateSubtitleWord(word.id, text: String(newWords[index]))
+                        } else {
+                            editor.deleteSubtitleWord(word.id)
                         }
                     }
                     editor.saveSubtitles()
