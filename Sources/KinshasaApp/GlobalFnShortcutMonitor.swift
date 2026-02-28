@@ -2,6 +2,25 @@ import ApplicationServices
 import AppKit
 import Foundation
 
+/// Temporary debug logger — writes to /tmp/hold-debug.log so we can `tail -f` it.
+private let _holdDebugLogURL = URL(fileURLWithPath: "/tmp/hold-debug.log")
+private let _holdDebugQueue = DispatchQueue(label: "hold-debug-log")
+func holdDebugLog(_ msg: String) {
+    let ts = String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1_000_000))
+    let line = "[\(ts)] \(msg)\n"
+    _holdDebugQueue.async {
+        if let data = line.data(using: .utf8) {
+            if let fh = try? FileHandle(forWritingTo: _holdDebugLogURL) {
+                fh.seekToEndOfFile()
+                fh.write(data)
+                fh.closeFile()
+            } else {
+                try? data.write(to: _holdDebugLogURL)
+            }
+        }
+    }
+}
+
 final class GlobalFnShortcutMonitor {
     enum StartResult: Equatable {
         case started
@@ -54,6 +73,11 @@ final class GlobalFnShortcutMonitor {
     private var screenRecordingShortcut: InvocationShortcut?
     private var isScreenRecordingShortcutActive = false
 
+    // Multi-key todo sheet shortcut
+    var onTodoSheetKeyPressed: (() -> Void)?
+    private var todoSheetShortcut: InvocationShortcut?
+    private var isTodoSheetShortcutActive = false
+
     func setInvocationShortcut(_ shortcut: InvocationShortcut) {
         invocationShortcut = shortcut
         isInvocationShortcutActive = false
@@ -67,6 +91,11 @@ final class GlobalFnShortcutMonitor {
     func setScreenRecordingShortcut(_ shortcut: InvocationShortcut?) {
         screenRecordingShortcut = shortcut
         isScreenRecordingShortcutActive = false
+    }
+
+    func setTodoSheetShortcut(_ shortcut: InvocationShortcut?) {
+        todoSheetShortcut = shortcut
+        isTodoSheetShortcutActive = false
     }
 
     func setVoiceNoteSwitchArmed(_ armed: Bool) {
@@ -86,6 +115,13 @@ final class GlobalFnShortcutMonitor {
         if !armed {
             consumeTodoSwitchKeyUp = false
         }
+    }
+
+    func setRecordingControlsActive(_ active: Bool) {
+        isRecordingForSpaceCycle = active
+        isCurrentlyRecording = active
+        setVoiceNoteSwitchArmed(active)
+        setTodoSwitchArmed(active)
     }
 
     func isInvocationKeyCurrentlyPressed() -> Bool {
@@ -180,10 +216,7 @@ final class GlobalFnShortcutMonitor {
         runLoopSource = nil
         eventTap = nil
         isInvocationShortcutActive = false
-        voiceNoteSwitchArmed = false
-        consumeVoiceNoteSwitchKeyUp = false
-        todoSwitchArmed = false
-        consumeTodoSwitchKeyUp = false
+        setRecordingControlsActive(false)
     }
 
     // MARK: - Event Handling
@@ -194,6 +227,8 @@ final class GlobalFnShortcutMonitor {
         // Update current modifier flags from the event
         let rawFlags = event.flags
         currentModifierFlags = Self.nsModifierFlags(from: rawFlags)
+
+        holdDebugLog("flagsChanged: keyCode=\(keyCode) flags=\(rawFlags.rawValue) modifiers=\(currentModifierFlags.rawValue) isActive=\(isInvocationShortcutActive)")
 
         // Screen recording shortcut: modifier-based matching
         if let srShortcut = screenRecordingShortcut {
@@ -211,32 +246,76 @@ final class GlobalFnShortcutMonitor {
             }
         }
 
+        // Todo sheet shortcut: modifier-based matching
+        if let tsShortcut = todoSheetShortcut {
+            if tsShortcut != invocationShortcut {
+                let tsResult = evaluateModifierShortcut(tsShortcut, keyCode: keyCode, isActive: isTodoSheetShortcutActive)
+                if let tsResult {
+                    if tsResult, !isTodoSheetShortcutActive {
+                        isTodoSheetShortcutActive = true
+                        onTodoSheetKeyPressed?()
+                    } else if !tsResult {
+                        isTodoSheetShortcutActive = false
+                    }
+                    return true
+                }
+            }
+        }
+
         // Invocation shortcut
         if invocationShortcut.isModifierOnly || (invocationShortcut.primaryKeyCode.map { InvocationKey.isModifierKeyCode($0) } ?? false) {
             // Modifier-only or single-modifier shortcut
             let result = evaluateModifierShortcut(invocationShortcut, keyCode: keyCode, isActive: isInvocationShortcutActive)
+            holdDebugLog("evaluateModifier: result=\(String(describing: result)) isActive=\(isInvocationShortcutActive)")
             if let result {
                 if result != isInvocationShortcutActive {
                     if result {
                         isInvocationShortcutActive = true
-                        if voiceNoteSwitchKeyCode != nil {
-                            voiceNoteSwitchArmed = true
-                        }
-                        if todoSwitchKeyCode != nil {
-                            todoSwitchArmed = true
-                        }
+                        holdDebugLog(">>> FIRING .down")
                         onEvent?(.down)
                     } else {
-                        // Cross-check with HID for Fn/Globe key spurious releases
-                        if let primaryKey = invocationShortcut.primaryKeyCode,
-                           CGEventSource.keyState(.hidSystemState, key: CGKeyCode(primaryKey)) {
-                            return true
+                        // Cross-check with HID for Fn/Globe key spurious releases.
+                        // macOS Globe behavior can clear .function flag even while
+                        // the key is physically held — check multiple sources.
+                        if let primaryKey = invocationShortcut.primaryKeyCode {
+                            let hidState = CGEventSource.keyState(.hidSystemState, key: CGKeyCode(primaryKey))
+                            let combinedState = CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(primaryKey))
+                            holdDebugLog("HID cross-check: hid=\(hidState) combined=\(combinedState)")
+                            if hidState {
+                                return true
+                            }
+                            if combinedState {
+                                return true
+                            }
                         }
+
+                        holdDebugLog(">>> FIRING .up")
                         isInvocationShortcutActive = false
                         onEvent?(.up)
                     }
                 }
                 return true
+            } else if isInvocationShortcutActive {
+                // evaluateModifierShortcut returned nil (event was for a different
+                // key code), but the invocation shortcut is active.  Another modifier
+                // changing state can spuriously clear the invocation modifier flag
+                // (especially .function on Globe key).  Re-check physically before
+                // allowing the active state to be invalidated by a later event.
+                if let primaryKey = invocationShortcut.primaryKeyCode {
+                    let stillHeld = CGEventSource.keyState(.hidSystemState, key: CGKeyCode(primaryKey))
+                        || CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(primaryKey))
+                    if !stillHeld {
+                        // Modifier flags say not held AND physical check also says not held.
+                        // Verify via modifier flags too before firing .up.
+                        let flagCheck = Self.keyStateFromModifierFlags(for: primaryKey, flags: currentModifierFlags)
+                        if flagCheck == false || flagCheck == nil {
+                            holdDebugLog(">>> FIRING .up (cross-key flagsChanged, physical check confirms release)")
+                            isInvocationShortcutActive = false
+                            onEvent?(.up)
+                            return true
+                        }
+                    }
+                }
             }
         }
 
@@ -258,10 +337,17 @@ final class GlobalFnShortcutMonitor {
 
     private func handleKeyEvent(_ event: CGEvent, isKeyDown: Bool) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let eventModifierFlags = Self.nsModifierFlags(from: event.flags)
+        currentModifierFlags = eventModifierFlags
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        let invocationHasPriority = Self.invocationShouldTakePriority(
+            forKeyCode: keyCode,
+            currentModifierFlags: eventModifierFlags,
+            invocationShortcut: invocationShortcut
+        )
 
         // Escape interception: if enabled and recording, consume escape key
-        if escapeToCancelEnabled, isCurrentlyRecording, keyCode == 53, isKeyDown {
-            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if !invocationHasPriority, escapeToCancelEnabled, isCurrentlyRecording, keyCode == 53, isKeyDown {
             if !isRepeat {
                 onEscapePressed?()
             }
@@ -269,8 +355,7 @@ final class GlobalFnShortcutMonitor {
         }
 
         // Space cycling: intercept left/right arrow keys during recording
-        if isRecordingForSpaceCycle, isKeyDown {
-            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if !invocationHasPriority, isRecordingForSpaceCycle, isKeyDown {
             if !isRepeat {
                 if keyCode == 123 { // left arrow
                     onSpaceCycleKeyPressed?(.left)
@@ -295,71 +380,72 @@ final class GlobalFnShortcutMonitor {
             }
         }
 
+        // Todo sheet shortcut (non-modifier key variant)
+        if let tsShortcut = todoSheetShortcut, tsShortcut != invocationShortcut {
+            if matchesKeyEvent(tsShortcut, keyCode: keyCode, isKeyDown: isKeyDown) {
+                if isKeyDown {
+                    let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                    if !isRepeat {
+                        onTodoSheetKeyPressed?()
+                    }
+                }
+                return true
+            }
+        }
+
         // Voice note switch key
-        if let voiceNoteSwitchKeyCode, keyCode == voiceNoteSwitchKeyCode {
+        if !invocationHasPriority,
+           let voiceNoteSwitchKeyCode,
+           keyCode == voiceNoteSwitchKeyCode
+        {
             if isKeyDown {
-                let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                 if isRepeat {
                     return voiceNoteSwitchArmed
                 }
 
-                guard voiceNoteSwitchArmed else {
-                    return false
+                if voiceNoteSwitchArmed {
+                    consumeVoiceNoteSwitchKeyUp = true
+                    onVoiceNoteSwitchKeyPressed?()
+                    return true
                 }
-
-                consumeVoiceNoteSwitchKeyUp = true
-                onVoiceNoteSwitchKeyPressed?()
-                return true
-            }
-
-            if consumeVoiceNoteSwitchKeyUp {
+            } else if consumeVoiceNoteSwitchKeyUp {
                 consumeVoiceNoteSwitchKeyUp = false
                 return true
             }
-
-            return false
         }
 
         // Todo switch key
-        if let todoSwitchKeyCode,
+        if !invocationHasPriority,
+           let todoSwitchKeyCode,
            keyCode == todoSwitchKeyCode
         {
             if isKeyDown {
-                let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                 if isRepeat {
                     return todoSwitchArmed
                 }
-                guard todoSwitchArmed else {
-                    return false
+
+                if todoSwitchArmed {
+                    consumeTodoSwitchKeyUp = true
+                    onTodoSwitchKeyPressed?()
+                    return true
                 }
-                consumeTodoSwitchKeyUp = true
-                onTodoSwitchKeyPressed?()
-                return true
-            }
-            if consumeTodoSwitchKeyUp {
+            } else if consumeTodoSwitchKeyUp {
                 consumeTodoSwitchKeyUp = false
                 return true
             }
-            return false
         }
 
         // Invocation shortcut: key event handling
         if let primaryKey = invocationShortcut.primaryKeyCode, !InvocationKey.isModifierKeyCode(primaryKey) {
             if keyCode == primaryKey {
+                holdDebugLog("keyEvent: keyCode=\(keyCode) isKeyDown=\(isKeyDown) isActive=\(isInvocationShortcutActive)")
                 if invocationShortcut.modifiers != 0 {
                     // Modifier+key shortcut
                     let requiredFlags = invocationShortcut.nsModifierFlags
                     if isKeyDown {
-                        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                         if isRepeat { return true }
                         if currentModifierFlags.contains(requiredFlags), !isInvocationShortcutActive {
                             isInvocationShortcutActive = true
-                            if voiceNoteSwitchKeyCode != nil {
-                                voiceNoteSwitchArmed = true
-                            }
-                            if todoSwitchKeyCode != nil {
-                                todoSwitchArmed = true
-                            }
                             onEvent?(.down)
                             return true
                         }
@@ -374,7 +460,6 @@ final class GlobalFnShortcutMonitor {
                 } else {
                     // Single key (no modifiers) — legacy behavior
                     if isKeyDown {
-                        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                         if isRepeat { return true }
                     }
 
@@ -383,12 +468,6 @@ final class GlobalFnShortcutMonitor {
                     }
 
                     isInvocationShortcutActive = isKeyDown
-                    if isKeyDown, voiceNoteSwitchKeyCode != nil {
-                        voiceNoteSwitchArmed = true
-                    }
-                    if isKeyDown, todoSwitchKeyCode != nil {
-                        todoSwitchArmed = true
-                    }
                     onEvent?(isKeyDown ? .down : .up)
                     return true
                 }
@@ -439,27 +518,55 @@ final class GlobalFnShortcutMonitor {
         return true
     }
 
+    static func invocationShouldTakePriority(
+        forKeyCode keyCode: Int64,
+        currentModifierFlags: NSEvent.ModifierFlags,
+        invocationShortcut: InvocationShortcut
+    ) -> Bool {
+        guard let primaryKey = invocationShortcut.primaryKeyCode,
+              !InvocationKey.isModifierKeyCode(primaryKey),
+              keyCode == primaryKey
+        else {
+            return false
+        }
+
+        if invocationShortcut.modifiers == 0 {
+            return true
+        }
+
+        let required = invocationShortcut.nsModifierFlags
+        return currentModifierFlags.contains(required)
+    }
+
     // MARK: - Physical State
 
     private func isShortcutPhysicallyActive(_ shortcut: InvocationShortcut) -> Bool {
-        // Check modifiers
-        if shortcut.modifiers != 0 {
-            let required = shortcut.nsModifierFlags
-            if !NSEvent.modifierFlags.contains(required) {
-                return false
-            }
-        }
-
-        // Check primary key
         if let primaryKey = shortcut.primaryKeyCode {
             if InvocationKey.isModifierKeyCode(primaryKey) {
-                // For modifier keys, check via modifier flags
+                // Single-modifier-key shortcut (e.g. Fn/Globe).
+                // Check modifier flags first, then fall through to CGEventSource
+                // because macOS Globe behavior can clear .function even while held.
                 if let keyDown = Self.keyStateFromModifierFlags(for: primaryKey, flags: NSEvent.modifierFlags) {
-                    return keyDown
+                    if keyDown { return true }
+                }
+                if CGEventSource.keyState(.hidSystemState, key: CGKeyCode(primaryKey)) {
+                    return true
+                }
+                if CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(primaryKey)) {
+                    return true
                 }
                 return false
             }
-            // For regular keys, check CGEventSource
+
+            // Modifier+key shortcut: check required modifiers first
+            if shortcut.modifiers != 0 {
+                let required = shortcut.nsModifierFlags
+                if !NSEvent.modifierFlags.contains(required) {
+                    return false
+                }
+            }
+
+            // Check the primary key via CGEventSource
             if CGEventSource.keyState(.hidSystemState, key: CGKeyCode(primaryKey)) {
                 return true
             }
@@ -469,7 +576,11 @@ final class GlobalFnShortcutMonitor {
             return false
         }
 
-        // Modifier-only: just check flags (already done above)
+        // Modifier-only (no primary key): just check flags
+        if shortcut.modifiers != 0 {
+            let required = shortcut.nsModifierFlags
+            return NSEvent.modifierFlags.contains(required)
+        }
         return true
     }
 
