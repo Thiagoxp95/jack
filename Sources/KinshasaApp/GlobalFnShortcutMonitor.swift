@@ -78,6 +78,11 @@ final class GlobalFnShortcutMonitor {
     private var todoSheetShortcut: InvocationShortcut?
     private var isTodoSheetShortcutActive = false
 
+    // Multi-key chat sheet shortcut
+    var onChatSheetKeyPressed: (() -> Void)?
+    private var chatSheetShortcut: InvocationShortcut?
+    private var isChatSheetShortcutActive = false
+
     func setInvocationShortcut(_ shortcut: InvocationShortcut) {
         invocationShortcut = shortcut
         isInvocationShortcutActive = false
@@ -96,6 +101,11 @@ final class GlobalFnShortcutMonitor {
     func setTodoSheetShortcut(_ shortcut: InvocationShortcut?) {
         todoSheetShortcut = shortcut
         isTodoSheetShortcutActive = false
+    }
+
+    func setChatSheetShortcut(_ shortcut: InvocationShortcut?) {
+        chatSheetShortcut = shortcut
+        isChatSheetShortcutActive = false
     }
 
     func setVoiceNoteSwitchArmed(_ armed: Bool) {
@@ -262,6 +272,22 @@ final class GlobalFnShortcutMonitor {
             }
         }
 
+        // Chat sheet shortcut: modifier-based matching
+        if let csShortcut = chatSheetShortcut {
+            if csShortcut != invocationShortcut {
+                let csResult = evaluateModifierShortcut(csShortcut, keyCode: keyCode, isActive: isChatSheetShortcutActive)
+                if let csResult {
+                    if csResult, !isChatSheetShortcutActive {
+                        isChatSheetShortcutActive = true
+                        onChatSheetKeyPressed?()
+                    } else if !csResult {
+                        isChatSheetShortcutActive = false
+                    }
+                    return true
+                }
+            }
+        }
+
         // Invocation shortcut
         if invocationShortcut.isModifierOnly || (invocationShortcut.primaryKeyCode.map { InvocationKey.isModifierKeyCode($0) } ?? false) {
             // Modifier-only or single-modifier shortcut
@@ -387,6 +413,19 @@ final class GlobalFnShortcutMonitor {
                     let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                     if !isRepeat {
                         onTodoSheetKeyPressed?()
+                    }
+                }
+                return true
+            }
+        }
+
+        // Chat sheet shortcut (non-modifier key variant)
+        if let csShortcut = chatSheetShortcut, csShortcut != invocationShortcut {
+            if matchesKeyEvent(csShortcut, keyCode: keyCode, isKeyDown: isKeyDown) {
+                if isKeyDown {
+                    let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                    if !isRepeat {
+                        onChatSheetKeyPressed?()
                     }
                 }
                 return true

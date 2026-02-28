@@ -71,12 +71,14 @@ final class DictationController: ObservableObject {
     @Published private(set) var voiceNoteSwitchKeyCode: Int64
     @Published private(set) var screenRecordingShortcut: InvocationShortcut?
     @Published private(set) var todoSheetShortcut: InvocationShortcut?
+    @Published private(set) var chatSheetShortcut: InvocationShortcut?
     @Published private(set) var todoSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
     @Published var isCapturingVoiceNoteSwitchKey = false
     @Published var isCapturingScreenRecordingKey = false
     @Published var isCapturingTodoSwitchKey = false
     @Published var isCapturingTodoSheetKey = false
+    @Published var isCapturingChatSheetKey = false
     @Published var statusText: String
     @Published var lastTranscript: String
     @Published var isRecording = false
@@ -336,6 +338,7 @@ final class DictationController: ObservableObject {
         static let screenRecordingKeyCode = "screen_recording_key_code" // Legacy
         static let screenRecordingShortcutJSON = "screen_recording_shortcut_json"
         static let todoSheetShortcutJSON = "todo_sheet_shortcut_json"
+        static let chatSheetShortcutJSON = "chat_sheet_shortcut_json"
         static let onboardingCompleted = "onboarding_completed"
         static let escapeToCancelEnabled = "escape_to_cancel_enabled"
         static let launchAtLogin = "launch_at_login"
@@ -367,6 +370,7 @@ final class DictationController: ObservableObject {
         case screenRecording
         case todoSwitch
         case todoSheet
+        case chatSheet
     }
 
     nonisolated static func inferOnboardingCompletion(
@@ -441,7 +445,19 @@ final class DictationController: ObservableObject {
            let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
             initialTodoSheetShortcut = decoded
         } else {
-            initialTodoSheetShortcut = nil
+            // Default: ⌃⇧T (Control+Shift+T)
+            let controlShift = NSEvent.ModifierFlags.control.rawValue | NSEvent.ModifierFlags.shift.rawValue
+            initialTodoSheetShortcut = InvocationShortcut(primaryKeyCode: 17, modifiers: controlShift)
+        }
+
+        let initialChatSheetShortcut: InvocationShortcut?
+        if let jsonData = defaults.data(forKey: DefaultsKey.chatSheetShortcutJSON),
+           let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
+            initialChatSheetShortcut = decoded
+        } else {
+            // Default: ⌃⇧A (Control+Shift+A)
+            let controlShift = NSEvent.ModifierFlags.control.rawValue | NSEvent.ModifierFlags.shift.rawValue
+            initialChatSheetShortcut = InvocationShortcut(primaryKeyCode: 0, modifiers: controlShift)
         }
 
         mode = initialMode
@@ -456,6 +472,7 @@ final class DictationController: ObservableObject {
         todoSwitchKeyCode = initialTodoSwitchKeyCode
         screenRecordingShortcut = initialScreenRecordingShortcut
         todoSheetShortcut = initialTodoSheetShortcut
+        chatSheetShortcut = initialChatSheetShortcut
 
         escapeToCancelEnabled = defaults.object(forKey: DefaultsKey.escapeToCancelEnabled) as? Bool ?? false
         launchAtLoginEnabled = defaults.object(forKey: DefaultsKey.launchAtLogin) as? Bool ?? false
@@ -559,6 +576,14 @@ final class DictationController: ObservableObject {
                 self?.handleTodoSheetShortcut()
             }
         }
+        if let initialChatSheetShortcut = chatSheetShortcut {
+            shortcutMonitor.setChatSheetShortcut(initialChatSheetShortcut)
+        }
+        shortcutMonitor.onChatSheetKeyPressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleChatSheetShortcut()
+            }
+        }
         shortcutMonitor.onEscapePressed = { [weak self] in
             Task { @MainActor [weak self] in
                 self?.cancelRecording()
@@ -633,6 +658,10 @@ final class DictationController: ObservableObject {
 
     var todoSheetKeyDisplayName: String {
         todoSheetShortcut?.displayName ?? "Not Set"
+    }
+
+    var chatSheetKeyDisplayName: String {
+        chatSheetShortcut?.displayName ?? "Not Set"
     }
 
     func showOnboardingWizard() {
@@ -724,8 +753,13 @@ final class DictationController: ObservableObject {
         statusText = "Todo sheet shortcut set to \(todoSheetKeyDisplayName)."
     }
 
+    func applyChatSheetShortcut(_ shortcut: InvocationShortcut) {
+        setChatSheetShortcut(shortcut)
+        statusText = "Chat sheet shortcut set to \(chatSheetKeyDisplayName)."
+    }
+
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
 
@@ -748,7 +782,7 @@ final class DictationController: ObservableObject {
     }
 
     func startVoiceNoteSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
 
@@ -771,7 +805,7 @@ final class DictationController: ObservableObject {
     }
 
     func startScreenRecordingKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
 
@@ -793,7 +827,7 @@ final class DictationController: ObservableObject {
     }
 
     func startTodoSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
 
@@ -815,7 +849,7 @@ final class DictationController: ObservableObject {
     }
 
     func startTodoSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
 
@@ -846,6 +880,34 @@ final class DictationController: ObservableObject {
         todoSheetShortcut = nil
         shortcutMonitor.setTodoSheetShortcut(nil)
         UserDefaults.standard.removeObject(forKey: DefaultsKey.todoSheetShortcutJSON)
+    }
+
+    func startChatSheetKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+            return
+        }
+
+        keyCaptureTarget = .chatSheet
+        isCapturingChatSheetKey = true
+        statusText = "Press a key combination for the Chat Sheet shortcut."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelChatSheetKeyCapture() {
+        guard isCapturingChatSheetKey else {
+            return
+        }
+
+        isCapturingChatSheetKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Chat Sheet key capture canceled."
+    }
+
+    func clearChatSheetKey() {
+        chatSheetShortcut = nil
+        shortcutMonitor.setChatSheetShortcut(nil)
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.chatSheetShortcutJSON)
     }
 
     func requestKeyboardPrompt() {
@@ -984,7 +1046,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             holdDebugLog("handleShortcutEvent: BLOCKED by capture mode")
             return
         }
@@ -1051,17 +1113,24 @@ final class DictationController: ObservableObject {
     }
 
     private func handleScreenRecordingShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
         NotificationCenter.default.post(name: .toggleScreenRecording, object: nil)
     }
 
     private func handleTodoSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
             return
         }
-        NotificationCenter.default.post(name: .toggleTodoSheet, object: nil)
+        TodoSideSheetController.shared.toggle()
+    }
+
+    private func handleChatSheetShortcut() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+            return
+        }
+        ChatSideSheetController.shared.toggle()
     }
 
     private func scheduleHoldStopConfirmation(after delay: TimeInterval) {
@@ -1641,10 +1710,17 @@ final class DictationController: ObservableObject {
         todoConfirmation.show(todo: todo)
     }
 
-    private nonisolated func saveTodoEdit(todoId: String, updates: [String: Any]) async {
+    private nonisolated func saveTodoEdit(todoId: String, updates: TodoEditUpdates) async {
         do {
             let token = try await ConvexHTTPClient.getToken()
-            let args: [String: Any] = updates.merging(["todoId": todoId]) { _, new in new }
+            var args: [String: Any] = [
+                "todoId": todoId,
+                "title": updates.title,
+                "priority": updates.priority,
+            ]
+            if let dueDate = updates.dueDate { args["dueDate"] = dueDate }
+            if let dueTime = updates.dueTime { args["dueTime"] = dueTime }
+            if let tags = updates.tags { args["tags"] = tags }
             _ = try await ConvexHTTPClient.mutation(
                 function: "todos:update",
                 args: args,
@@ -2250,6 +2326,12 @@ final class DictationController: ObservableObject {
             removeInvocationKeyCaptureMonitors()
             setTodoSheetShortcut(shortcut)
             statusText = "Todo sheet shortcut set to \(todoSheetKeyDisplayName)."
+        case .chatSheet:
+            isCapturingChatSheetKey = false
+            keyCaptureTarget = nil
+            removeInvocationKeyCaptureMonitors()
+            setChatSheetShortcut(shortcut)
+            statusText = "Chat sheet shortcut set to \(chatSheetKeyDisplayName)."
         }
 
         isCapturingInvocationKey = false
@@ -2257,6 +2339,7 @@ final class DictationController: ObservableObject {
         isCapturingScreenRecordingKey = false
         isCapturingTodoSwitchKey = false
         isCapturingTodoSheetKey = false
+        isCapturingChatSheetKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
     }
@@ -2288,6 +2371,14 @@ final class DictationController: ObservableObject {
         shortcutMonitor.setTodoSheetShortcut(shortcut)
         if let data = try? JSONEncoder().encode(shortcut) {
             UserDefaults.standard.set(data, forKey: DefaultsKey.todoSheetShortcutJSON)
+        }
+    }
+
+    private func setChatSheetShortcut(_ shortcut: InvocationShortcut) {
+        chatSheetShortcut = shortcut
+        shortcutMonitor.setChatSheetShortcut(shortcut)
+        if let data = try? JSONEncoder().encode(shortcut) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.chatSheetShortcutJSON)
         }
     }
 
