@@ -23,6 +23,8 @@ struct EditorSnapshot {
     let webcamPositionX: Double
     let webcamPositionY: Double
     let webcamStartOffset: TimeInterval
+    let subtitleLines: [SubtitleLine]
+    let subtitleConfig: SubtitleConfiguration
 }
 
 // MARK: - VideoEditorController
@@ -77,6 +79,11 @@ final class VideoEditorController {
     var systemMuted: Bool = false
 
     var aspectRatio: ExportAspectRatio = .original
+
+    // MARK: - Subtitles
+    var subtitleLines: [SubtitleLine] = []
+    var subtitleConfig: SubtitleConfiguration = .init()
+    var isTranscribing: Bool = false
 
     var webcamEnabled: Bool = true
     var webcamScale: Double = 1.0
@@ -260,11 +267,14 @@ final class VideoEditorController {
         // Load audio waveforms
         micWaveform = await loadWaveform(url: session.micAudioURL)
         systemWaveform = await loadWaveform(url: session.systemAudioURL)
+
+        // Load subtitle data
+        loadSubtitles()
     }
 
     // MARK: - Audio Mix
 
-    /// Rebuilds the AVAudioMix from current volume/mute state.
+    /// Rebuilds the AVAudioMix from current volume/mute state and per-segment volumes.
     /// Called when volumes change — triggers @Observable update so MetalPreviewView reapplies.
     func rebuildAudioMix() {
         guard let comp = composition else { return }
@@ -273,22 +283,48 @@ final class VideoEditorController {
         if let trackID = micTrackID,
            let track = comp.track(withTrackID: trackID) {
             let p = AVMutableAudioMixInputParameters(track: track)
-            let vol = micMuted ? Float(0) : micVolume
-            p.setVolume(vol, at: .zero)
+            if micMuted {
+                p.setVolume(0, at: .zero)
+            } else {
+                for segment in segments {
+                    let time = CMTime(seconds: segment.sourceStart, preferredTimescale: 600)
+                    let vol: Float = segment.enabled ? segment.micVolume * micVolume : 0
+                    p.setVolume(vol, at: time)
+                }
+            }
             params.append(p)
         }
 
         if let trackID = systemTrackID,
            let track = comp.track(withTrackID: trackID) {
             let p = AVMutableAudioMixInputParameters(track: track)
-            let vol = systemMuted ? Float(0) : systemVolume
-            p.setVolume(vol, at: .zero)
+            if systemMuted {
+                p.setVolume(0, at: .zero)
+            } else {
+                for segment in segments {
+                    let time = CMTime(seconds: segment.sourceStart, preferredTimescale: 600)
+                    let vol: Float = segment.enabled ? segment.systemVolume * systemVolume : 0
+                    p.setVolume(vol, at: time)
+                }
+            }
             params.append(p)
         }
 
         let mix = AVMutableAudioMix()
         mix.inputParameters = params
         audioMix = mix
+    }
+
+    /// Updates the per-segment volume for a specific segment and rebuilds audio mix.
+    func updateSegmentVolume(segmentID: UUID, micVolume: Float? = nil, systemVolume: Float? = nil) {
+        guard let idx = segments.firstIndex(where: { $0.id == segmentID }) else { return }
+        if let mv = micVolume {
+            segments[idx].micVolume = max(0, min(2.0, mv))
+        }
+        if let sv = systemVolume {
+            segments[idx].systemVolume = max(0, min(2.0, sv))
+        }
+        rebuildAudioMix()
     }
 
     // MARK: - Waveform Loading
@@ -409,34 +445,40 @@ final class VideoEditorController {
         guard let idx = segments.firstIndex(where: { $0.sourceStart < srcTime && srcTime < $0.sourceEnd }) else { return }
         pushSnapshot()
         let seg = segments[idx]
-        let left = TimelineSegment(sourceStart: seg.sourceStart, sourceEnd: srcTime, enabled: seg.enabled)
-        let right = TimelineSegment(sourceStart: srcTime, sourceEnd: seg.sourceEnd, enabled: seg.enabled)
+        let left = TimelineSegment(sourceStart: seg.sourceStart, sourceEnd: srcTime, enabled: seg.enabled, micVolume: seg.micVolume, systemVolume: seg.systemVolume)
+        let right = TimelineSegment(sourceStart: srcTime, sourceEnd: seg.sourceEnd, enabled: seg.enabled, micVolume: seg.micVolume, systemVolume: seg.systemVolume)
         segments.replaceSubrange(idx...idx, with: [left, right])
+        rebuildAudioMix()
     }
 
     func splitAtSourceTime(_ srcTime: TimeInterval) {
         guard let idx = segments.firstIndex(where: { $0.sourceStart < srcTime && srcTime < $0.sourceEnd }) else { return }
         pushSnapshot()
         let seg = segments[idx]
-        let left = TimelineSegment(sourceStart: seg.sourceStart, sourceEnd: srcTime, enabled: seg.enabled)
-        let right = TimelineSegment(sourceStart: srcTime, sourceEnd: seg.sourceEnd, enabled: seg.enabled)
+        let left = TimelineSegment(sourceStart: seg.sourceStart, sourceEnd: srcTime, enabled: seg.enabled, micVolume: seg.micVolume, systemVolume: seg.systemVolume)
+        let right = TimelineSegment(sourceStart: srcTime, sourceEnd: seg.sourceEnd, enabled: seg.enabled, micVolume: seg.micVolume, systemVolume: seg.systemVolume)
         segments.replaceSubrange(idx...idx, with: [left, right])
+        rebuildAudioMix()
     }
 
     func deleteSelectedSegment() {
         guard let selID = selectedSegmentID,
               let idx = segments.firstIndex(where: { $0.id == selID }) else { return }
         pushSnapshot()
+        let seg = segments[idx]
         segments[idx] = TimelineSegment(
-            id: segments[idx].id,
-            sourceStart: segments[idx].sourceStart,
-            sourceEnd: segments[idx].sourceEnd,
-            enabled: false
+            id: seg.id,
+            sourceStart: seg.sourceStart,
+            sourceEnd: seg.sourceEnd,
+            enabled: false,
+            micVolume: seg.micVolume,
+            systemVolume: seg.systemVolume
         )
         selectedSegmentID = nil
         // Clamp playhead to edited duration
         let edited = editedDuration
         if currentTime > edited { currentTime = edited }
+        rebuildAudioMix()
     }
 
     func toggleBladeMode() {
@@ -624,6 +666,126 @@ final class VideoEditorController {
         }
     }
 
+    // MARK: - Subtitle Queries
+
+    func subtitleLineAt(time: TimeInterval) -> SubtitleLine? {
+        subtitleLines.first { time >= $0.sourceStart && time <= $0.sourceEnd }
+    }
+
+    // MARK: - Subtitle Editing
+
+    func updateSubtitleWord(_ wordId: UUID, text: String) {
+        for lineIndex in subtitleLines.indices {
+            if let wordIndex = subtitleLines[lineIndex].words.firstIndex(where: { $0.id == wordId }) {
+                subtitleLines[lineIndex].words[wordIndex].text = text
+                return
+            }
+        }
+    }
+
+    func deleteSubtitleWord(_ wordId: UUID) {
+        for lineIndex in subtitleLines.indices.reversed() {
+            if let wordIndex = subtitleLines[lineIndex].words.firstIndex(where: { $0.id == wordId }) {
+                subtitleLines[lineIndex].words.remove(at: wordIndex)
+                if subtitleLines[lineIndex].words.isEmpty {
+                    subtitleLines.remove(at: lineIndex)
+                }
+                return
+            }
+        }
+    }
+
+    // MARK: - Transcription
+
+    func transcribeAudio() async {
+        guard !isTranscribing else { return }
+        isTranscribing = true
+        defer { isTranscribing = false }
+
+        pushSnapshot()
+
+        do {
+            let audioURL: URL
+            switch subtitleConfig.audioSource {
+            case .microphone:
+                audioURL = session.micAudioURL
+            case .systemAudio:
+                audioURL = session.systemAudioURL
+            case .both:
+                audioURL = try await mixAudioTracks(mic: session.micAudioURL, system: session.systemAudioURL)
+            }
+
+            let bootstrapper = LocalParakeetBootstrapper()
+            let model = ProcessInfo.processInfo.environment["KINSHASA_COREML_MODEL"] ?? "parakeet-v2"
+            let config = try await bootstrapper.ensureReady(model: model)
+
+            let service = ParakeetTranscriptionService()
+            try await service.prepare(configuration: config)
+            let result = try await service.transcribe(audioFileURL: audioURL, configuration: config)
+            subtitleLines = SubtitleChunker.chunk(wordTimings: result.wordTimings)
+            subtitleConfig.enabled = true
+            saveSubtitles()
+        } catch {
+            Self.logger.error("Transcription failed: \(error)")
+        }
+    }
+
+    private func mixAudioTracks(mic: URL, system: URL) async throws -> URL {
+        let composition = AVMutableComposition()
+        let micAsset = AVURLAsset(url: mic)
+        let systemAsset = AVURLAsset(url: system)
+
+        if let micTrack = try await micAsset.loadTracks(withMediaType: .audio).first,
+           let compMicTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let duration = try await micAsset.load(.duration)
+            try compMicTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: micTrack, at: .zero)
+        }
+        if let sysTrack = try await systemAsset.loadTracks(withMediaType: .audio).first,
+           let compSysTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let duration = try await systemAsset.load(.duration)
+            try compSysTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: sysTrack, at: .zero)
+        }
+
+        let outputURL = session.sessionDirectory.appendingPathComponent("mixed_audio.caf")
+        try? FileManager.default.removeItem(at: outputURL)
+
+        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            throw NSError(domain: "SubtitleExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create export session"])
+        }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .caf
+        await exportSession.export()
+
+        if exportSession.status != .completed {
+            throw exportSession.error ?? NSError(domain: "SubtitleExport", code: 2)
+        }
+        return outputURL
+    }
+
+    // MARK: - Subtitle Persistence
+
+    func saveSubtitles() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        if let data = try? encoder.encode(subtitleLines) {
+            try? data.write(to: session.sessionDirectory.appendingPathComponent("subtitles.json"))
+        }
+        if let data = try? encoder.encode(subtitleConfig) {
+            try? data.write(to: session.sessionDirectory.appendingPathComponent("subtitle_config.json"))
+        }
+    }
+
+    private func loadSubtitles() {
+        let subtitlesURL = session.sessionDirectory.appendingPathComponent("subtitles.json")
+        let configURL = session.sessionDirectory.appendingPathComponent("subtitle_config.json")
+        if let data = try? Data(contentsOf: subtitlesURL) {
+            subtitleLines = (try? JSONDecoder().decode([SubtitleLine].self, from: data)) ?? []
+        }
+        if let data = try? Data(contentsOf: configURL) {
+            subtitleConfig = (try? JSONDecoder().decode(SubtitleConfiguration.self, from: data)) ?? .init()
+        }
+    }
+
     // MARK: - Undo / Redo
 
     private func makeSnapshot() -> EditorSnapshot {
@@ -644,11 +806,13 @@ final class VideoEditorController {
             webcamScale: webcamScale,
             webcamPositionX: webcamPositionX,
             webcamPositionY: webcamPositionY,
-            webcamStartOffset: webcamStartOffset
+            webcamStartOffset: webcamStartOffset,
+            subtitleLines: subtitleLines,
+            subtitleConfig: subtitleConfig
         )
     }
 
-    private func pushSnapshot() {
+    func pushSnapshot() {
         undoStack.append(makeSnapshot())
         redoStack.removeAll()
     }
@@ -670,6 +834,9 @@ final class VideoEditorController {
         webcamScale = snapshot.webcamScale
         webcamPositionX = snapshot.webcamPositionX
         webcamPositionY = snapshot.webcamPositionY
+        subtitleLines = snapshot.subtitleLines
+        subtitleConfig = snapshot.subtitleConfig
+        rebuildAudioMix()
     }
 
     func undo() {

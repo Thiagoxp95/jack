@@ -332,6 +332,95 @@ final class SubtitleModelTests: XCTestCase {
     }
 }
 
+@MainActor
+final class SubtitleEditorTests: XCTestCase {
+    private func makeEditor() -> VideoEditorController {
+        let session = RecordingSession(
+            sessionDirectory: URL(fileURLWithPath: "/tmp/test-\(UUID())"),
+            captureSourceType: .screen,
+            fps: .thirty
+        )
+        return VideoEditorController(session: session)
+    }
+
+    func testSubtitleConfigDefaultsToDisabled() {
+        let editor = makeEditor()
+        XCTAssertFalse(editor.subtitleConfig.enabled)
+    }
+
+    func testSetSubtitleLinesUpdatesState() {
+        let editor = makeEditor()
+        let words = [SubtitleWord(text: "hello", startTime: 0, endTime: 0.5, confidence: 0.9)]
+        let lines = [SubtitleLine(words: words)]
+        editor.subtitleLines = lines
+        XCTAssertEqual(editor.subtitleLines.count, 1)
+    }
+
+    func testSubtitleLineAtTimeReturnsCorrectLine() {
+        let editor = makeEditor()
+        let line1 = SubtitleLine(words: [
+            SubtitleWord(text: "hello", startTime: 0.0, endTime: 0.5, confidence: 0.9),
+            SubtitleWord(text: "world", startTime: 0.6, endTime: 1.0, confidence: 0.9),
+        ])
+        let line2 = SubtitleLine(words: [
+            SubtitleWord(text: "foo", startTime: 2.0, endTime: 2.5, confidence: 0.9),
+        ])
+        editor.subtitleLines = [line1, line2]
+
+        let found = editor.subtitleLineAt(time: 0.7)
+        XCTAssertEqual(found?.words.first?.text, "hello")
+
+        let found2 = editor.subtitleLineAt(time: 2.2)
+        XCTAssertEqual(found2?.words.first?.text, "foo")
+
+        let notFound = editor.subtitleLineAt(time: 1.5)
+        XCTAssertNil(notFound)
+    }
+
+    func testDeleteSubtitleWord() {
+        let editor = makeEditor()
+        let word1 = SubtitleWord(text: "hello", startTime: 0, endTime: 0.5, confidence: 0.9)
+        let word2 = SubtitleWord(text: "world", startTime: 0.6, endTime: 1.0, confidence: 0.9)
+        editor.subtitleLines = [SubtitleLine(words: [word1, word2])]
+
+        editor.deleteSubtitleWord(word1.id)
+        XCTAssertEqual(editor.subtitleLines[0].words.count, 1)
+        XCTAssertEqual(editor.subtitleLines[0].words[0].text, "world")
+    }
+
+    func testDeleteLastWordRemovesEntireLine() {
+        let editor = makeEditor()
+        let word = SubtitleWord(text: "hello", startTime: 0, endTime: 0.5, confidence: 0.9)
+        editor.subtitleLines = [SubtitleLine(words: [word])]
+
+        editor.deleteSubtitleWord(word.id)
+        XCTAssertTrue(editor.subtitleLines.isEmpty)
+    }
+
+    func testUpdateSubtitleWordText() {
+        let editor = makeEditor()
+        let word = SubtitleWord(text: "helo", startTime: 0, endTime: 0.5, confidence: 0.9)
+        editor.subtitleLines = [SubtitleLine(words: [word])]
+
+        editor.updateSubtitleWord(word.id, text: "hello")
+        XCTAssertEqual(editor.subtitleLines[0].words[0].text, "hello")
+    }
+
+    func testSubtitleStateIncludedInUndoRedo() {
+        let editor = makeEditor()
+        let word = SubtitleWord(text: "hello", startTime: 0, endTime: 0.5, confidence: 0.9)
+        editor.subtitleLines = [SubtitleLine(words: [word])]
+        editor.pushSnapshot()
+
+        editor.subtitleLines = []
+        XCTAssertTrue(editor.subtitleLines.isEmpty)
+
+        editor.undo()
+        XCTAssertEqual(editor.subtitleLines.count, 1)
+        XCTAssertEqual(editor.subtitleLines[0].words[0].text, "hello")
+    }
+}
+
 final class SubtitleChunkerTests: XCTestCase {
     func testChunkEmptyTimingsReturnsEmpty() {
         let lines = SubtitleChunker.chunk(wordTimings: [])

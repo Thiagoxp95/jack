@@ -100,7 +100,7 @@ final class ExportService: @unchecked Sendable {
     private var videoInput: AVAssetWriterInput?
     private var videoReaderOutput: AVAssetReaderTrackOutput?
     private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
-    private var audioPairs: [(input: AVAssetWriterInput, readerOutput: AVAssetReaderTrackOutput, reader: AVAssetReader, asset: AVURLAsset)] = []
+    private var audioPairs: [(input: AVAssetWriterInput, readerOutput: AVAssetReaderTrackOutput, reader: AVAssetReader, asset: AVURLAsset, label: String)] = []
     private var renderer: MetalVideoRenderer?
     private var metalTextureCache: CVMetalTextureCache?
 
@@ -197,7 +197,9 @@ final class ExportService: @unchecked Sendable {
                 webcamScale: editor.webcamScale,
                 webcamPositionX: editor.webcamPositionX,
                 webcamPositionY: editor.webcamPositionY,
-                webcamStartOffset: editor.webcamStartOffset
+                webcamStartOffset: editor.webcamStartOffset,
+                subtitleLines: editor.subtitleLines,
+                subtitleConfig: editor.subtitleConfig
             )
         }
 
@@ -705,6 +707,7 @@ final class ExportService: @unchecked Sendable {
                 let audioQueue = DispatchQueue(label: "com.kinshasa.export.audio.\(UUID().uuidString)")
                 nonisolated(unsafe) let audioWriterInput = pair.input
                 nonisolated(unsafe) let audioReaderOutput = pair.readerOutput
+                let trackLabel = pair.label
                 audioWriterInput.requestMediaDataWhenReady(on: audioQueue) { [self] in
                     while audioWriterInput.isReadyForMoreMediaData {
                         if self.isCancelled {
@@ -719,6 +722,26 @@ final class ExportService: @unchecked Sendable {
                         }
                         if let sampleBuffer = audioReaderOutput.copyNextSampleBuffer() {
                             _ = autoreleasepool {
+                                let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+                                let masterVol: Float
+                                let isMuted: Bool
+                                if trackLabel == "mic" {
+                                    masterVol = editorState.micVolume
+                                    isMuted = editorState.micMuted
+                                } else {
+                                    masterVol = editorState.systemVolume
+                                    isMuted = editorState.systemMuted
+                                }
+                                let effectiveVol = Self.volumeForAudioTime(
+                                    time: pts,
+                                    segments: editorState.segments,
+                                    trackLabel: trackLabel,
+                                    masterVolume: masterVol,
+                                    isMuted: isMuted
+                                )
+                                if effectiveVol != 1.0 {
+                                    Self.scaleSampleBuffer(sampleBuffer, volume: effectiveVol)
+                                }
                                 audioWriterInput.append(sampleBuffer)
                             }
                         } else {
@@ -793,8 +816,8 @@ final class ExportService: @unchecked Sendable {
     }
 
     /// Adds an audio reader/writer pair.
-    /// For compressed sources (AAC), uses passthrough (no re-encoding).
-    /// For uncompressed sources (PCM), decodes and re-encodes to AAC.
+    /// Always decodes to PCM for sample-level per-segment volume scaling,
+    /// then re-encodes to AAC for export.
     private func addAudioPair(
         url: URL,
         writer: AVAssetWriter,
@@ -814,17 +837,6 @@ final class ExportService: @unchecked Sendable {
             return
         }
 
-        // Detect whether the source is compressed (AAC) or uncompressed (PCM).
-        let formatDescriptions = try await audioTrack.load(.formatDescriptions)
-        let isCompressed: Bool
-        if let desc = formatDescriptions.first {
-            let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)
-            let formatID = asbd?.pointee.mFormatID ?? 0
-            isCompressed = formatID != kAudioFormatLinearPCM
-        } else {
-            isCompressed = true // Assume compressed if we can't tell
-        }
-
         let audioReader: AVAssetReader
         do {
             audioReader = try AVAssetReader(asset: asset)
@@ -833,33 +845,25 @@ final class ExportService: @unchecked Sendable {
             return
         }
 
-        let readerOutput: AVAssetReaderTrackOutput
-        let audioInput: AVAssetWriterInput
+        // Always decode to PCM so we can apply per-segment volume scaling
+        let decodingSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 48_000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsFloatKey: false,
+        ]
+        let readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: decodingSettings)
+        readerOutput.alwaysCopiesSampleData = true
 
-        if isCompressed {
-            // Passthrough: compressed AAC buffers copied directly
-            readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
-            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
-        } else {
-            // Decode PCM source to raw samples, then encode to AAC for export
-            let decodingSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsBigEndianKey: false,
-                AVLinearPCMIsFloatKey: false,
-            ]
-            readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: decodingSettings)
-
-            let encodingSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 128_000,
-            ]
-            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: encodingSettings)
-        }
+        let encodingSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 48_000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 128_000,
+        ]
+        let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: encodingSettings)
 
         audioInput.expectsMediaDataInRealTime = false
 
@@ -880,7 +884,7 @@ final class ExportService: @unchecked Sendable {
         }
         writer.add(audioInput)
 
-        audioPairs.append((input: audioInput, readerOutput: readerOutput, reader: audioReader, asset: asset))
+        audioPairs.append((input: audioInput, readerOutput: readerOutput, reader: audioReader, asset: asset, label: label))
     }
 
     // MARK: - Resolved Size
@@ -1230,6 +1234,53 @@ final class ExportService: @unchecked Sendable {
             }
         }
         return false
+    }
+
+    // MARK: - Per-Segment Volume Helpers
+
+    /// Returns the effective volume for an audio sample at a given time.
+    /// Effective = segment volume × master volume. Disabled segments and muted tracks return 0.
+    private static func volumeForAudioTime(
+        time: Double,
+        segments: [TimelineSegment],
+        trackLabel: String,
+        masterVolume: Float,
+        isMuted: Bool
+    ) -> Float {
+        if isMuted { return 0 }
+        for segment in segments {
+            if time >= segment.sourceStart && time < segment.sourceEnd {
+                if !segment.enabled { return 0 }
+                let segVol = trackLabel == "mic" ? segment.micVolume : segment.systemVolume
+                return segVol * masterVolume
+            }
+        }
+        return masterVolume
+    }
+
+    /// Scales Int16 PCM samples in a CMSampleBuffer in place.
+    /// The buffer must have been created with `alwaysCopiesSampleData = true`.
+    private static func scaleSampleBuffer(_ sampleBuffer: CMSampleBuffer, volume: Float) {
+        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        var length = 0
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        let status = CMBlockBufferGetDataPointer(dataBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
+        guard status == kCMBlockBufferNoErr, let ptr = dataPointer else { return }
+
+        let sampleCount = length / MemoryLayout<Int16>.size
+        ptr.withMemoryRebound(to: Int16.self, capacity: sampleCount) { samples in
+            if volume <= 0.0001 {
+                // Silence: zero out
+                for i in 0..<sampleCount {
+                    samples[i] = 0
+                }
+            } else {
+                for i in 0..<sampleCount {
+                    let scaled = Float(samples[i]) * volume
+                    samples[i] = Int16(clamping: Int32(scaled))
+                }
+            }
+        }
     }
 
     private func interpolatedCursorPosition(
