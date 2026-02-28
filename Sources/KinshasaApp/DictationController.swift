@@ -97,6 +97,8 @@ final class DictationController: ObservableObject {
     @Published var isCapturingTodoSwitchKey = false
     @Published var isCapturingTodoSheetKey = false
     @Published var isCapturingChatSheetKey = false
+    @Published private(set) var aiSwitchKeyCode: Int64
+    @Published var isCapturingAiSwitchKey = false
     @Published var statusText: String
     @Published var lastTranscript: String
     @Published var isRecording = false
@@ -368,6 +370,7 @@ final class DictationController: ObservableObject {
         static let invocationShortcutJSON = "invocation_shortcut_json"
         static let voiceNoteSwitchKeyCode = "voice_note_switch_key_code"
         static let todoSwitchKeyCode = "todo_switch_key_code"
+        static let aiSwitchKeyCode = "ai_switch_key_code"
         static let screenRecordingKeyCode = "screen_recording_key_code" // Legacy
         static let screenRecordingShortcutJSON = "screen_recording_shortcut_json"
         static let todoSheetShortcutJSON = "todo_sheet_shortcut_json"
@@ -407,6 +410,7 @@ final class DictationController: ObservableObject {
         case todoSwitch
         case todoSheet
         case chatSheet
+        case aiSwitch
     }
 
     nonisolated static func inferOnboardingCompletion(
@@ -462,6 +466,13 @@ final class DictationController: ObservableObject {
             initialTodoSwitchKeyCode = 17 // T key
         }
 
+        let initialAiSwitchKeyCode: Int64
+        if let stored = defaults.object(forKey: DefaultsKey.aiSwitchKeyCode) as? Int {
+            initialAiSwitchKeyCode = Int64(stored)
+        } else {
+            initialAiSwitchKeyCode = 0 // A key default
+        }
+
         // Migrate screen recording shortcut from legacy key code
         let initialScreenRecordingShortcut: InvocationShortcut?
         if let jsonData = defaults.data(forKey: DefaultsKey.screenRecordingShortcutJSON),
@@ -508,6 +519,7 @@ final class DictationController: ObservableObject {
         invocationShortcut = initialInvocationShortcut
         voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
         todoSwitchKeyCode = initialTodoSwitchKeyCode
+        aiSwitchKeyCode = initialAiSwitchKeyCode
         screenRecordingShortcut = initialScreenRecordingShortcut
         todoSheetShortcut = initialTodoSheetShortcut
         chatSheetShortcut = initialChatSheetShortcut
@@ -579,6 +591,7 @@ final class DictationController: ObservableObject {
         shortcutMonitor.setInvocationShortcut(initialInvocationShortcut)
         shortcutMonitor.setVoiceNoteSwitchKeyCode(initialVoiceNoteSwitchKeyCode)
         shortcutMonitor.setTodoSwitchKeyCode(initialTodoSwitchKeyCode)
+        shortcutMonitor.setAiSwitchKeyCode(initialAiSwitchKeyCode)
         shortcutMonitor.setScreenRecordingShortcut(initialScreenRecordingShortcut)
         shortcutMonitor.escapeToCancelEnabled = escapeToCancelEnabled
 
@@ -599,6 +612,11 @@ final class DictationController: ObservableObject {
         shortcutMonitor.onTodoSwitchKeyPressed = { [weak self] in
             Task { @MainActor [weak self] in
                 self?.setTodoMode()
+            }
+        }
+        shortcutMonitor.onAiSwitchKeyPressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.setAiChatMode()
             }
         }
         shortcutMonitor.onSpaceCycleKeyPressed = { [weak self] direction in
@@ -693,6 +711,10 @@ final class DictationController: ObservableObject {
 
     var todoSwitchKeyDisplayName: String {
         InvocationKey.displayName(for: todoSwitchKeyCode)
+    }
+
+    var aiSwitchKeyDisplayName: String {
+        InvocationKey.displayName(for: aiSwitchKeyCode)
     }
 
     var screenRecordingKeyDisplayName: String {
@@ -802,7 +824,7 @@ final class DictationController: ObservableObject {
     }
 
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -825,7 +847,7 @@ final class DictationController: ObservableObject {
     }
 
     func startVoiceNoteSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -848,7 +870,7 @@ final class DictationController: ObservableObject {
     }
 
     func startScreenRecordingKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -870,7 +892,7 @@ final class DictationController: ObservableObject {
     }
 
     func startTodoSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -891,8 +913,30 @@ final class DictationController: ObservableObject {
         statusText = "Todo key capture canceled."
     }
 
+    func startAiSwitchKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+            return
+        }
+
+        keyCaptureTarget = .aiSwitch
+        isCapturingAiSwitchKey = true
+        statusText = "Press the key to switch to AI mode while recording."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelAiSwitchKeyCapture() {
+        guard isCapturingAiSwitchKey else {
+            return
+        }
+
+        isCapturingAiSwitchKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "AI key capture canceled."
+    }
+
     func startTodoSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -926,7 +970,7 @@ final class DictationController: ObservableObject {
     }
 
     func startChatSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -1089,7 +1133,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             holdDebugLog("handleShortcutEvent: BLOCKED by capture mode")
             return
         }
@@ -1156,21 +1200,21 @@ final class DictationController: ObservableObject {
     }
 
     private func handleScreenRecordingShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
         NotificationCenter.default.post(name: .toggleScreenRecording, object: nil)
     }
 
     private func handleTodoSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
         TodoSideSheetController.shared.toggle()
     }
 
     private func handleChatSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
         ChatSideSheetController.shared.toggle()
@@ -1230,6 +1274,15 @@ final class DictationController: ObservableObject {
         showBubble(message: listeningBubbleMessage(), isRecording: true)
     }
 
+    private func setAiChatMode() {
+        guard isRecording, !isTranscribing else {
+            return
+        }
+        recordingOutputMode = recordingOutputMode == .aiChat ? .paste : .aiChat
+        statusText = listeningStatusText(isLive: false)
+        showBubble(message: listeningBubbleMessage(), isRecording: true)
+    }
+
     private func cycleSpace(direction: GlobalFnShortcutMonitor.SpaceCycleDirection) {
         guard isRecording, !isTranscribing else {
             return
@@ -1265,6 +1318,8 @@ final class DictationController: ObservableObject {
             return "Listening (Note Mode)..."
         case .todo:
             return "Listening (Todo Mode)..."
+        case .aiChat:
+            return "Listening (AI Mode)..."
         }
     }
 
@@ -1282,6 +1337,10 @@ final class DictationController: ObservableObject {
             return "Listening... (todo mode)"
         case (.todo, true):
             return "Listening... (todo mode, live)"
+        case (.aiChat, false):
+            return "Listening... (AI mode)"
+        case (.aiChat, true):
+            return "Listening... (AI mode, live)"
         }
     }
 
@@ -1422,8 +1481,8 @@ final class DictationController: ObservableObject {
                             )
                             lastTranscriptionLatency = totalLatency
                             lastTranscriptionBackend = "\(reusedLive.backend) (live reuse)"
-                            handleTranscriptionResult(reusedLive.text)
                         }
+                        await handleTranscriptionResult(reusedLive.text)
                         return
                     }
 
@@ -1446,8 +1505,8 @@ final class DictationController: ObservableObject {
                             )
                             lastTranscriptionLatency = totalLatency
                             lastTranscriptionBackend = "\(reusedLive.backend) (live reuse)"
-                            handleTranscriptionResult(reusedLive.text)
                         }
+                        await handleTranscriptionResult(reusedLive.text)
                         return
                     }
 
@@ -1489,8 +1548,8 @@ final class DictationController: ObservableObject {
                                 )
                                 lastTranscriptionLatency = totalLatency
                                 lastTranscriptionBackend = "\(tailResult.backend) + live reuse"
-                                handleTranscriptionResult(stitchedText)
                             }
+                            await handleTranscriptionResult(stitchedText)
                             return
                         } catch {
                             await MainActor.run {
@@ -1514,8 +1573,8 @@ final class DictationController: ObservableObject {
                         )
                         lastTranscriptionLatency = totalLatency
                         lastTranscriptionBackend = result.backend
-                        handleTranscriptionResult(result.text)
                     }
+                    await handleTranscriptionResult(result.text)
                 } catch {
                     await MainActor.run {
                         // Don't call handleError here — it would re-show the
@@ -1601,7 +1660,7 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private func handleTranscriptionResult(_ text: String) {
+    private func handleTranscriptionResult(_ text: String) async {
         isTranscribing = false
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1613,23 +1672,44 @@ final class DictationController: ObservableObject {
         }
 
         let cleaned = wordReplacements.isEmpty ? trimmed : WordReplacementEngine.apply(wordReplacements, to: trimmed)
-        lastTranscript = cleaned
+
+        var finalText = cleaned
+        if cleanupEnabled, !cleanupPrompt.isEmpty {
+            do {
+                let token = try await ConvexHTTPClient.getToken()
+                let result = try await ConvexHTTPClient.action(
+                    function: "transcription:cleanup",
+                    args: [
+                        "text": cleaned,
+                        "prompt": cleanupPrompt,
+                        "model": cleanupModel.rawValue,
+                    ],
+                    token: token
+                )
+                if let cleanedUp = result as? String, !cleanedUp.isEmpty {
+                    finalText = cleanedUp
+                }
+            } catch {
+                print("Transcription cleanup failed: \(error.localizedDescription)")
+            }
+        }
+        lastTranscript = finalText
 
         switch recordingOutputMode {
         case .paste:
             let pasteStartedAt = Date()
             let didPaste: Bool
             if autoCopyToClipboard {
-                didPaste = pasteService.copyAndPaste(cleaned)
+                didPaste = pasteService.copyAndPaste(finalText)
             } else {
-                didPaste = pasteService.pasteWithoutCopying(cleaned)
+                didPaste = pasteService.pasteWithoutCopying(finalText)
             }
             let pasteLatency = Date().timeIntervalSince(pasteStartedAt)
             logPipelineTiming(
                 String(
                     format: "paste latency=%.3fs chars=%d success=%@",
                     pasteLatency,
-                    cleaned.count,
+                    finalText.count,
                     didPaste ? "yes" : "no"
                 )
             )
@@ -1644,16 +1724,20 @@ final class DictationController: ObservableObject {
             bubble.hide()
         case .voiceNote:
             do {
-                let fileURL = try noteService.appendVoiceNote(cleaned)
+                let fileURL = try noteService.appendVoiceNote(finalText)
                 statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
-                Task { await syncNoteToConvex(text: cleaned) }
+                Task { await syncNoteToConvex(text: finalText) }
             } catch {
                 handleError("Could not save voice note. \(error.localizedDescription)")
             }
             bubble.hide()
         case .todo:
             statusText = "Creating todo..."
-            Task { await syncTodoToConvex(text: cleaned) }
+            Task { await syncTodoToConvex(text: finalText) }
+            bubble.hide()
+        case .aiChat:
+            statusText = "Sending to AI..."
+            ChatSideSheetController.shared.openWithMessage(finalText)
             bubble.hide()
         }
 
@@ -2363,6 +2447,14 @@ final class DictationController: ObservableObject {
                 statusText = "Todo key must be a single key."
                 return
             }
+        case .aiSwitch:
+            if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
+                setAiSwitchKeyCode(primaryKey)
+                statusText = "AI key set to \(aiSwitchKeyDisplayName)."
+            } else {
+                statusText = "AI key must be a single key."
+                return
+            }
         case .todoSheet:
             isCapturingTodoSheetKey = false
             keyCaptureTarget = nil
@@ -2383,6 +2475,7 @@ final class DictationController: ObservableObject {
         isCapturingTodoSwitchKey = false
         isCapturingTodoSheetKey = false
         isCapturingChatSheetKey = false
+        isCapturingAiSwitchKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
     }
@@ -2432,6 +2525,12 @@ final class DictationController: ObservableObject {
         todoSwitchKeyCode = keyCode
         UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.todoSwitchKeyCode)
         shortcutMonitor.setTodoSwitchKeyCode(keyCode)
+    }
+
+    private func setAiSwitchKeyCode(_ keyCode: Int64) {
+        aiSwitchKeyCode = keyCode
+        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.aiSwitchKeyCode)
+        shortcutMonitor.setAiSwitchKeyCode(keyCode)
     }
 
     private func startLiveTranscriptionLoop(configuration: ParakeetConfiguration) {
