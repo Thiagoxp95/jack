@@ -36,6 +36,24 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
     }
 }
 
+enum CleanupModelChoice: String, CaseIterable, Identifiable {
+    case geminiFlash = "google/gemini-2.0-flash-001"
+    case gpt4oMini = "openai/gpt-4o-mini"
+    case claudeHaiku = "anthropic/claude-3.5-haiku"
+    case geminiThinking = "google/gemini-2.0-flash-thinking"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .geminiFlash: return "Gemini 2.0 Flash"
+        case .gpt4oMini: return "GPT-4o Mini"
+        case .claudeHaiku: return "Claude 3.5 Haiku"
+        case .geminiThinking: return "Gemini 2.0 Flash Thinking"
+        }
+    }
+}
+
 @MainActor
 final class DictationController: ObservableObject {
     private struct LiveTranscriptionResult {
@@ -244,6 +262,21 @@ final class DictationController: ObservableObject {
             }
         }
     }
+    @Published var cleanupEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(cleanupEnabled, forKey: DefaultsKey.cleanupEnabled)
+        }
+    }
+    @Published var cleanupPrompt: String {
+        didSet {
+            UserDefaults.standard.set(cleanupPrompt, forKey: DefaultsKey.cleanupPrompt)
+        }
+    }
+    @Published var cleanupModel: CleanupModelChoice {
+        didSet {
+            UserDefaults.standard.set(cleanupModel.rawValue, forKey: DefaultsKey.cleanupModel)
+        }
+    }
 
     private var initialized = false
     private var interpreter: ShortcutInterpreter
@@ -362,6 +395,9 @@ final class DictationController: ObservableObject {
         static let floatingIndicatorPosition = "floating_indicator_position"
         static let floatingIndicatorSizePercent = "floating_indicator_size_percent"
         static let transcriptionModel = "transcription_model"
+        static let cleanupEnabled = "transcription_cleanup_enabled"
+        static let cleanupPrompt = "transcription_cleanup_prompt"
+        static let cleanupModel = "transcription_cleanup_model"
     }
 
     private enum KeyCaptureTarget {
@@ -444,10 +480,12 @@ final class DictationController: ObservableObject {
         if let jsonData = defaults.data(forKey: DefaultsKey.todoSheetShortcutJSON),
            let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
             initialTodoSheetShortcut = decoded
+            NSLog("[Actionfy] Loaded todo sheet shortcut from defaults: primaryKeyCode=\(String(describing: decoded.primaryKeyCode)) modifiers=\(decoded.modifiers) display=\(decoded.displayName)")
         } else {
             // Default: ⌃⇧T (Control+Shift+T)
             let controlShift = NSEvent.ModifierFlags.control.rawValue | NSEvent.ModifierFlags.shift.rawValue
             initialTodoSheetShortcut = InvocationShortcut(primaryKeyCode: 17, modifiers: controlShift)
+            NSLog("[Actionfy] Using default todo sheet shortcut: ⌃⇧T")
         }
 
         let initialChatSheetShortcut: InvocationShortcut?
@@ -525,6 +563,11 @@ final class DictationController: ObservableObject {
 
         let storedModelRaw = defaults.string(forKey: DefaultsKey.transcriptionModel) ?? ""
         selectedTranscriptionModel = TranscriptionModelChoice(rawValue: storedModelRaw) ?? .parakeetV2
+
+        cleanupEnabled = defaults.object(forKey: DefaultsKey.cleanupEnabled) as? Bool ?? false
+        cleanupPrompt = defaults.string(forKey: DefaultsKey.cleanupPrompt) ?? ""
+        let storedCleanupModel = defaults.string(forKey: DefaultsKey.cleanupModel) ?? ""
+        cleanupModel = CleanupModelChoice(rawValue: storedCleanupModel) ?? .geminiFlash
 
         accessibilityGranted = initialAccessibilityGranted
         keyboardMonitoringGranted = initialKeyboardMonitoringGranted
@@ -2367,10 +2410,13 @@ final class DictationController: ObservableObject {
     }
 
     private func setTodoSheetShortcut(_ shortcut: InvocationShortcut) {
+        NSLog("[Actionfy] setTodoSheetShortcut: primaryKeyCode=\(String(describing: shortcut.primaryKeyCode)) modifiers=\(shortcut.modifiers) display=\(shortcut.displayName)")
         todoSheetShortcut = shortcut
         shortcutMonitor.setTodoSheetShortcut(shortcut)
         if let data = try? JSONEncoder().encode(shortcut) {
             UserDefaults.standard.set(data, forKey: DefaultsKey.todoSheetShortcutJSON)
+        } else {
+            NSLog("[Actionfy] WARNING: Failed to encode todo sheet shortcut")
         }
     }
 
