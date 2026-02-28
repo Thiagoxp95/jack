@@ -215,27 +215,80 @@ private struct AuthenticatedRootView: View {
 
     @StateObject private var controller = DictationController()
     @State private var recordingController = RecordingSessionController()
+    @State private var todoSheetController = TodoSideSheetController()
+    @State private var todoListController = TodoListController()
 
     var body: some View {
-        ContentView(
-            controller: controller,
-            recordingController: recordingController,
-            spaceController: spaceController,
-            authController: authController
-        )
-            .frame(minWidth: 640, minHeight: 460)
+        Group {
+            if controller.shouldShowOnboardingWizard {
+                OnboardingWizardView(controller: controller)
+                    .frame(minWidth: 640, minHeight: 460)
+            } else {
+                ContentView(
+                    controller: controller,
+                    recordingController: recordingController,
+                    spaceController: spaceController,
+                    authController: authController,
+                    todoListController: todoListController
+                )
+                .frame(minWidth: 640, minHeight: 460)
+            }
+        }
             .task {
-                // Ensure Convex client is ready before child views need it
+                // 1. Wire up controllers immediately (synchronous, no network)
+                recordingController.authController = authController
+                recordingController.spaceController = spaceController
+                controller.spaceController = spaceController
+                todoSheetController.todoListController = todoListController
+                todoSheetController.spaceController = spaceController
+
+                // 2. Check local permissions first (fast, no network)
+                await controller.initialize()
+                await recordingController.initialize()
+
+                // 3. Fetch spaces via HTTP client (uses Clerk JWT directly,
+                //    does NOT depend on ConvexMobile bridge)
+                await spaceController.refreshSpaces()
+
+                // 4. Convex auth (may be slow due to ConvexMobile bridge —
+                //    run last so it doesn't block spaces or permissions)
                 if authController.convexClient == nil {
                     authController.initializeConvex(deploymentUrl: AppConfig.convexDeploymentUrl)
                     await authController.authenticateConvex()
                 }
-                await controller.initialize()
-                await recordingController.initialize()
-                spaceController.refreshSpaces()
+
+                // 5. Start reminder polling at the app level so it survives
+                //    window close/hide (not tied to ContentView lifecycle)
+                todoListController.startReminderPolling()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleScreenRecording)) { _ in
+                Task {
+                    await toggleScreenRecordingFromShortcut()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleTodoSheet)) { _ in
+                todoSheetController.toggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .todoSheetCommitInput)) { _ in
+                todoSheetController.commitTextInput()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 controller.applicationWillTerminate()
             }
+    }
+
+    private func toggleScreenRecordingFromShortcut() async {
+        switch recordingController.state {
+        case .recording, .paused:
+            await recordingController.stopRecording()
+        case .idle:
+            do {
+                try await recordingController.startRecording()
+            } catch {
+                NSLog("[Actionfy] Quick screen recording failed: %@", "\(error)")
+            }
+        default:
+            break
+        }
     }
 }

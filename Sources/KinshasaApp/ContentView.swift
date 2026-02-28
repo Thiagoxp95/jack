@@ -12,9 +12,12 @@ struct ContentView: View {
     @State private var setupWindow = SetupWindowController()
     @State private var showCreateSpace = false
     @State private var noteListController = NoteListController()
-    @State private var todoListController = TodoListController()
+    var todoListController: TodoListController
     @State private var showSpaceSettings = false
     @State private var showWordReplacements = false
+    @State private var showShortcutCapture = false
+    @State private var showScreenRecordingCapture = false
+    @State private var showTodoSheetCapture = false
 
     var body: some View {
         NavigationSplitView {
@@ -152,6 +155,42 @@ struct ContentView: View {
             WordReplacementsView(replacements: $controller.wordReplacements)
                 .frame(minWidth: 400, minHeight: 300)
         }
+        .sheet(isPresented: $showShortcutCapture) {
+            ShortcutCaptureView(
+                title: "Record Keyboard Shortcut",
+                onSave: { shortcut in
+                    controller.applyInvocationShortcut(shortcut)
+                    showShortcutCapture = false
+                },
+                onCancel: {
+                    showShortcutCapture = false
+                }
+            )
+        }
+        .sheet(isPresented: $showScreenRecordingCapture) {
+            ShortcutCaptureView(
+                title: "Record Screen Recording Shortcut",
+                onSave: { shortcut in
+                    controller.applyScreenRecordingShortcut(shortcut)
+                    showScreenRecordingCapture = false
+                },
+                onCancel: {
+                    showScreenRecordingCapture = false
+                }
+            )
+        }
+        .sheet(isPresented: $showTodoSheetCapture) {
+            ShortcutCaptureView(
+                title: "Record Todo Sheet Shortcut",
+                onSave: { shortcut in
+                    controller.applyTodoSheetShortcut(shortcut)
+                    showTodoSheetCapture = false
+                },
+                onCancel: {
+                    showTodoSheetCapture = false
+                }
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showRecordingsTab)) { _ in
             selectedSection = .screenRecording
             NSApp.activate()
@@ -195,6 +234,15 @@ struct ContentView: View {
 
             // 2. Recording Controls
             settingsCard(title: "Recording Controls", subtitle: "Activation shortcut and mode.") {
+                // Type selector (segmented)
+                Picker("Type", selection: $controller.shortcutType) {
+                    ForEach(ShortcutType.allCases) { type in
+                        Text(type.title).tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                // Inline row: Mode + Key
                 HStack {
                     Image(systemName: "command")
                         .foregroundStyle(.secondary)
@@ -204,14 +252,6 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Picker("Type", selection: $controller.shortcutType) {
-                        ForEach(ShortcutType.allCases) { type in
-                            Text(type.title).tag(type)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .fixedSize()
-
                     Picker("Mode", selection: $controller.mode) {
                         ForEach(ShortcutMode.allCases) { mode in
                             Text(mode.title).tag(mode)
@@ -220,22 +260,39 @@ struct ContentView: View {
                     .pickerStyle(.menu)
                     .fixedSize()
 
-                    Button {
-                        if controller.isCapturingInvocationKey {
-                            controller.cancelInvocationKeyCapture()
-                        } else {
-                            controller.startInvocationKeyCapture()
+                    if controller.shortcutType == .singleKey {
+                        // Single key: inline capture button
+                        Button {
+                            if controller.isCapturingInvocationKey {
+                                controller.cancelInvocationKeyCapture()
+                            } else {
+                                controller.startInvocationKeyCapture()
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(controller.isCapturingInvocationKey ? "Press key…" : controller.invocationKeyDisplayName)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(controller.isCapturingInvocationKey ? "Press keys…" : controller.invocationKeyDisplayName)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                        .buttonStyle(.bordered)
+                        .disabled(controller.isCapturingVoiceNoteSwitchKey)
+                    } else {
+                        // Combination: open capture sheet
+                        Button {
+                            showShortcutCapture = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(controller.invocationKeyDisplayName)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
+                        .buttonStyle(.bordered)
+                        .disabled(controller.isCapturingVoiceNoteSwitchKey)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(controller.isCapturingVoiceNoteSwitchKey)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -245,9 +302,7 @@ struct ContentView: View {
                 )
 
                 if controller.isCapturingInvocationKey {
-                    Text(controller.shortcutType == .singleKey
-                        ? "Press a single key (Fn, F-key, or any key)."
-                        : "Press a key or key combo now. Modifiers accumulate; press a regular key to finalize. Hold modifiers for 1s for modifier-only shortcuts.")
+                    Text("Press a single key (Fn, F-key, or any key).")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 } else {
@@ -360,21 +415,12 @@ struct ContentView: View {
                     }
 
                     Button {
-                        if controller.isCapturingScreenRecordingKey {
-                            controller.cancelScreenRecordingKeyCapture()
-                        } else {
-                            controller.startScreenRecordingKeyCapture()
-                        }
+                        showScreenRecordingCapture = true
                     } label: {
-                        HStack(spacing: 4) {
-                            Text(controller.isCapturingScreenRecordingKey ? "Press keys…" : controller.screenRecordingKeyDisplayName)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
+                        Text(controller.screenRecordingKeyDisplayName)
+                            .font(.body.weight(.medium))
                     }
                     .buttonStyle(.bordered)
-                    .disabled(controller.isCapturingInvocationKey || controller.isCapturingVoiceNoteSwitchKey)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -383,15 +429,51 @@ struct ContentView: View {
                         .fill(.black.opacity(0.15))
                 )
 
-                if controller.isCapturingScreenRecordingKey {
-                    Text("Press a key or key combo now.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text("Press to instantly start/stop recording your screen with default settings.")
-                        .font(.caption)
+                Text("Press to instantly start/stop recording your screen with default settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                // Todo Side Sheet
+                HStack {
+                    Image(systemName: "sidebar.right")
                         .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    Text("Todo Side Sheet")
+                        .font(.body.weight(.medium))
+
+                    Spacer()
+
+                    if controller.todoSheetShortcut != nil {
+                        Button {
+                            controller.clearTodoSheetKey()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove shortcut")
+                    }
+
+                    Button {
+                        showTodoSheetCapture = true
+                    } label: {
+                        Text(controller.todoSheetKeyDisplayName)
+                            .font(.body.weight(.medium))
+                    }
+                    .buttonStyle(.bordered)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.black.opacity(0.15))
+                )
+
+                Text("Press to open/close the Todo side sheet overlay.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // 3. Audio & Feedback
@@ -496,6 +578,12 @@ struct ContentView: View {
                     title: "Screen Recording",
                     granted: recordingController.hasScreenPermission,
                     detail: "Capture screen content"
+                )
+
+                permissionRow(
+                    title: "Notifications",
+                    granted: controller.notificationsGranted,
+                    detail: "Todo reminders and alerts"
                 )
 
                 HStack(spacing: 10) {
@@ -686,15 +774,11 @@ struct ContentView: View {
             .task(id: spaceController.activeSpace.id) {
                 await todoListController.fetchTodos(spaceId: spaceController.currentSpaceId)
                 await todoListController.fetchLists(spaceId: spaceController.currentSpaceId)
-                todoListController.startReminderPolling()
             }
             .onChange(of: controller.lastTodoSavedAt) { _, _ in
                 Task {
                     await todoListController.fetchTodos(spaceId: spaceController.currentSpaceId)
                 }
-            }
-            .onDisappear {
-                todoListController.stopReminderPolling()
             }
     }
 
