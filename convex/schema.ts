@@ -112,4 +112,23 @@ export default defineSchema({
     .index("by_space_user", ["spaceId", "userId"])
     .index("by_list", ["listId"])
     .index("by_status", ["status"]),
+
+  chatThreads: defineTable({
+    spaceId: v.optional(v.id("spaces")),
+    userId: v.id("users"),
+    title: v.string(),
+    model: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_space", ["spaceId"])
+    .index("by_space_user", ["spaceId", "userId"]),
+
+  chatMessages: defineTable({
+    threadId: v.id("chatThreads"),
+    role: v.union(v.literal("user"), v.literal("assistant")),
+    content: v.string(),
+    model: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_thread", ["threadId"]),
 });
