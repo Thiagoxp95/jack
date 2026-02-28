@@ -363,6 +363,18 @@ struct VideoEditorView: View {
                 WebcamEditorOverlay(editor: editor, viewSize: videoGroupSize)
                     .frame(width: videoGroupSize.width, height: videoGroupSize.height)
 
+                // Subtitle preview overlay
+                if editor.subtitleConfig.enabled,
+                   !editor.subtitleLines.isEmpty {
+                    let subtitleTime = editor.isPlaying ? editor.smoothTime : editor.currentTime
+                    subtitlePreviewOverlay(
+                        at: subtitleTime,
+                        previewSize: previewSize
+                    )
+                    .frame(width: previewSize.width, height: previewSize.height)
+                    .allowsHitTesting(false)
+                }
+
                 if !editor.isPlaying {
                     Button(action: editor.togglePlayPause) {
                         Image(systemName: "play.circle.fill")
@@ -421,6 +433,75 @@ struct VideoEditorView: View {
             cursorNormY: normY,
             zoomLevel: zoomLevel
         )
+    }
+
+    // MARK: - Subtitle Preview Overlay
+
+    /// Overlay that renders the current subtitle line on the video preview
+    /// with karaoke-style word highlighting.
+    @ViewBuilder
+    private func subtitlePreviewOverlay(
+        at time: TimeInterval,
+        previewSize: CGSize
+    ) -> some View {
+        let alignment: Alignment = {
+            switch editor.subtitleConfig.position {
+            case .top: return .top
+            case .middle: return .center
+            case .bottom: return .bottom
+            }
+        }()
+
+        // Scale font size proportionally: config fontSize is for the full
+        // export canvas, but the preview is much smaller.
+        let scaleFactor = previewSize.height / max(editor.session.screenSize.height, 1)
+        let previewFontSize = max(10, editor.subtitleConfig.fontSize * scaleFactor)
+
+        ZStack(alignment: alignment) {
+            Color.clear
+            if let line = editor.subtitleLineAt(time: time) {
+                subtitleLineView(line: line, currentTime: time, fontSize: previewFontSize)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
+            }
+        }
+    }
+
+    /// Renders a single subtitle line with karaoke word colouring.
+    @ViewBuilder
+    private func subtitleLineView(
+        line: SubtitleLine,
+        currentTime: TimeInterval,
+        fontSize: CGFloat
+    ) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(line.words.enumerated()), id: \.element.id) { index, word in
+                if index > 0 {
+                    Text(" ")
+                        .font(.system(size: fontSize, weight: .semibold))
+                        .foregroundStyle(
+                            currentTime >= word.startTime
+                                ? Color.white
+                                : Color.gray
+                        )
+                }
+                Text(word.text)
+                    .font(.system(size: fontSize, weight: .semibold))
+                    .foregroundStyle(
+                        currentTime >= word.startTime
+                            ? Color.white
+                            : Color.gray
+                    )
+            }
+        }
+        .padding(.horizontal, editor.subtitleConfig.backgroundEnabled ? 12 : 0)
+        .padding(.vertical, editor.subtitleConfig.backgroundEnabled ? 6 : 0)
+        .background {
+            if editor.subtitleConfig.backgroundEnabled {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.black.opacity(0.5))
+            }
+        }
     }
 
     // MARK: - Timeline Panel
