@@ -244,7 +244,8 @@ final class ChatController {
 
                 // Refresh messages and threads after streaming completes
                 await self?.fetchMessages(threadId: threadId)
-                await self?.fetchThreads(spaceId: nil)
+                let spaceId = self?.threads.first(where: { $0.id == threadId })?.spaceId
+                await self?.fetchThreads(spaceId: spaceId)
 
             } catch {
                 if !Task.isCancelled {

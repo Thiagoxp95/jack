@@ -16,26 +16,32 @@ private final class ChatKeyInterceptingPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
-    override func keyDown(with event: NSEvent) {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let keyCode = event.keyCode
-        let isRepeat = event.isARepeat
         let hasCommand = event.modifierFlags.contains(.command)
-
-        // Escape always handled
-        if keyCode == 53 {
-            if !isRepeat { keyboardDelegate?.chatSheetDidPressEscape() }
-            return
-        }
 
         // Cmd+N: new thread
         if hasCommand && keyCode == 45 {
-            if !isRepeat { keyboardDelegate?.chatSheetDidPressCommandN() }
-            return
+            keyboardDelegate?.chatSheetDidPressCommandN()
+            return true
         }
 
         // Cmd+Delete / Cmd+Forward Delete: delete thread
         if hasCommand && (keyCode == 51 || keyCode == 117) {
-            if !isRepeat { keyboardDelegate?.chatSheetDidPressCommandDelete() }
+            keyboardDelegate?.chatSheetDidPressCommandDelete()
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let keyCode = event.keyCode
+        let isRepeat = event.isARepeat
+
+        // Escape always handled
+        if keyCode == 53 {
+            if !isRepeat { keyboardDelegate?.chatSheetDidPressEscape() }
             return
         }
 
