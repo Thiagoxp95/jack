@@ -609,6 +609,39 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // 5b. Transcription Cleanup
+            settingsCard(title: "Transcription Cleanup", subtitle: "Clean up transcribed text with an LLM before output.") {
+                Toggle("Enable cleanup", isOn: $controller.cleanupEnabled)
+
+                if controller.cleanupEnabled {
+                    Picker("Model", selection: $controller.cleanupModel) {
+                        ForEach(CleanupModelChoice.allCases) { model in
+                            Text(model.title).tag(model)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Cleanup Prompt")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $controller.cleanupPrompt)
+                            .font(.body)
+                            .frame(minHeight: 80, maxHeight: 200)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                            )
+                    }
+                }
+            }
+
             // 6. Permissions (at bottom)
             settingsCard(title: "Permissions", subtitle: "Input Monitoring, Accessibility, Microphone, and Screen Recording.") {
                 permissionRow(
