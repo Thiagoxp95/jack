@@ -30,6 +30,20 @@ struct ChatSideSheetView: View {
         )
         .padding(4)
         .preferredColorScheme(.dark)
+        .alert("Delete Chat?", isPresented: $sheetState.isConfirmingDelete) {
+            Button("Delete", role: .destructive) {
+                if let threadId = sheetState.selectedThreadId {
+                    Task {
+                        await chatController.deleteThread(threadId: threadId)
+                        await chatController.fetchThreads(spaceId: spaceController.currentSpaceId)
+                        sheetState.selectedThreadId = chatController.threads.first?.id
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete this chat and all its messages.")
+        }
     }
 
     // MARK: - Resize Handle
