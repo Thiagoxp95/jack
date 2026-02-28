@@ -1675,6 +1675,7 @@ final class DictationController: ObservableObject {
 
         var finalText = cleaned
         if cleanupEnabled, !cleanupPrompt.isEmpty {
+            NSLog("[Actionfy] Cleanup enabled, calling transcription:cleanup with model=%@", cleanupModel.rawValue)
             do {
                 let token = try await ConvexHTTPClient.getToken()
                 let result = try await ConvexHTTPClient.action(
@@ -1690,7 +1691,7 @@ final class DictationController: ObservableObject {
                     finalText = cleanedUp
                 }
             } catch {
-                print("Transcription cleanup failed: \(error.localizedDescription)")
+                NSLog("[Actionfy] Transcription cleanup failed: %@", String(describing: error))
             }
         }
         lastTranscript = finalText
@@ -2178,6 +2179,7 @@ final class DictationController: ObservableObject {
             isRecording: true,
             isTranscribing: false,
             isNoteMode: false,
+            isAiMode: false,
             riveAssetPath: preferredRiveAssetPath(),
             htmlIndicatorMarkup: preferredCustomSVGMarkup(),
             useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
@@ -2264,6 +2266,7 @@ final class DictationController: ObservableObject {
             isTranscribing: isTranscribing,
             isNoteMode: recordingOutputMode == .voiceNote,
             isTodoMode: recordingOutputMode == .todo,
+            isAiMode: recordingOutputMode == .aiChat,
             riveAssetPath: riveAssetPathIfEnabled(forRecordingState: isRecording),
             htmlIndicatorMarkup: (isRecording || isTranscribing) ? preferredCustomSVGMarkup() : nil,
             useBuiltInWaveIndicator: builtInWaveIndicatorEnabled
@@ -2278,6 +2281,7 @@ final class DictationController: ObservableObject {
             isRecording: false,
             isTranscribing: false,
             isNoteMode: false,
+            isAiMode: false,
             riveAssetPath: nil,
             htmlIndicatorMarkup: nil,
             useBuiltInWaveIndicator: false
@@ -2355,8 +2359,13 @@ final class DictationController: ObservableObject {
 
         let capturedKeyCode = Int64(event.keyCode)
 
-        // Single-key mode for invocation: accept any key immediately, no modifier accumulation
-        if keyCaptureTarget == .invocation, shortcutType == .singleKey {
+        // Single-key mode: accept any key immediately, no modifier accumulation.
+        // Used for invocation (when singleKey mode) and all switch key targets.
+        let isSingleKeyCapture = (keyCaptureTarget == .invocation && shortcutType == .singleKey)
+            || keyCaptureTarget == .voiceNoteSwitch
+            || keyCaptureTarget == .todoSwitch
+            || keyCaptureTarget == .aiSwitch
+        if isSingleKeyCapture {
             if event.type == .flagsChanged {
                 // Modifier key pressed — use it as the single key
                 if InvocationKey.isModifierKeyCode(capturedKeyCode) {
@@ -2415,9 +2424,14 @@ final class DictationController: ObservableObject {
     }
 
     private func finalizeCapturedShortcut(_ shortcut: InvocationShortcut, for target: KeyCaptureTarget) {
-        guard shortcut.isValid else {
-            statusText = "Invalid shortcut. Try again."
-            return
+        // Switch keys accept any single key (no modifier required), so skip
+        // the isValid check which requires modifiers for regular keys.
+        let isSwitchKeyTarget = target == .voiceNoteSwitch || target == .todoSwitch || target == .aiSwitch
+        if !isSwitchKeyTarget {
+            guard shortcut.isValid else {
+                statusText = "Invalid shortcut. Try again."
+                return
+            }
         }
 
         captureAccumulatedModifiers = []
