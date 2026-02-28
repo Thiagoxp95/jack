@@ -234,10 +234,20 @@ struct TodoSideSheetView: View {
         }
     }
 
+    private static let isoDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
     private func formatShortDate(_ dateString: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: dateString) else { return dateString }
+        guard let date = Self.isoDateFormatter.date(from: dateString) else { return dateString }
 
         let calendar = Calendar.current
         if calendar.isDateInToday(date) {
@@ -245,9 +255,7 @@ struct TodoSideSheetView: View {
         } else if calendar.isDateInTomorrow(date) {
             return "Tmrw"
         } else {
-            let display = DateFormatter()
-            display.dateFormat = "MMM d"
-            return display.string(from: date)
+            return Self.shortDateFormatter.string(from: date)
         }
     }
 }

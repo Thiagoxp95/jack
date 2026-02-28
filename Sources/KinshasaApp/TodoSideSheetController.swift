@@ -40,10 +40,10 @@ private final class KeyInterceptingPanel: NSPanel {
         }
 
         switch keyCode {
-        case 126: // Up arrow
-            if !isRepeat { keyboardDelegate?.todoSheetDidPressArrow(direction: .up) }
-        case 125: // Down arrow
-            if !isRepeat { keyboardDelegate?.todoSheetDidPressArrow(direction: .down) }
+        case 126: // Up arrow (allow repeats for fast navigation)
+            keyboardDelegate?.todoSheetDidPressArrow(direction: .up)
+        case 125: // Down arrow (allow repeats for fast navigation)
+            keyboardDelegate?.todoSheetDidPressArrow(direction: .down)
         case 36, 49: // Enter, Space
             if !isRepeat { keyboardDelegate?.todoSheetDidPressEnter() }
         case 51, 117: // Backspace, Forward Delete
@@ -91,7 +91,6 @@ final class TodoSideSheetController: TodoSheetKeyboardDelegate {
     let sheetState = TodoSideSheetState()
     var todoListController: TodoListController?
     var spaceController: SpaceController?
-    var onSpaceCycled: (() -> Void)?
 
     private static let sheetWidth: CGFloat = 320
 
@@ -136,13 +135,18 @@ final class TodoSideSheetController: TodoSheetKeyboardDelegate {
 
         guard let panel else { return }
 
+        guard let todoListController, let spaceController else {
+            NSLog("[TodoSheet] Cannot show — controllers not wired yet")
+            return
+        }
+
         sheetState.reset()
         sheetState.isVisible = true
 
         let sheetView = TodoSideSheetView(
             sheetState: sheetState,
-            todoListController: todoListController!,
-            spaceController: spaceController!
+            todoListController: todoListController,
+            spaceController: spaceController
         )
         .frame(width: size.width, height: size.height)
 
@@ -171,7 +175,7 @@ final class TodoSideSheetController: TodoSheetKeyboardDelegate {
 
         // Fetch todos
         Task {
-            await todoListController?.fetchTodos(spaceId: spaceController?.currentSpaceId)
+            await todoListController.fetchTodos(spaceId: spaceController.currentSpaceId)
         }
     }
 
@@ -191,6 +195,7 @@ final class TodoSideSheetController: TodoSheetKeyboardDelegate {
             panel.animator().setFrameOrigin(NSPoint(x: targetX, y: panel.frame.origin.y))
         }, completionHandler: {
             Task { @MainActor [weak self] in
+                self?.panel?.contentView = nil
                 self?.panel?.orderOut(nil)
             }
         })
@@ -240,8 +245,10 @@ final class TodoSideSheetController: TodoSheetKeyboardDelegate {
 
         Task {
             await todoListController?.deleteTodo(todoId: todo.id)
-            if sheetState.selectedIndex >= (todoListController?.todos.count ?? 0) {
-                sheetState.selectedIndex = max(0, (todoListController?.todos.count ?? 1) - 1)
+            await todoListController?.fetchTodos(spaceId: spaceController?.currentSpaceId)
+            let count = todoListController?.todos.count ?? 0
+            if sheetState.selectedIndex >= count {
+                sheetState.selectedIndex = max(0, count - 1)
             }
         }
     }
@@ -262,7 +269,6 @@ final class TodoSideSheetController: TodoSheetKeyboardDelegate {
 
         sc.switchSpace(to: spaces[nextIndex])
         sheetState.selectedIndex = 0
-        onSpaceCycled?()
 
         Task {
             await todoListController?.fetchTodos(spaceId: sc.currentSpaceId)
