@@ -215,8 +215,6 @@ private struct AuthenticatedRootView: View {
 
     @StateObject private var controller = DictationController()
     @State private var recordingController = RecordingSessionController()
-    @State private var todoSheetController = TodoSideSheetController()
-    @State private var todoListController = TodoListController()
 
     var body: some View {
         Group {
@@ -229,7 +227,7 @@ private struct AuthenticatedRootView: View {
                     recordingController: recordingController,
                     spaceController: spaceController,
                     authController: authController,
-                    todoListController: todoListController
+                    todoListController: TodoListController.shared
                 )
                 .frame(minWidth: 640, minHeight: 460)
             }
@@ -239,8 +237,10 @@ private struct AuthenticatedRootView: View {
                 recordingController.authController = authController
                 recordingController.spaceController = spaceController
                 controller.spaceController = spaceController
-                todoSheetController.todoListController = todoListController
-                todoSheetController.spaceController = spaceController
+                TodoSideSheetController.shared.todoListController = TodoListController.shared
+                TodoSideSheetController.shared.spaceController = spaceController
+                ChatSideSheetController.shared.chatController = ChatController.shared
+                ChatSideSheetController.shared.spaceController = spaceController
 
                 // 2. Check local permissions first (fast, no network)
                 await controller.initialize()
@@ -251,26 +251,20 @@ private struct AuthenticatedRootView: View {
                 await spaceController.refreshSpaces()
 
                 // 4. Convex auth (may be slow due to ConvexMobile bridge —
-                //    run last so it doesn't block spaces or permissions)
+                //    run last so it doesn't block anything)
+                // Note: reminder polling is started by AppDelegate, not here.
                 if authController.convexClient == nil {
                     authController.initializeConvex(deploymentUrl: AppConfig.convexDeploymentUrl)
                     await authController.authenticateConvex()
                 }
-
-                // 5. Start reminder polling at the app level so it survives
-                //    window close/hide (not tied to ContentView lifecycle)
-                todoListController.startReminderPolling()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleScreenRecording)) { _ in
                 Task {
                     await toggleScreenRecordingFromShortcut()
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleTodoSheet)) { _ in
-                todoSheetController.toggle()
-            }
             .onReceive(NotificationCenter.default.publisher(for: .todoSheetCommitInput)) { _ in
-                todoSheetController.commitTextInput()
+                TodoSideSheetController.shared.commitTextInput()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 controller.applicationWillTerminate()

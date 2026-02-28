@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showShortcutCapture = false
     @State private var showScreenRecordingCapture = false
     @State private var showTodoSheetCapture = false
+    @State private var showChatSheetCapture = false
 
     var body: some View {
         NavigationSplitView {
@@ -188,6 +189,18 @@ struct ContentView: View {
                 },
                 onCancel: {
                     showTodoSheetCapture = false
+                }
+            )
+        }
+        .sheet(isPresented: $showChatSheetCapture) {
+            ShortcutCaptureView(
+                title: "Record AI Chat Shortcut",
+                onSave: { shortcut in
+                    controller.applyChatSheetShortcut(shortcut)
+                    showChatSheetCapture = false
+                },
+                onCancel: {
+                    showChatSheetCapture = false
                 }
             )
         }
@@ -472,6 +485,48 @@ struct ContentView: View {
                 )
 
                 Text("Press to open/close the Todo side sheet overlay.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                // AI Chat Side Sheet
+                HStack {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    Text("AI Chat")
+                        .font(.body.weight(.medium))
+
+                    Spacer()
+
+                    if controller.chatSheetShortcut != nil {
+                        Button {
+                            controller.clearChatSheetKey()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove shortcut")
+                    }
+
+                    Button {
+                        showChatSheetCapture = true
+                    } label: {
+                        Text(controller.chatSheetKeyDisplayName)
+                            .font(.body.weight(.medium))
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.black.opacity(0.15))
+                )
+
+                Text("Press to open/close the AI Chat side sheet overlay.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
