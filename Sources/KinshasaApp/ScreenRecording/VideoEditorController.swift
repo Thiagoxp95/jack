@@ -764,6 +764,12 @@ final class VideoEditorController {
 
     // MARK: - Subtitle Persistence
 
+    /// Called by the UI when subtitle config properties change (position, font size, etc.)
+    /// to auto-save the updated configuration.
+    func subtitleConfigDidChange() {
+        saveSubtitles()
+    }
+
     func saveSubtitles() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted

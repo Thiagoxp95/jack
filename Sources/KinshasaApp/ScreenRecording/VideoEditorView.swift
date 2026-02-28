@@ -1417,6 +1417,9 @@ struct VideoEditorView: View {
             }
             .padding(.vertical, 4)
         }
+        .onChange(of: editor.subtitleConfig) {
+            editor.subtitleConfigDidChange()
+        }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(EditorColors.card))
     }
@@ -1430,10 +1433,20 @@ struct VideoEditorView: View {
                 .monospacedDigit()
                 .frame(width: 36, alignment: .trailing)
 
-            Text(line.words.map(\.text).joined(separator: " "))
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .lineLimit(2)
+            TextField("", text: Binding(
+                get: { line.words.map(\.text).joined(separator: " ") },
+                set: { newText in
+                    let newWords = newText.split(separator: " ", omittingEmptySubsequences: true)
+                    for (index, word) in line.words.enumerated() {
+                        if index < newWords.count {
+                            editor.updateSubtitleWord(word.id, text: String(newWords[index]))
+                        }
+                    }
+                    editor.saveSubtitles()
+                }
+            ))
+            .font(.caption)
+            .textFieldStyle(.plain)
         }
         .padding(.vertical, 2)
     }
