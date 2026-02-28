@@ -483,3 +483,54 @@ final class SubtitleChunkerTests: XCTestCase {
         XCTAssertEqual(lines[0].words[1].text, "world")
     }
 }
+
+final class SubtitleRendererTests: XCTestCase {
+    func testRenderReturnsImageWithCorrectSize() {
+        let words = [
+            SubtitleWord(text: "hello", startTime: 0.0, endTime: 0.5, confidence: 0.9),
+            SubtitleWord(text: "world", startTime: 0.6, endTime: 1.0, confidence: 0.9),
+        ]
+        let line = SubtitleLine(words: words)
+        let config = SubtitleConfiguration(enabled: true, fontSize: 24)
+
+        let image = SubtitleRenderer.renderLine(
+            line,
+            currentTime: 0.3,
+            canvasSize: CGSize(width: 1920, height: 1080),
+            config: config
+        )
+        XCTAssertNotNil(image)
+        XCTAssertGreaterThan(image!.width, 0)
+        XCTAssertGreaterThan(image!.height, 0)
+    }
+
+    func testRenderReturnsNilForEmptyLine() {
+        let line = SubtitleLine(words: [])
+        let config = SubtitleConfiguration(enabled: true)
+        let image = SubtitleRenderer.renderLine(
+            line,
+            currentTime: 0,
+            canvasSize: CGSize(width: 1920, height: 1080),
+            config: config
+        )
+        XCTAssertNil(image)
+    }
+
+    func testVerticalPositionForBottom() {
+        let y = SubtitleRenderer.verticalOffset(
+            position: .bottom,
+            textHeight: 40,
+            canvasHeight: 1080
+        )
+        XCTAssertGreaterThan(y, 900)
+    }
+
+    func testVerticalPositionForTop() {
+        let y = SubtitleRenderer.verticalOffset(
+            position: .top,
+            textHeight: 40,
+            canvasHeight: 1080
+        )
+        XCTAssertLessThan(y, 100)
+    }
+}
