@@ -695,6 +695,59 @@ final class ExportService: @unchecked Sendable {
                             }
                         }
 
+                        // 3d. Composite subtitles (Core Graphics, same pattern as webcam)
+                        if editorState.subtitleConfig.enabled, !editorState.subtitleLines.isEmpty {
+                            if let line = editorState.subtitleLines.first(where: {
+                                timeSeconds >= $0.sourceStart && timeSeconds <= $0.sourceEnd
+                            }) {
+                                let outputWidth = Int(outputSize.width)
+                                let outputHeight = Int(outputSize.height)
+                                if let subtitleImage = SubtitleRenderer.renderLine(
+                                    line,
+                                    currentTime: timeSeconds,
+                                    canvasSize: CGSize(width: outputWidth, height: outputHeight),
+                                    config: editorState.subtitleConfig
+                                ) {
+                                    let subtitleY = SubtitleRenderer.verticalOffset(
+                                        position: editorState.subtitleConfig.position,
+                                        textHeight: CGFloat(subtitleImage.height),
+                                        canvasHeight: CGFloat(outputHeight)
+                                    )
+                                    let subtitleX = (CGFloat(outputWidth) - CGFloat(subtitleImage.width)) / 2
+
+                                    CVPixelBufferLockBaseAddress(outputPB, [])
+                                    defer { CVPixelBufferUnlockBaseAddress(outputPB, []) }
+
+                                    guard let baseAddr = CVPixelBufferGetBaseAddress(outputPB) else { return }
+                                    let bpr = CVPixelBufferGetBytesPerRow(outputPB)
+                                    let colorSpace = CGColorSpaceCreateDeviceRGB()
+                                    let bitmapInfo = CGBitmapInfo(rawValue:
+                                        CGBitmapInfo.byteOrder32Little.rawValue |
+                                        CGImageAlphaInfo.premultipliedFirst.rawValue
+                                    )
+
+                                    if let ctx = CGContext(
+                                        data: baseAddr,
+                                        width: outputWidth,
+                                        height: outputHeight,
+                                        bitsPerComponent: 8,
+                                        bytesPerRow: bpr,
+                                        space: colorSpace,
+                                        bitmapInfo: bitmapInfo.rawValue
+                                    ) {
+                                        // Core Graphics Y is flipped (origin at bottom-left)
+                                        let flippedY = CGFloat(outputHeight) - subtitleY - CGFloat(subtitleImage.height)
+                                        ctx.draw(subtitleImage, in: CGRect(
+                                            x: subtitleX,
+                                            y: flippedY,
+                                            width: CGFloat(subtitleImage.width),
+                                            height: CGFloat(subtitleImage.height)
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+
                         // 4. Append — the pixel buffer already contains the rendered data
                         guard capturedWriter.status == .writing else { return }
                         capturedAdaptor.append(outputPB, withPresentationTime: presentationTime)
