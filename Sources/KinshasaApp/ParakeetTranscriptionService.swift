@@ -11,9 +11,17 @@ struct ParakeetConfiguration: Sendable {
     var version: AsrModelVersion
 }
 
+struct WordTiming: Sendable {
+    let word: String
+    let startTime: TimeInterval
+    let endTime: TimeInterval
+    let confidence: Float
+}
+
 struct TranscriptionResult: Sendable {
     let text: String
     let backend: String
+    let wordTimings: [WordTiming]
 }
 
 enum ParakeetTranscriptionError: LocalizedError {
@@ -49,12 +57,12 @@ struct ParakeetTranscriptionService {
         startSeconds: TimeInterval? = nil,
         backendLabel: String = "CoreML Streaming"
     ) async throws -> TranscriptionResult {
-        let text = try await Self.engine.transcribe(
+        let (text, wordTimings) = try await Self.engine.transcribe(
             audioFileURL: audioFileURL,
             configuration: configuration,
             startSeconds: startSeconds
         )
-        return TranscriptionResult(text: text, backend: backendLabel)
+        return TranscriptionResult(text: text, backend: backendLabel, wordTimings: wordTimings)
     }
 
     // Backward-compatible shim; this backend is CoreML-only.
@@ -98,7 +106,7 @@ private actor CoreMLParakeetEngine {
         audioFileURL: URL,
         configuration: ParakeetConfiguration,
         startSeconds: TimeInterval?
-    ) async throws -> String {
+    ) async throws -> (String, [WordTiming]) {
         let manager = try await ensureManager(configuration: configuration)
         let trimmedStart = max(0, startSeconds ?? 0)
 
@@ -107,7 +115,7 @@ private actor CoreMLParakeetEngine {
 
         if trimmedStart > 0 {
             guard let clippedURL = try clipAudioIfNeeded(sourceURL: audioFileURL, startSeconds: trimmedStart) else {
-                return ""
+                return ("", [])
             }
             targetURL = clippedURL
             temporaryTailURL = clippedURL
@@ -123,7 +131,15 @@ private actor CoreMLParakeetEngine {
 
         do {
             let result = try await manager.transcribeStreaming(targetURL, source: .microphone)
-            return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let wordTimings: [WordTiming] = (result.tokenTimings ?? []).map { timing in
+                WordTiming(
+                    word: timing.token,
+                    startTime: timing.startTime,
+                    endTime: timing.endTime,
+                    confidence: timing.confidence
+                )
+            }
+            return (result.text.trimmingCharacters(in: .whitespacesAndNewlines), wordTimings)
         } catch {
             throw ParakeetTranscriptionError.transcriptionFailed(error.localizedDescription)
         }

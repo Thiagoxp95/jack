@@ -268,6 +268,30 @@ final class ZoomEditorTests: XCTestCase {
     }
 }
 
+final class TranscriptionResultTests: XCTestCase {
+    func testWordTimingStruct() {
+        let timing = WordTiming(word: "hello", startTime: 0.5, endTime: 1.0, confidence: 0.9)
+        XCTAssertEqual(timing.word, "hello")
+        XCTAssertEqual(timing.startTime, 0.5)
+        XCTAssertEqual(timing.endTime, 1.0)
+        XCTAssertEqual(timing.confidence, 0.9, accuracy: 0.001)
+    }
+
+    func testTranscriptionResultContainsTimings() {
+        let timings = [
+            WordTiming(word: "hello", startTime: 0.5, endTime: 1.0, confidence: 0.9),
+            WordTiming(word: "world", startTime: 1.1, endTime: 1.6, confidence: 0.85),
+        ]
+        let result = TranscriptionResult(
+            text: "hello world",
+            backend: "test",
+            wordTimings: timings
+        )
+        XCTAssertEqual(result.wordTimings.count, 2)
+        XCTAssertEqual(result.wordTimings[0].word, "hello")
+    }
+}
+
 final class SubtitleModelTests: XCTestCase {
     func testSubtitleWordCodableRoundTrip() {
         let word = SubtitleWord(
