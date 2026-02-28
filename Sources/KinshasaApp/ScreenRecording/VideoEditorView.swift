@@ -104,8 +104,12 @@ final class CameraTracker {
 
 struct VideoEditorView: View {
     @Bindable var editor: VideoEditorController
-    var onDone: () -> Void
-    @State private var showExportSheet = false
+    var authController: AuthController?
+    var spaceController: SpaceController?
+    var onSave: (String) -> Void
+    var onDiscard: () -> Void
+    @State private var showingSaveSheet = false
+    @State private var recordingName = ""
     @State private var lastScrubTime: Date = .distantPast
     @State private var zoomDragStart: CGFloat?
     @State private var zoomDragEnd: CGFloat?
@@ -115,6 +119,8 @@ struct VideoEditorView: View {
     @State private var cameraTracker = CameraTracker()
     @State private var lastMagnifyScale: CGFloat = 1.0
     @State private var bladeHoverX: CGFloat?
+    @State private var gainDragSegmentID: UUID?
+    @State private var gainDragDidPushUndo: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -185,6 +191,7 @@ struct VideoEditorView: View {
                         }
                         cursorEffectsPanel
                         audioTracksPanel
+                        subtitlesPanel
                     }
                     .padding(12)
                 }
@@ -196,12 +203,6 @@ struct VideoEditorView: View {
         .background(Color.black)
         .preferredColorScheme(.dark)
         .keyboardShortcut(shortcuts: editorShortcuts)
-        .sheet(isPresented: $showExportSheet) {
-            ExportDialogView(
-                editor: editor,
-                onDismiss: { showExportSheet = false }
-            )
-        }
         .onChange(of: editor.micMuted) { _, _ in updateAudioVolumes() }
         .onChange(of: editor.systemMuted) { _, _ in updateAudioVolumes() }
         .onChange(of: editor.micVolume) { _, _ in updateAudioVolumes() }
@@ -266,11 +267,48 @@ struct VideoEditorView: View {
 
             Spacer()
 
-            Button("Export") { showExportSheet = true }
-                .buttonStyle(.borderedProminent)
+            Button("Discard") { onDiscard() }
+                .foregroundStyle(.secondary)
 
-            Button("Done", action: onDone)
+            Button("Save") {
+                let timestamp = ISO8601DateFormatter().string(from: Date())
+                    .replacingOccurrences(of: ":", with: "-")
+                recordingName = "Recording-\(timestamp)"
+                showingSaveSheet = true
+            }
+            .buttonStyle(.borderedProminent)
+            .sheet(isPresented: $showingSaveSheet) {
+                saveNameSheet
+            }
         }
+    }
+
+    // MARK: - Save Name Sheet
+
+    private var saveNameSheet: some View {
+        VStack(spacing: 16) {
+            Text("Save Recording")
+                .font(.headline)
+
+            TextField("Recording name", text: $recordingName)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 300)
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    showingSaveSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Save") {
+                    showingSaveSheet = false
+                    onSave(recordingName)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(recordingName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(24)
     }
 
     // MARK: - Video Preview
@@ -409,13 +447,13 @@ struct VideoEditorView: View {
                         zoomTimeline
                             .frame(height: 30)
 
-                        sectionHeader("AUDIO")
-                        HStack(spacing: 4) {
-                            waveformView(samples: editor.micWaveform, color: EditorColors.micWaveform, label: "Mic")
-                                .frame(height: 28)
-                            waveformView(samples: editor.systemWaveform, color: EditorColors.systemWaveform, label: "Sys")
-                                .frame(height: 28)
-                        }
+                        sectionHeader("MIC")
+                        audioTrackTimeline(samples: editor.micWaveform, color: EditorColors.micWaveform, label: "Mic", trackType: .mic)
+                            .frame(height: 44)
+
+                        sectionHeader("SYSTEM")
+                        audioTrackTimeline(samples: editor.systemWaveform, color: EditorColors.systemWaveform, label: "Sys", trackType: .system)
+                            .frame(height: 44)
 
                         if !editor.markers.isEmpty {
                             sectionHeader("MARKERS")
@@ -878,18 +916,20 @@ struct VideoEditorView: View {
         }
     }
 
-    // MARK: - Waveform View
+    // MARK: - Audio Track Timeline
 
     @ViewBuilder
-    private func waveformView(samples: [Float], color: Color, label: String) -> some View {
+    private func audioTrackTimeline(samples: [Float], color: Color, label: String, trackType: AudioTrackType) -> some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let height = geometry.size.height
 
-            ZStack {
+            ZStack(alignment: .leading) {
+                // Track background
                 RoundedRectangle(cornerRadius: 4)
                     .fill(EditorColors.trackBackground)
 
+                // Waveform bars
                 if samples.isEmpty {
                     Text(label)
                         .font(.system(size: 9))
@@ -911,10 +951,81 @@ struct VideoEditorView: View {
                                 width: max(1, barWidth - 0.5),
                                 height: barHeight * 2
                             )
-                            context.fill(Path(rect), with: .color(color.opacity(0.6)))
+                            context.fill(Path(rect), with: .color(color.opacity(0.4)))
                         }
                     }
+                    .allowsHitTesting(false)
                 }
+
+                // Per-segment gain lines and dB labels
+                ForEach(editor.segments) { segment in
+                    let startX = sourceTimeToX(segment.sourceStart, width: width)
+                    let endX = sourceTimeToX(segment.sourceEnd, width: width)
+                    let segWidth = max(0, endX - startX)
+                    let volume = trackType == .mic ? segment.micVolume : segment.systemVolume
+                    // Map volume 0–2.0 to bottom–top of track
+                    let lineY = height - CGFloat(volume / 2.0) * height
+
+                    // Gain line
+                    Rectangle()
+                        .fill(color)
+                        .frame(width: segWidth, height: 2)
+                        .offset(x: startX, y: lineY - 1)
+                        .allowsHitTesting(false)
+
+                    // dB label
+                    Text(volumeToDBLabel(volume))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundColor(color)
+                        .offset(x: startX + 4, y: lineY - 12)
+                        .allowsHitTesting(false)
+                }
+
+                // Drag gesture overlay for gain adjustment
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                guard width > 0, height > 0 else { return }
+
+                                // On first drag event, find segment and push undo
+                                if !gainDragDidPushUndo {
+                                    let srcTime = (value.startLocation.x / width) * editor.duration
+                                    if let seg = editor.segment(atSourceTime: srcTime) {
+                                        gainDragSegmentID = seg.id
+                                        editor.pushSnapshot()
+                                        gainDragDidPushUndo = true
+                                    }
+                                }
+
+                                guard let segID = gainDragSegmentID else { return }
+
+                                // Map Y position to volume: top = 2.0, bottom = 0.0
+                                let clampedY = max(0, min(height, value.location.y))
+                                let newVolume = Float((height - clampedY) / height) * 2.0
+
+                                switch trackType {
+                                case .mic:
+                                    editor.updateSegmentVolume(segmentID: segID, micVolume: newVolume)
+                                case .system:
+                                    editor.updateSegmentVolume(segmentID: segID, systemVolume: newVolume)
+                                }
+                            }
+                            .onEnded { _ in
+                                gainDragSegmentID = nil
+                                gainDragDidPushUndo = false
+                            }
+                    )
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active:
+                            NSCursor.resizeUpDown.set()
+                        case .ended:
+                            NSCursor.arrow.set()
+                        }
+                    }
 
                 // Playhead
                 Rectangle()
@@ -924,6 +1035,7 @@ struct VideoEditorView: View {
                         editor.sourceTime(forEditedTime: editor.currentTime),
                         width: width
                     ))
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -1057,23 +1169,198 @@ struct VideoEditorView: View {
         DisclosureGroup("Audio") {
             VStack(spacing: 12) {
                 audioTrack(
-                    label: "Microphone",
+                    label: "Mic Master",
                     icon: "mic.fill",
                     volume: $editor.micVolume,
                     muted: $editor.micMuted
                 )
 
                 audioTrack(
-                    label: "System Audio",
+                    label: "System Master",
                     icon: "speaker.wave.2.fill",
                     volume: $editor.systemVolume,
                     muted: $editor.systemMuted
                 )
+
+                // Per-segment volume for selected segment
+                if let selID = editor.selectedSegmentID,
+                   let segIndex = editor.segments.firstIndex(where: { $0.id == selID }) {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Segment Volume")
+                            .font(.caption.bold())
+                        HStack {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 9))
+                            Text("Mic")
+                                .font(.system(size: 9))
+                            Slider(
+                                value: Binding(
+                                    get: { editor.segments[segIndex].micVolume },
+                                    set: { editor.updateSegmentVolume(segmentID: selID, micVolume: $0) }
+                                ),
+                                in: 0...2
+                            )
+                            Text(volumeToDBLabel(editor.segments[segIndex].micVolume))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(EditorColors.secondary)
+                                .frame(width: 52, alignment: .trailing)
+                        }
+                        HStack {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .font(.system(size: 9))
+                            Text("Sys")
+                                .font(.system(size: 9))
+                            Slider(
+                                value: Binding(
+                                    get: { editor.segments[segIndex].systemVolume },
+                                    set: { editor.updateSegmentVolume(segmentID: selID, systemVolume: $0) }
+                                ),
+                                in: 0...2
+                            )
+                            Text(volumeToDBLabel(editor.segments[segIndex].systemVolume))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(EditorColors.secondary)
+                                .frame(width: 52, alignment: .trailing)
+                        }
+                    }
+                }
             }
             .padding(.top, 4)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(EditorColors.card))
+    }
+
+    // MARK: - Subtitles Panel
+
+    @ViewBuilder
+    private var subtitlesPanel: some View {
+        DisclosureGroup("Subtitles") {
+            VStack(alignment: .leading, spacing: 12) {
+                // Enable toggle
+                Toggle("Enable Subtitles", isOn: $editor.subtitleConfig.enabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+
+                // Audio source picker
+                HStack {
+                    Text("Audio Source")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("", selection: $editor.subtitleConfig.audioSource) {
+                        Text("Microphone").tag(SubtitleAudioSource.microphone)
+                        Text("System Audio").tag(SubtitleAudioSource.systemAudio)
+                        Text("Both").tag(SubtitleAudioSource.both)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+
+                // Transcribe button
+                Button(action: {
+                    Task { await editor.transcribeAudio() }
+                }) {
+                    HStack {
+                        if editor.isTranscribing {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Transcribing...")
+                        } else {
+                            Image(systemName: "waveform")
+                            Text(editor.subtitleLines.isEmpty ? "Transcribe" : "Re-transcribe")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(editor.isTranscribing)
+
+                if editor.subtitleConfig.enabled && !editor.subtitleLines.isEmpty {
+                    Divider()
+
+                    // Position picker
+                    HStack {
+                        Text("Position")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Picker("", selection: $editor.subtitleConfig.position) {
+                            Text("Top").tag(SubtitlePosition.top)
+                            Text("Middle").tag(SubtitlePosition.middle)
+                            Text("Bottom").tag(SubtitlePosition.bottom)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+
+                    // Font size
+                    HStack {
+                        Text("Size")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Picker("", selection: $editor.subtitleConfig.fontSize) {
+                            Text("Small").tag(CGFloat(18))
+                            Text("Medium").tag(CGFloat(24))
+                            Text("Large").tag(CGFloat(32))
+                            Text("Extra Large").tag(CGFloat(42))
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+
+                    // Background toggle
+                    Toggle("Background Box", isOn: $editor.subtitleConfig.backgroundEnabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    Divider()
+
+                    // Scrollable transcript
+                    Text("Transcript")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(editor.subtitleLines) { line in
+                                subtitleLineRow(line)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(EditorColors.card))
+    }
+
+    @ViewBuilder
+    private func subtitleLineRow(_ line: SubtitleLine) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(formatSubtitleTime(line.sourceStart))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .frame(width: 36, alignment: .trailing)
+
+            Text(line.words.map(\.text).joined(separator: " "))
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func formatSubtitleTime(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
     }
 
     @ViewBuilder
@@ -1109,6 +1396,17 @@ struct VideoEditorView: View {
                     .frame(width: 32, alignment: .trailing)
             }
         }
+    }
+
+    // MARK: - Audio Helpers
+
+    private func volumeToDBLabel(_ volume: Float) -> String {
+        if volume <= 0.0001 { return "-inf dB" }
+        let db = 20.0 * log10(volume)
+        if db >= 0 {
+            return String(format: "+%.1f dB", db)
+        }
+        return String(format: "%.1f dB", db)
     }
 
     // MARK: - Helpers
@@ -1267,6 +1565,12 @@ private extension View {
     func onScrollWheel(_ handler: @escaping (Double, CGPoint) -> Void) -> some View {
         modifier(ScrollWheelModifier(handler: handler))
     }
+}
+
+// MARK: - Audio Track Type
+
+private enum AudioTrackType {
+    case mic, system
 }
 
 // MARK: - Zoom Resize Edge
