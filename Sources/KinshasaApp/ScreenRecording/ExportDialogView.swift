@@ -1,28 +1,34 @@
-import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
+import SwiftUI
 
 // MARK: - ExportPhase
 
 enum ExportPhase: Equatable {
-    case settings
     case exporting
     case done(URL)
     case error(String)
+}
+
+// MARK: - Notification
+
+extension Notification.Name {
+    static let recordingExported = Notification.Name("recordingExported")
+    static let showRecordingsTab = Notification.Name("showRecordingsTab")
+    static let showSection = Notification.Name("showSection")
+    static let toggleScreenRecording = Notification.Name("toggleScreenRecording")
+    static let toggleTodoSheet = Notification.Name("toggleTodoSheet")
+    static let statusBarVisibilityChanged = Notification.Name("statusBarVisibilityChanged")
 }
 
 // MARK: - ExportDialogView
 
 struct ExportDialogView: View {
     @Bindable var editor: VideoEditorController
+    var spaceController: SpaceController?
 
     // MARK: - State
 
-    @State private var codec: VideoCodec = .h264
-    @State private var quality: ExportQuality = .high
-    @State private var resolution: ExportResolution = .original
-    @State private var fileFormat: ExportFileFormat = .mp4
-    @State private var phase: ExportPhase = .settings
+    @State private var phase: ExportPhase = .exporting
     @State private var progress: Double = 0
     @State private var exportTask: Task<Void, Never>?
     @State private var exportService: ExportService?
@@ -36,8 +42,6 @@ struct ExportDialogView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             switch phase {
-            case .settings:
-                settingsContent
             case .exporting:
                 exportingContent
             case .done(let url):
@@ -49,83 +53,8 @@ struct ExportDialogView: View {
         .padding(24)
         .frame(width: 400)
         .interactiveDismissDisabled(phase == .exporting)
-    }
-
-    // MARK: - Settings Phase
-
-    @ViewBuilder
-    private var settingsContent: some View {
-        Text("Export Recording")
-            .font(.title2)
-            .fontWeight(.semibold)
-
-        Divider()
-
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Codec")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Picker("Codec", selection: $codec) {
-                ForEach(VideoCodec.allCases) { c in
-                    Text(c.label).tag(c)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        }
-
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Quality")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Picker("Quality", selection: $quality) {
-                ForEach(ExportQuality.allCases) { q in
-                    Text(q.label).tag(q)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        }
-
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Resolution")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Picker("Resolution", selection: $resolution) {
-                ForEach(ExportResolution.allCases) { r in
-                    Text(r.label).tag(r)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        }
-
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Format")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Picker("Format", selection: $fileFormat) {
-                ForEach(ExportFileFormat.allCases) { f in
-                    Text(f.label).tag(f)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        }
-
-        Divider()
-
-        HStack {
-            Spacer()
-
-            Button("Cancel", action: onDismiss)
-                .keyboardShortcut(.cancelAction)
-
-            Button("Export...") {
-                presentSavePanel()
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.defaultAction)
+        .task {
+            startExport()
         }
     }
 
@@ -155,7 +84,7 @@ struct ExportDialogView: View {
             Button("Cancel") {
                 exportService?.cancel()
                 exportTask?.cancel()
-                phase = .settings
+                onDismiss()
             }
         }
     }
@@ -164,7 +93,7 @@ struct ExportDialogView: View {
 
     @ViewBuilder
     private func doneContent(url: URL) -> some View {
-        Text("Export Complete")
+        Text("Upload Queued")
             .font(.title2)
             .fontWeight(.semibold)
 
@@ -174,18 +103,14 @@ struct ExportDialogView: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
                 .font(.title3)
-            Text(url.lastPathComponent)
-                .font(.system(.caption, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            Text("Recording will upload in the background.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Divider()
 
         HStack {
-            Button("Show in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
             Spacer()
             Button("Done", action: onDismiss)
                 .buttonStyle(.borderedProminent)
@@ -216,52 +141,39 @@ struct ExportDialogView: View {
 
         HStack {
             Spacer()
-            Button("Back") {
-                phase = .settings
+            Button("Retry") {
+                startExport()
             }
             Button("Close", action: onDismiss)
                 .keyboardShortcut(.cancelAction)
         }
     }
 
-    // MARK: - NSSavePanel
+    // MARK: - Export
 
-    private func presentSavePanel() {
-        let panel = NSSavePanel()
-        panel.title = "Export Recording"
-        panel.nameFieldStringValue = defaultFilename()
-        panel.allowedContentTypes = [fileFormat.utType]
-        panel.canCreateDirectories = true
-
-        let exportDir = RecordingSessionController.exportDirectory
+    private func generateOutputURL() -> URL {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let exportDir = cacheDir.appendingPathComponent("Actionfy/exports", isDirectory: true)
         let fm = FileManager.default
         if !fm.fileExists(atPath: exportDir.path) {
             try? fm.createDirectory(at: exportDir, withIntermediateDirectories: true)
         }
-        panel.directoryURL = exportDir
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        startExport(outputURL: url)
-    }
-
-    private func defaultFilename() -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        return "Recording-\(timestamp).\(fileFormat.fileExtension)"
+        return exportDir.appendingPathComponent("Recording-\(timestamp).mp4")
     }
 
-    // MARK: - Export Execution
-
-    private func startExport(outputURL: URL) {
+    private func startExport() {
         phase = .exporting
         progress = 0
 
+        let outputURL = generateOutputURL()
+
         let config = ExportConfiguration(
-            codec: codec,
-            quality: quality,
-            resolution: resolution,
-            fileFormat: fileFormat,
+            codec: .h265,
+            quality: .high,
+            resolution: .original,
+            fileFormat: .mp4,
             aspectRatio: editor.aspectRatio,
             outputURL: outputURL
         )
@@ -285,11 +197,20 @@ struct ExportDialogView: View {
                 )
 
                 await MainActor.run {
+                    // Enqueue for background upload
+                    let title = outputURL.deletingPathExtension().lastPathComponent
+                    let duration = editorRef.session.duration
+                    UploadQueue.shared.enqueue(
+                        filePath: outputURL.path,
+                        title: title,
+                        duration: duration,
+                        spaceId: spaceController?.currentSpaceId
+                    )
                     phase = .done(outputURL)
                 }
             } catch is CancellationError {
                 await MainActor.run {
-                    phase = .settings
+                    onDismiss()
                 }
             } catch {
                 await MainActor.run {

@@ -4,6 +4,7 @@ import Foundation
 import os.log
 import ServiceManagement
 import UniformTypeIdentifiers
+import UserNotifications
 
 private let slackLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Kinshasa", category: "slackMute")
 
@@ -69,11 +70,13 @@ final class DictationController: ObservableObject {
     @Published private(set) var invocationShortcut: InvocationShortcut
     @Published private(set) var voiceNoteSwitchKeyCode: Int64
     @Published private(set) var screenRecordingShortcut: InvocationShortcut?
+    @Published private(set) var todoSheetShortcut: InvocationShortcut?
     @Published private(set) var todoSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
     @Published var isCapturingVoiceNoteSwitchKey = false
     @Published var isCapturingScreenRecordingKey = false
     @Published var isCapturingTodoSwitchKey = false
+    @Published var isCapturingTodoSheetKey = false
     @Published var statusText: String
     @Published var lastTranscript: String
     @Published var isRecording = false
@@ -82,6 +85,7 @@ final class DictationController: ObservableObject {
     @Published var accessibilityGranted = AXIsProcessTrusted()
     @Published var keyboardMonitoringGranted = CGPreflightListenEventAccess()
     @Published var microphoneGranted = false
+    @Published var notificationsGranted = false
     @Published private(set) var hasCompletedOnboarding: Bool
     @Published var shouldShowOnboardingWizard: Bool
     @Published var escapeToCancelEnabled: Bool {
@@ -249,6 +253,7 @@ final class DictationController: ObservableObject {
     private let duckingService = SystemAudioDuckingService()
     private let slackMuteService = SlackMuteService()
     private let bubble = FloatingBubbleController()
+    private let todoConfirmation = TodoConfirmationController()
     var spaceController: SpaceController? {
         didSet { syncSpaceAppearance() }
     }
@@ -264,6 +269,7 @@ final class DictationController: ObservableObject {
     private var riveReactiveLoopTask: Task<Void, Never>?
     private var keepModelWarmTask: Task<Void, Never>?
     private var holdReleaseWatchdogTask: Task<Void, Never>?
+    private var pendingHoldStopTask: Task<Void, Never>?
     private var indicatorPreviewHideTask: Task<Void, Never>?
     private var liveTranscriptionInFlight = false
     private var liveSnapshotInFlightDuration: TimeInterval?
@@ -277,6 +283,10 @@ final class DictationController: ObservableObject {
     /// After enough quiet ticks, the level decays smoothly to zero.
     private var silenceTickCount: Int = 0
     private var holdReleaseMissingSince: Date?
+    /// Timestamp when the most recent hold-mode `.startRecording` was received.
+    /// Used to suppress spurious `.up` events that arrive within a few ms of
+    /// key-down (common with macOS Globe/Fn key clearing `.function` flag).
+    private var holdRecordingStartedAt: Date?
     /// Set synchronously on `.startRecording`/`.stopRecording` so the intent
     /// survives the gap while `beginRecording()` is awaiting async setup.
     private var wantRecording = false
@@ -304,7 +314,16 @@ final class DictationController: ObservableObject {
     private let liveTailPatchWaitTimeout: TimeInterval = 0.42
     private let liveTailPatchOverlap: TimeInterval = 0.22
     private let holdReleaseWatchPollInterval: TimeInterval = 0.05
-    private let holdReleaseDebounce: TimeInterval = 0.12
+    /// Safety-net debounce for the hold-release watchdog.  CGEventSource.keyState
+    /// is unreliable for certain modifier keys (e.g. Right Command on macOS) —
+    /// it can report "not pressed" while the key is still held.  A longer
+    /// debounce prevents the watchdog from killing a recording prematurely;
+    /// normal releases are detected via the event tap's `.up` event instead.
+    private let holdReleaseDebounce: TimeInterval = 3.0
+    /// Minimum gap before we trust a hold-mode release immediately. Faster
+    /// releases are confirmed shortly after to filter spurious modifier `.up`s
+    /// without making genuine short holds feel stuck.
+    private let holdMinimumDuration: TimeInterval = 0.08
     private let pipelineTimingEnabled = ProcessInfo.processInfo.environment["KINSHASA_TIMING"] == "1"
 
     private enum DefaultsKey {
@@ -316,6 +335,7 @@ final class DictationController: ObservableObject {
         static let todoSwitchKeyCode = "todo_switch_key_code"
         static let screenRecordingKeyCode = "screen_recording_key_code" // Legacy
         static let screenRecordingShortcutJSON = "screen_recording_shortcut_json"
+        static let todoSheetShortcutJSON = "todo_sheet_shortcut_json"
         static let onboardingCompleted = "onboarding_completed"
         static let escapeToCancelEnabled = "escape_to_cancel_enabled"
         static let launchAtLogin = "launch_at_login"
@@ -346,6 +366,7 @@ final class DictationController: ObservableObject {
         case voiceNoteSwitch
         case screenRecording
         case todoSwitch
+        case todoSheet
     }
 
     nonisolated static func inferOnboardingCompletion(
@@ -415,6 +436,14 @@ final class DictationController: ObservableObject {
             initialScreenRecordingShortcut = nil
         }
 
+        let initialTodoSheetShortcut: InvocationShortcut?
+        if let jsonData = defaults.data(forKey: DefaultsKey.todoSheetShortcutJSON),
+           let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
+            initialTodoSheetShortcut = decoded
+        } else {
+            initialTodoSheetShortcut = nil
+        }
+
         mode = initialMode
         // Infer shortcut type from existing shortcut if not persisted
         if let storedType = ShortcutType(rawValue: defaults.string(forKey: DefaultsKey.shortcutType) ?? "") {
@@ -426,6 +455,7 @@ final class DictationController: ObservableObject {
         voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
         todoSwitchKeyCode = initialTodoSwitchKeyCode
         screenRecordingShortcut = initialScreenRecordingShortcut
+        todoSheetShortcut = initialTodoSheetShortcut
 
         escapeToCancelEnabled = defaults.object(forKey: DefaultsKey.escapeToCancelEnabled) as? Bool ?? false
         launchAtLoginEnabled = defaults.object(forKey: DefaultsKey.launchAtLogin) as? Bool ?? false
@@ -482,6 +512,10 @@ final class DictationController: ObservableObject {
         accessibilityGranted = initialAccessibilityGranted
         keyboardMonitoringGranted = initialKeyboardMonitoringGranted
         microphoneGranted = initialMicrophoneGranted
+        Task {
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            notificationsGranted = settings.authorizationStatus == .authorized
+        }
         shortcutMonitor.setInvocationShortcut(initialInvocationShortcut)
         shortcutMonitor.setVoiceNoteSwitchKeyCode(initialVoiceNoteSwitchKeyCode)
         shortcutMonitor.setTodoSwitchKeyCode(initialTodoSwitchKeyCode)
@@ -515,6 +549,14 @@ final class DictationController: ObservableObject {
         shortcutMonitor.onScreenRecordingKeyPressed = { [weak self] in
             Task { @MainActor [weak self] in
                 self?.handleScreenRecordingShortcut()
+            }
+        }
+        if let initialTodoSheetShortcut = todoSheetShortcut {
+            shortcutMonitor.setTodoSheetShortcut(initialTodoSheetShortcut)
+        }
+        shortcutMonitor.onTodoSheetKeyPressed = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleTodoSheetShortcut()
             }
         }
         shortcutMonitor.onEscapePressed = { [weak self] in
@@ -587,6 +629,10 @@ final class DictationController: ObservableObject {
 
     var screenRecordingKeyDisplayName: String {
         screenRecordingShortcut?.displayName ?? "Not Set"
+    }
+
+    var todoSheetKeyDisplayName: String {
+        todoSheetShortcut?.displayName ?? "Not Set"
     }
 
     func showOnboardingWizard() {
@@ -663,8 +709,23 @@ final class DictationController: ObservableObject {
         lastTranscriptionBackend ?? "No transcription completed yet"
     }
 
+    func applyInvocationShortcut(_ shortcut: InvocationShortcut) {
+        setInvocationShortcut(shortcut)
+        statusText = "Invocation key set to \(invocationKeyDisplayName)."
+    }
+
+    func applyScreenRecordingShortcut(_ shortcut: InvocationShortcut) {
+        setScreenRecordingShortcut(shortcut)
+        statusText = "Screen recording shortcut set to \(screenRecordingKeyDisplayName)."
+    }
+
+    func applyTodoSheetShortcut(_ shortcut: InvocationShortcut) {
+        setTodoSheetShortcut(shortcut)
+        statusText = "Todo sheet shortcut set to \(todoSheetKeyDisplayName)."
+    }
+
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
             return
         }
 
@@ -687,7 +748,7 @@ final class DictationController: ObservableObject {
     }
 
     func startVoiceNoteSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
             return
         }
 
@@ -710,7 +771,7 @@ final class DictationController: ObservableObject {
     }
 
     func startScreenRecordingKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
             return
         }
 
@@ -732,7 +793,7 @@ final class DictationController: ObservableObject {
     }
 
     func startTodoSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
             return
         }
 
@@ -753,10 +814,38 @@ final class DictationController: ObservableObject {
         statusText = "Todo key capture canceled."
     }
 
+    func startTodoSheetKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+            return
+        }
+
+        keyCaptureTarget = .todoSheet
+        isCapturingTodoSheetKey = true
+        statusText = "Press a key combination for the Todo Sheet shortcut."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelTodoSheetKeyCapture() {
+        guard isCapturingTodoSheetKey else {
+            return
+        }
+
+        isCapturingTodoSheetKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Todo Sheet key capture canceled."
+    }
+
     func clearScreenRecordingKey() {
         screenRecordingShortcut = nil
         shortcutMonitor.setScreenRecordingShortcut(nil)
         UserDefaults.standard.removeObject(forKey: DefaultsKey.screenRecordingShortcutJSON)
+    }
+
+    func clearTodoSheetKey() {
+        todoSheetShortcut = nil
+        shortcutMonitor.setTodoSheetShortcut(nil)
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.todoSheetShortcutJSON)
     }
 
     func requestKeyboardPrompt() {
@@ -782,6 +871,8 @@ final class DictationController: ObservableObject {
             accessibilityGranted = requestAccessibilityPermission(prompt: false)
             keyboardMonitoringGranted = requestKeyboardMonitoringPermission(prompt: false)
             microphoneGranted = await audioCapture.requestMicrophonePermissionIfNeeded(prompt: false)
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            notificationsGranted = settings.authorizationStatus == .authorized
             markOnboardingCompleteIfReady()
             _ = startShortcutMonitor()
         }
@@ -865,8 +956,9 @@ final class DictationController: ObservableObject {
         riveReactiveLoopTask?.cancel()
         riveReactiveLoopTask = nil
         stopHoldReleaseWatchdog()
-        shortcutMonitor.setVoiceNoteSwitchArmed(false)
-        shortcutMonitor.setTodoSwitchArmed(false)
+        pendingHoldStopTask?.cancel()
+        pendingHoldStopTask = nil
+        shortcutMonitor.setRecordingControlsActive(false)
         keepModelWarmTask?.cancel()
         keepModelWarmTask = nil
         indicatorPreviewHideTask?.cancel()
@@ -892,18 +984,25 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+            holdDebugLog("handleShortcutEvent: BLOCKED by capture mode")
             return
         }
 
         lastShortcutEventAt = .now
+        holdDebugLog("handleShortcutEvent: event=\(event) mode=\(mode) isRecording=\(isRecording) wantRecording=\(wantRecording) isTranscribing=\(isTranscribing)")
 
         guard let action = interpreter.handle(event) else {
+            holdDebugLog("handleShortcutEvent: interpreter returned nil")
             return
         }
 
+        holdDebugLog("handleShortcutEvent: action=\(action)")
+
         switch action {
         case .toggleRecording:
+            pendingHoldStopTask?.cancel()
+            pendingHoldStopTask = nil
             if isRecording {
                 wantRecording = false
                 stopRecordingAndTranscribe()
@@ -914,14 +1013,35 @@ final class DictationController: ObservableObject {
                 }
             }
         case .startRecording:
+            pendingHoldStopTask?.cancel()
+            pendingHoldStopTask = nil
+            holdRecordingStartedAt = .now
             wantRecording = true
             Task {
                 await beginRecording()
             }
         case .stopRecording:
+            // Guard against spurious rapid releases.  Modifier keys (especially
+            // Fn/Globe) can emit a flagsChanged that clears the modifier flag
+            // within milliseconds of the key-down, even though the key is still
+            // physically held.  If the .up arrives too fast, ignore it — the
+            // hold-release watchdog will detect the real release independently.
+            if let started = holdRecordingStartedAt {
+                let elapsed = Date.now.timeIntervalSince(started)
+                holdDebugLog(".stopRecording: elapsed since start = \(elapsed)s, threshold = \(holdMinimumDuration)s")
+                if elapsed < holdMinimumDuration {
+                    holdDebugLog(".stopRecording: deferring confirmation")
+                    scheduleHoldStopConfirmation(after: holdMinimumDuration - elapsed)
+                    return
+                }
+            } else {
+                holdDebugLog(".stopRecording: holdRecordingStartedAt is nil")
+            }
+            pendingHoldStopTask?.cancel()
+            pendingHoldStopTask = nil
+            holdRecordingStartedAt = nil
             wantRecording = false
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
+            shortcutMonitor.setRecordingControlsActive(false)
             if isRecording {
                 stopRecordingAndTranscribe()
             }
@@ -931,10 +1051,52 @@ final class DictationController: ObservableObject {
     }
 
     private func handleScreenRecordingShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
             return
         }
         NotificationCenter.default.post(name: .toggleScreenRecording, object: nil)
+    }
+
+    private func handleTodoSheetShortcut() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey else {
+            return
+        }
+        NotificationCenter.default.post(name: .toggleTodoSheet, object: nil)
+    }
+
+    private func scheduleHoldStopConfirmation(after delay: TimeInterval) {
+        pendingHoldStopTask?.cancel()
+        let delayNanos = UInt64(max(0, delay) * 1_000_000_000)
+
+        pendingHoldStopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run {
+                guard let self else {
+                    return
+                }
+
+                self.pendingHoldStopTask = nil
+                guard self.mode == .hold else {
+                    return
+                }
+                guard !self.shortcutMonitor.isInvocationKeyPhysicallyPressed() else {
+                    holdDebugLog(".stopRecording: deferred stop canceled (key still pressed)")
+                    return
+                }
+
+                holdDebugLog(".stopRecording: deferred stop confirmed")
+                self.holdRecordingStartedAt = nil
+                self.wantRecording = false
+                self.shortcutMonitor.setRecordingControlsActive(false)
+                if self.isRecording {
+                    self.stopRecordingAndTranscribe()
+                }
+            }
+        }
     }
 
     private func toggleRecordingOutputMode() {
@@ -1012,15 +1174,19 @@ final class DictationController: ObservableObject {
     }
 
     private func beginRecording() async {
+        holdDebugLog("beginRecording: START appMode=\(appMode) isRecording=\(isRecording) isTranscribing=\(isTranscribing) wantRecording=\(wantRecording)")
         guard appMode == .dictation else {
+            holdDebugLog("beginRecording: BAIL appMode != dictation")
             return
         }
 
         guard !isRecording, !isTranscribing else {
+            holdDebugLog("beginRecording: BAIL isRecording=\(isRecording) isTranscribing=\(isTranscribing)")
             return
         }
 
         guard await prepareParakeetIfNeeded(showReadyStatus: true) else {
+            holdDebugLog("beginRecording: BAIL parakeet not ready")
             return
         }
 
@@ -1037,16 +1203,16 @@ final class DictationController: ObservableObject {
 
         // A stop request may have arrived while we were awaiting async setup.
         guard wantRecording else {
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
+            holdDebugLog("beginRecording: BAIL wantRecording=false (stop arrived during setup)")
+            shortcutMonitor.setRecordingControlsActive(false)
             return
         }
 
         do {
             try audioCapture.startRecording()
+            holdDebugLog("beginRecording: audio started, setting isRecording=true")
             isRecording = true
-            shortcutMonitor.isRecordingForSpaceCycle = true
-            shortcutMonitor.isCurrentlyRecording = true
+            shortcutMonitor.setRecordingControlsActive(true)
             playSoundEffect()
             performHaptic()
             recordingOutputMode = .paste
@@ -1068,24 +1234,28 @@ final class DictationController: ObservableObject {
             muteSlackIfNeeded()
             startLiveTranscriptionLoop(configuration: configuration)
         } catch {
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
+            shortcutMonitor.setRecordingControlsActive(false)
             recordingOutputMode = .paste
             handleError(error.localizedDescription)
         }
     }
 
     private func stopRecordingAndTranscribe() {
+        holdDebugLog("stopRecordingAndTranscribe: isRecording=\(isRecording)")
+        // Log the call stack to see WHO called this
+        Thread.callStackSymbols.prefix(6).forEach { holdDebugLog("  \($0)") }
         guard isRecording else {
             return
         }
 
         // Always restore volume ducking when leaving the recording state,
         // regardless of which path we take (success, error, or early return).
+        pendingHoldStopTask?.cancel()
+        pendingHoldStopTask = nil
+        holdRecordingStartedAt = nil
         wantRecording = false
         isRecording = false
-        shortcutMonitor.isRecordingForSpaceCycle = false
-        shortcutMonitor.isCurrentlyRecording = false
+        shortcutMonitor.setRecordingControlsActive(false)
         playSoundEffect()
         performHaptic()
         duckingService.restoreIfNeeded()
@@ -1098,8 +1268,6 @@ final class DictationController: ObservableObject {
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
             recordingOutputMode = .paste
             handleError("Speech model is still preparing. Try again in a few seconds.")
             return
@@ -1111,8 +1279,6 @@ final class DictationController: ObservableObject {
             let finalDuration = stoppedRecording.duration
 
             isTranscribing = true
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
@@ -1251,8 +1417,6 @@ final class DictationController: ObservableObject {
                 }
             }
         } catch {
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
             recordingOutputMode = .paste
             stopLiveTranscriptionLoop()
             stopHoldReleaseWatchdog()
@@ -1262,12 +1426,15 @@ final class DictationController: ObservableObject {
     }
 
     func cancelRecording() {
+        holdDebugLog("cancelRecording called, isRecording=\(isRecording)")
         guard isRecording else { return }
 
+        pendingHoldStopTask?.cancel()
+        pendingHoldStopTask = nil
+        holdRecordingStartedAt = nil
         wantRecording = false
         isRecording = false
-        shortcutMonitor.isRecordingForSpaceCycle = false
-        shortcutMonitor.isCurrentlyRecording = false
+        shortcutMonitor.setRecordingControlsActive(false)
         duckingService.restoreIfNeeded()
         let slackService = slackMuteService
         DispatchQueue.global(qos: .userInitiated).async {
@@ -1277,8 +1444,6 @@ final class DictationController: ObservableObject {
         stopLiveTranscriptionLoop()
         stopHoldReleaseWatchdog()
         stopRiveReactiveLoop(resetInputs: true)
-        shortcutMonitor.setVoiceNoteSwitchArmed(false)
-        shortcutMonitor.setTodoSwitchArmed(false)
         recordingOutputMode = .paste
         statusText = "Recording cancelled."
         showTransientBubble(message: "Cancelled", duration: 0.8)
@@ -1385,10 +1550,11 @@ final class DictationController: ObservableObject {
 
     private func handleError(_ message: String) {
         if !isRecording {
+            pendingHoldStopTask?.cancel()
+            pendingHoldStopTask = nil
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
-            shortcutMonitor.setVoiceNoteSwitchArmed(false)
-            shortcutMonitor.setTodoSwitchArmed(false)
+            shortcutMonitor.setRecordingControlsActive(false)
             recordingOutputMode = .paste
         }
         // Always restore ducking as a safety net, regardless of recording state.
@@ -1429,19 +1595,64 @@ final class DictationController: ObservableObject {
     private func syncTodoToConvex(text: String) async {
         do {
             let token = try await ConvexHTTPClient.getToken()
-            var args: [String: Any] = ["rawText": text]
+            var args: [String: Any] = [
+                "rawText": text,
+                "timezone": TimeZone.current.identifier,
+            ]
             if let spaceId = spaceController?.currentSpaceId {
                 args["spaceId"] = spaceId
             }
-            _ = try await ConvexHTTPClient.action(
+            let result = try await ConvexHTTPClient.action(
                 function: "todos:processAndCreate",
                 args: args,
                 token: token
             )
             lastTodoSavedAt = Date()
+
+            // Parse the returned JSON and show confirmation card
+            if let jsonString = result as? String,
+               let data = jsonString.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+
+                let info = CreatedTodoInfo(
+                    id: json["id"] as? String ?? "",
+                    title: json["title"] as? String ?? text,
+                    description: json["description"] as? String,
+                    dueDate: json["dueDate"] as? String,
+                    dueTime: json["dueTime"] as? String,
+                    priority: json["priority"] as? String ?? "none",
+                    tags: json["tags"] as? [String],
+                    reminderCount: (json["reminders"] as? [[String: Any]])?.count ?? 0,
+                    listName: json["listName"] as? String
+                )
+                showTodoConfirmation(info)
+            }
+
             statusText = "Todo created."
         } catch {
             handleError("Could not create todo. \(error.localizedDescription)")
+        }
+    }
+
+    private func showTodoConfirmation(_ todo: CreatedTodoInfo) {
+        todoConfirmation.onSave = { [weak self] todo, updates in
+            await self?.saveTodoEdit(todoId: todo.id, updates: updates)
+        }
+        todoConfirmation.show(todo: todo)
+    }
+
+    private nonisolated func saveTodoEdit(todoId: String, updates: [String: Any]) async {
+        do {
+            let token = try await ConvexHTTPClient.getToken()
+            let args: [String: Any] = updates.merging(["todoId": todoId]) { _, new in new }
+            _ = try await ConvexHTTPClient.mutation(
+                function: "todos:update",
+                args: args,
+                token: token
+            )
+            await MainActor.run { lastTodoSavedAt = Date() }
+        } catch {
+            NSLog("[DictationController] Failed to update todo: %@", String(describing: error))
         }
     }
 
@@ -1522,17 +1733,21 @@ final class DictationController: ObservableObject {
             return
         }
 
-        // Use hardware-only check, NOT isInvocationKeyCurrentlyPressed().
-        // The event-tap's internal isInvocationKeyPressed flag can get stuck
-        // when handleFlagsChanged's HID cross-check suppresses a genuine
-        // key-up event (observed especially when Slack is open and sending
-        // synthetic keystrokes). The whole point of this watchdog is to catch
-        // missed key-up events, so it must bypass event-tap tracking.
-        let isPressed = shortcutMonitor.isInvocationKeyPhysicallyPressed()
+        // Check both the event-tap's logical state AND the hardware state.
+        // CGEventSource.keyState is unreliable for modifier keys (especially
+        // Fn/Globe) — it can report "not pressed" while the key is still
+        // physically held.  The event-tap's internal flag tracks the actual
+        // flagsChanged events we receive, so if it says the key is down we
+        // trust it.  The watchdog only fires when BOTH agree the key is up.
+        let physicallyPressed = shortcutMonitor.isInvocationKeyPhysicallyPressed()
+        let logicallyPressed = shortcutMonitor.isInvocationKeyCurrentlyPressed()
+        let isPressed = physicallyPressed || logicallyPressed
         if isPressed {
             holdReleaseMissingSince = nil
             return
         }
+
+        holdDebugLog("watchdog: key NOT pressed! holdReleaseMissingSince=\(String(describing: holdReleaseMissingSince))")
 
         if holdReleaseMissingSince == nil {
             holdReleaseMissingSince = .now
@@ -1545,6 +1760,7 @@ final class DictationController: ObservableObject {
             return
         }
 
+        holdDebugLog("watchdog: STOPPING recording (debounce elapsed: \(Date().timeIntervalSince(holdReleaseMissingSince))s)")
         // Clear the stale internal flag so the next key-down is recognized
         // correctly (otherwise handleFlagsChanged would see keyDown == isInvocationKeyPressed
         // and suppress it).
@@ -2028,12 +2244,19 @@ final class DictationController: ObservableObject {
                 statusText = "Todo key must be a single key."
                 return
             }
+        case .todoSheet:
+            isCapturingTodoSheetKey = false
+            keyCaptureTarget = nil
+            removeInvocationKeyCaptureMonitors()
+            setTodoSheetShortcut(shortcut)
+            statusText = "Todo sheet shortcut set to \(todoSheetKeyDisplayName)."
         }
 
         isCapturingInvocationKey = false
         isCapturingVoiceNoteSwitchKey = false
         isCapturingScreenRecordingKey = false
         isCapturingTodoSwitchKey = false
+        isCapturingTodoSheetKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
     }
@@ -2058,6 +2281,14 @@ final class DictationController: ObservableObject {
             UserDefaults.standard.set(data, forKey: DefaultsKey.screenRecordingShortcutJSON)
         }
         shortcutMonitor.setScreenRecordingShortcut(shortcut)
+    }
+
+    private func setTodoSheetShortcut(_ shortcut: InvocationShortcut) {
+        todoSheetShortcut = shortcut
+        shortcutMonitor.setTodoSheetShortcut(shortcut)
+        if let data = try? JSONEncoder().encode(shortcut) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.todoSheetShortcutJSON)
+        }
     }
 
     private func setTodoSwitchKeyCode(_ keyCode: Int64) {
