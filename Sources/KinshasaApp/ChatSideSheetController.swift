@@ -157,11 +157,11 @@ final class ChatSideSheetController: ChatSheetKeyboardDelegate {
                 self.updatePanelFrame()
             }
         )
-        .frame(width: size.width, height: size.height)
 
         let hostingView = NSHostingView(rootView: sheetView)
         hostingView.sizingOptions = []
         hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
         panel.setContentSize(size)
 
@@ -209,16 +209,12 @@ final class ChatSideSheetController: ChatSheetKeyboardDelegate {
         let screenFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let width = currentWidth
         let sheetHeight = screenFrame.height
-        let size = NSSize(width: width, height: sheetHeight)
 
         let finalX = screenFrame.maxX - width
         let finalY = screenFrame.minY
 
-        panel.setFrame(NSRect(origin: NSPoint(x: finalX, y: finalY), size: size), display: true)
-
-        if let hostingView = panel.contentView as? NSHostingView<AnyView> {
-            hostingView.frame = NSRect(origin: .zero, size: size)
-        }
+        // setFrame resizes both panel and content view (via autoresizingMask)
+        panel.setFrame(NSRect(x: finalX, y: finalY, width: width, height: sheetHeight), display: true)
     }
 
     // MARK: - ChatSheetKeyboardDelegate
