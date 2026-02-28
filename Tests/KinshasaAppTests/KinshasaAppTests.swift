@@ -331,3 +331,66 @@ final class SubtitleModelTests: XCTestCase {
         XCTAssertTrue(config.backgroundEnabled)
     }
 }
+
+final class SubtitleChunkerTests: XCTestCase {
+    func testChunkEmptyTimingsReturnsEmpty() {
+        let lines = SubtitleChunker.chunk(wordTimings: [])
+        XCTAssertTrue(lines.isEmpty)
+    }
+
+    func testChunkSingleWordReturnsOneLine() {
+        let timings = [WordTiming(word: "hello", startTime: 0.5, endTime: 1.0, confidence: 0.9)]
+        let lines = SubtitleChunker.chunk(wordTimings: timings)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].words.count, 1)
+        XCTAssertEqual(lines[0].words[0].text, "hello")
+    }
+
+    func testChunkBreaksAtLongPause() {
+        let timings = [
+            WordTiming(word: "hello", startTime: 0.0, endTime: 0.4, confidence: 0.9),
+            WordTiming(word: "world", startTime: 0.5, endTime: 0.9, confidence: 0.9),
+            WordTiming(word: "this", startTime: 1.4, endTime: 1.8, confidence: 0.9),
+            WordTiming(word: "works", startTime: 1.9, endTime: 2.3, confidence: 0.9),
+        ]
+        let lines = SubtitleChunker.chunk(wordTimings: timings, maxWordsPerLine: 10, pauseThreshold: 0.3)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0].words.count, 2)
+        XCTAssertEqual(lines[1].words.count, 2)
+    }
+
+    func testChunkBreaksAtMaxWords() {
+        var timings: [WordTiming] = []
+        for i in 0..<12 {
+            let start = Double(i) * 0.5
+            timings.append(WordTiming(word: "word\(i)", startTime: start, endTime: start + 0.4, confidence: 0.9))
+        }
+        let lines = SubtitleChunker.chunk(wordTimings: timings, maxWordsPerLine: 8)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0].words.count, 8)
+        XCTAssertEqual(lines[1].words.count, 4)
+    }
+
+    func testChunkLineTimesMatchWordBoundaries() {
+        let timings = [
+            WordTiming(word: "hello", startTime: 1.0, endTime: 1.5, confidence: 0.9),
+            WordTiming(word: "world", startTime: 1.6, endTime: 2.1, confidence: 0.85),
+        ]
+        let lines = SubtitleChunker.chunk(wordTimings: timings)
+        XCTAssertEqual(lines[0].sourceStart, 1.0)
+        XCTAssertEqual(lines[0].sourceEnd, 2.1)
+    }
+
+    func testChunkFiltersEmptyTokens() {
+        let timings = [
+            WordTiming(word: "", startTime: 0.0, endTime: 0.1, confidence: 0.5),
+            WordTiming(word: "hello", startTime: 0.2, endTime: 0.5, confidence: 0.9),
+            WordTiming(word: " ", startTime: 0.6, endTime: 0.7, confidence: 0.3),
+            WordTiming(word: "world", startTime: 0.7, endTime: 1.1, confidence: 0.85),
+        ]
+        let lines = SubtitleChunker.chunk(wordTimings: timings)
+        XCTAssertEqual(lines[0].words.count, 2)
+        XCTAssertEqual(lines[0].words[0].text, "hello")
+        XCTAssertEqual(lines[0].words[1].text, "world")
+    }
+}
