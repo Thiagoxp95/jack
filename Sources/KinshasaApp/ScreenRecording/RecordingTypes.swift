@@ -291,12 +291,25 @@ struct TimelineSegment: Identifiable, Equatable {
     let sourceStart: TimeInterval
     let sourceEnd: TimeInterval
     var enabled: Bool
+    /// Per-segment microphone volume (0.0–2.0). Multiplied with master mic volume.
+    var micVolume: Float
+    /// Per-segment system audio volume (0.0–2.0). Multiplied with master system volume.
+    var systemVolume: Float
 
-    init(id: UUID = UUID(), sourceStart: TimeInterval, sourceEnd: TimeInterval, enabled: Bool = true) {
+    init(
+        id: UUID = UUID(),
+        sourceStart: TimeInterval,
+        sourceEnd: TimeInterval,
+        enabled: Bool = true,
+        micVolume: Float = 1.0,
+        systemVolume: Float = 1.0
+    ) {
         self.id = id
         self.sourceStart = sourceStart
         self.sourceEnd = sourceEnd
         self.enabled = enabled
+        self.micVolume = micVolume
+        self.systemVolume = systemVolume
     }
 
     var sourceDuration: TimeInterval {
@@ -390,4 +403,60 @@ struct RecordingSession {
         self.captureSourceType = captureSourceType
         self.fps = fps
     }
+}
+
+// MARK: - Subtitle Types
+
+enum SubtitlePosition: String, Codable, CaseIterable, Sendable {
+    case top, middle, bottom
+}
+
+enum SubtitleAudioSource: String, Codable, CaseIterable, Sendable {
+    case microphone, systemAudio, both
+}
+
+struct SubtitleWord: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    var text: String
+    var startTime: TimeInterval
+    var endTime: TimeInterval
+    var confidence: Float
+
+    init(id: UUID = UUID(), text: String, startTime: TimeInterval, endTime: TimeInterval, confidence: Float) {
+        self.id = id
+        self.text = text
+        self.startTime = startTime
+        self.endTime = endTime
+        self.confidence = confidence
+    }
+}
+
+struct SubtitleLine: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    var words: [SubtitleWord]
+
+    var sourceStart: TimeInterval {
+        words.first?.startTime ?? 0
+    }
+
+    var sourceEnd: TimeInterval {
+        words.last?.endTime ?? 0
+    }
+
+    init(id: UUID = UUID(), words: [SubtitleWord]) {
+        self.id = id
+        self.words = words
+    }
+}
+
+struct SubtitleConfiguration: Codable, Equatable, Sendable {
+    var enabled: Bool = false
+    var fontFamily: String = ".AppleSystemUIFont"
+    var fontSize: CGFloat = 24
+    var activeColor: String = "#FFFFFF"
+    var inactiveColor: String = "#888888"
+    var backgroundColor: String = "#00000080"
+    var backgroundEnabled: Bool = true
+    var position: SubtitlePosition = .bottom
+    var audioSource: SubtitleAudioSource = .microphone
 }

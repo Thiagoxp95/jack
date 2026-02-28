@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import KinshasaApp
 
@@ -36,6 +37,37 @@ final class KinshasaAppTests: XCTestCase {
         XCTAssertEqual(
             interpreter.handle(.down, now: start.addingTimeInterval(0.55)),
             .toggleRecording
+        )
+    }
+
+    func testSingleKeyInvocationKeepsPriorityEvenWithExtraModifiers() {
+        let invocation = InvocationShortcut(primaryKeyCode: 0, modifiers: 0)
+
+        XCTAssertTrue(
+            GlobalFnShortcutMonitor.invocationShouldTakePriority(
+                forKeyCode: 0,
+                currentModifierFlags: [.command],
+                invocationShortcut: invocation
+            )
+        )
+    }
+
+    func testCombinationInvocationRequiresItsModifiersBeforeTakingPriority() {
+        let invocation = InvocationShortcut(primaryKeyCode: 0, modifiers: NSEvent.ModifierFlags.command.rawValue)
+
+        XCTAssertFalse(
+            GlobalFnShortcutMonitor.invocationShouldTakePriority(
+                forKeyCode: 0,
+                currentModifierFlags: [],
+                invocationShortcut: invocation
+            )
+        )
+        XCTAssertTrue(
+            GlobalFnShortcutMonitor.invocationShouldTakePriority(
+                forKeyCode: 0,
+                currentModifierFlags: [.command, .shift],
+                invocationShortcut: invocation
+            )
         )
     }
 
@@ -233,5 +265,45 @@ final class ZoomEditorTests: XCTestCase {
         // Non-overlapping region should be added
         editor.addZoomRegion(start: 6.0, end: 8.0, level: 2.0)
         XCTAssertEqual(editor.zoomKeyframes.count, 2)
+    }
+}
+
+final class SubtitleModelTests: XCTestCase {
+    func testSubtitleWordCodableRoundTrip() {
+        let word = SubtitleWord(
+            id: UUID(),
+            text: "hello",
+            startTime: 1.5,
+            endTime: 2.0,
+            confidence: 0.95
+        )
+        let data = try! JSONEncoder().encode(word)
+        let decoded = try! JSONDecoder().decode(SubtitleWord.self, from: data)
+        XCTAssertEqual(word, decoded)
+    }
+
+    func testSubtitleLineSourceTimeSpan() {
+        let words = [
+            SubtitleWord(id: UUID(), text: "hello", startTime: 1.0, endTime: 1.5, confidence: 0.9),
+            SubtitleWord(id: UUID(), text: "world", startTime: 1.6, endTime: 2.1, confidence: 0.85),
+        ]
+        let line = SubtitleLine(id: UUID(), words: words)
+        XCTAssertEqual(line.sourceStart, 1.0)
+        XCTAssertEqual(line.sourceEnd, 2.1)
+    }
+
+    func testSubtitleLineEmptyWordsReturnsZeroTimes() {
+        let line = SubtitleLine(id: UUID(), words: [])
+        XCTAssertEqual(line.sourceStart, 0)
+        XCTAssertEqual(line.sourceEnd, 0)
+    }
+
+    func testSubtitleConfigurationDefaults() {
+        let config = SubtitleConfiguration()
+        XCTAssertFalse(config.enabled)
+        XCTAssertEqual(config.position, .bottom)
+        XCTAssertEqual(config.audioSource, .microphone)
+        XCTAssertEqual(config.fontSize, 24)
+        XCTAssertTrue(config.backgroundEnabled)
     }
 }
