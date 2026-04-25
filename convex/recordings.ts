@@ -13,6 +13,7 @@ export const list = query({
       .unique();
     if (!user) return [];
 
+    let recordings;
     if (args.spaceId) {
       // Verify membership
       const membership = await ctx.db
@@ -23,21 +24,36 @@ export const list = query({
         .unique();
       if (!membership) throw new Error("Not a member of this space");
 
-      return await ctx.db
+      recordings = await ctx.db
         .query("recordings")
         .withIndex("by_space", (q) => q.eq("spaceId", args.spaceId))
         .order("desc")
         .collect();
+    } else {
+      // Personal recordings (no space)
+      recordings = await ctx.db
+        .query("recordings")
+        .withIndex("by_space_user", (q) =>
+          q.eq("spaceId", undefined).eq("userId", user._id),
+        )
+        .order("desc")
+        .collect();
     }
 
-    // Personal recordings (no space)
-    return await ctx.db
-      .query("recordings")
-      .withIndex("by_space_user", (q) =>
-        q.eq("spaceId", undefined).eq("userId", user._id),
-      )
-      .order("desc")
-      .collect();
+    // Resolve storage URLs
+    return Promise.all(
+      recordings.map(async (r) => {
+        let thumbnailUrl: string | null = null;
+        let videoUrl: string | null = null;
+        if (r.thumbnailStorageId) {
+          thumbnailUrl = await ctx.storage.getUrl(r.thumbnailStorageId);
+        }
+        if (r.storageId) {
+          videoUrl = await ctx.storage.getUrl(r.storageId);
+        }
+        return { ...r, thumbnailUrl, videoUrl };
+      }),
+    );
   },
 });
 
@@ -103,6 +119,8 @@ export const createAndShare = mutation({
     title: v.string(),
     duration: v.number(),
     storageId: v.optional(v.id("_storage")),
+    thumbnailStorageId: v.optional(v.id("_storage")),
+    ogImageStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -130,6 +148,8 @@ export const createAndShare = mutation({
       title: args.title,
       duration: args.duration,
       storageId: args.storageId,
+      thumbnailStorageId: args.thumbnailStorageId,
+      ogImageStorageId: args.ogImageStorageId,
     });
 
     const chars =
@@ -207,10 +227,22 @@ export const getByShareToken = query({
       videoUrl = await ctx.storage.getUrl(recording.storageId);
     }
 
+    let thumbnailUrl: string | null = null;
+    if (recording.thumbnailStorageId) {
+      thumbnailUrl = await ctx.storage.getUrl(recording.thumbnailStorageId);
+    }
+
+    let ogImageUrl: string | null = null;
+    if (recording.ogImageStorageId) {
+      ogImageUrl = await ctx.storage.getUrl(recording.ogImageStorageId);
+    }
+
     return {
       title: recording.title,
       duration: recording.duration,
       videoUrl,
+      thumbnailUrl,
+      ogImageUrl,
     };
   },
 });

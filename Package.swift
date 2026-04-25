@@ -2,31 +2,33 @@
 import PackageDescription
 
 let package = Package(
-    name: "KinshasaApp",
+    name: "JackApp",
     platforms: [
         .macOS(.v14),
     ],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.11.0"),
+        .package(path: "Packages/FluidAudio"),
         .package(url: "https://github.com/clerk/clerk-ios.git", from: "1.0.0"),
         .package(url: "https://github.com/get-convex/convex-swift.git", from: "0.5.0"),
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui.git", from: "2.4.1"),
     ],
     targets: [
         .executableTarget(
-            name: "KinshasaApp",
+            name: "JackApp",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "ClerkKit", package: "clerk-ios"),
                 .product(name: "ConvexMobile", package: "convex-swift"),
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
-            path: "Sources/KinshasaApp",
+            path: "Sources/JackApp",
             resources: [
                 .process("Resources"),
             ]),
         .testTarget(
-            name: "KinshasaAppTests",
-            dependencies: ["KinshasaApp"],
-            path: "Tests/KinshasaAppTests"
+            name: "JackAppTests",
+            dependencies: ["JackApp"],
+            path: "Tests/JackAppTests"
         ),
     ]
 )

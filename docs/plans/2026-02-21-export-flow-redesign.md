@@ -13,9 +13,9 @@
 ### Task 1: Remove `.exporting` from RecordingState and clean up references
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift:21` (remove `.exporting` case)
-- Modify: `Sources/KinshasaApp/ContentView.swift:432-438` (remove `.exporting` case block)
-- Modify: `Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift:386-428` (remove `startExport`, `exportProgress`)
+- Modify: `Sources/JackApp/ScreenRecording/RecordingTypes.swift:21` (remove `.exporting` case)
+- Modify: `Sources/JackApp/ContentView.swift:432-438` (remove `.exporting` case block)
+- Modify: `Sources/JackApp/ScreenRecording/RecordingSessionController.swift:386-428` (remove `startExport`, `exportProgress`)
 
 **Step 1: Remove `.exporting` from RecordingState enum**
 
@@ -93,10 +93,10 @@ Expected: Build succeeds (VideoEditorView will need its `onExport` removed too â
 **Step 7: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift \
-       Sources/KinshasaApp/ContentView.swift \
-       Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift \
-       Sources/KinshasaApp/ScreenRecording/EditorWindowController.swift
+git add Sources/JackApp/ScreenRecording/RecordingTypes.swift \
+       Sources/JackApp/ContentView.swift \
+       Sources/JackApp/ScreenRecording/RecordingSessionController.swift \
+       Sources/JackApp/ScreenRecording/EditorWindowController.swift
 git commit -m "refactor: remove .exporting state and export logic from RecordingSessionController"
 ```
 
@@ -105,7 +105,7 @@ git commit -m "refactor: remove .exporting state and export logic from Recording
 ### Task 2: Rewrite ExportDialogView with phases, NSSavePanel, and progress
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift` (full rewrite)
+- Modify: `Sources/JackApp/ScreenRecording/ExportDialogView.swift` (full rewrite)
 
 **Step 1: Rewrite ExportDialogView**
 
@@ -334,7 +334,7 @@ struct ExportDialogView: View {
         panel.allowedContentTypes = [.mpeg4Movie]
         panel.canCreateDirectories = true
 
-        // Default to Actionfy Recordings directory
+        // Default to Jack Recordings directory
         let exportDir = RecordingSessionController.exportDirectory
         let fm = FileManager.default
         if !fm.fileExists(atPath: exportDir.path) {
@@ -408,7 +408,7 @@ Expected: May still fail until VideoEditorView is updated (next task)
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift
+git add Sources/JackApp/ScreenRecording/ExportDialogView.swift
 git commit -m "feat: rewrite ExportDialogView with phases, NSSavePanel, and progress"
 ```
 
@@ -417,7 +417,7 @@ git commit -m "feat: rewrite ExportDialogView with phases, NSSavePanel, and prog
 ### Task 3: Wire ExportDialogView into VideoEditorView as a sheet
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 **Step 1: Update VideoEditorView**
 
@@ -466,7 +466,7 @@ Expected: Clean build â€” all compilation errors resolved
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat: wire export sheet into editor window"
 ```
 

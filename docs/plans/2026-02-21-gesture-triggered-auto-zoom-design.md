@@ -101,8 +101,8 @@ No new UI elements needed.
 
 ## Files Touched
 
-- **NEW:** `Sources/KinshasaApp/ScreenRecording/GestureZoomDetector.swift`
-- **EDIT:** `Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift` (~5 lines: call detector, set keyframes before editor opens)
+- **NEW:** `Sources/JackApp/ScreenRecording/GestureZoomDetector.swift`
+- **EDIT:** `Sources/JackApp/ScreenRecording/RecordingSessionController.swift` (~5 lines: call detector, set keyframes before editor opens)
 
 ## Data Flow
 

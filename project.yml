@@ -1,0 +1,72 @@
+name: JackApp
+options:
+  bundleIdPrefix: com.jack
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    EXCLUDED_ARCHS: x86_64
+    ONLY_ACTIVE_ARCH: NO
+
+packages:
+  FluidAudio:
+    path: Packages/FluidAudio
+  clerk-ios:
+    url: https://github.com/clerk/clerk-ios.git
+    from: "1.0.0"
+  convex-swift:
+    url: https://github.com/get-convex/convex-swift.git
+    from: "0.5.0"
+
+targets:
+  JackApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/JackApp
+        excludes:
+          - Resources
+      - path: Sources/JackApp/Resources
+        type: resource
+        buildPhase: resources
+      - path: Sources/JackApp/Assets.xcassets
+        type: resource
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jack.app.v2
+        MARKETING_VERSION: "1.0.1"
+        CURRENT_PROJECT_VERSION: "2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Jackly
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.productivity"
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Jack needs microphone access to transcribe speech."
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "6.0"
+        METAL_LIBRARY_OUTPUT_DIR: "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)"
+        ENABLE_HARDENED_RUNTIME: YES
+        DEVELOPMENT_TEAM: 6BJ89V75F2
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+    dependencies:
+      - package: FluidAudio
+        product: FluidAudio
+      - package: clerk-ios
+        product: ClerkKit
+      - package: convex-swift
+        product: ConvexMobile
+    entitlements:
+      path: JackApp.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.device.audio-input: true

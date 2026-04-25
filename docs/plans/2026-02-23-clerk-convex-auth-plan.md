@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add Clerk authentication, organization workspaces, and Convex cloud sync to the Actionfy macOS app.
+**Goal:** Add Clerk authentication, organization workspaces, and Convex cloud sync to the Jack macOS app.
 
 **Architecture:** Clerk iOS SDK (`ClerkKit`) handles auth and org management natively on macOS. A custom `ClerkAuthProvider` bridges Clerk JWTs to the `convex-swift` client's `AuthProvider` protocol. Custom SwiftUI views replace the iOS-only `ClerkKitUI`. A Convex TypeScript backend provides real-time data storage, file storage for recordings, and org-scoped data access.
 
@@ -26,7 +26,7 @@ Update `Package.swift` to include both new packages and their products in the ex
 import PackageDescription
 
 let package = Package(
-    name: "KinshasaApp",
+    name: "JackApp",
     platforms: [
         .macOS(.v14),
     ],
@@ -37,20 +37,20 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "KinshasaApp",
+            name: "JackApp",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "ClerkKit", package: "clerk-ios"),
                 .product(name: "ConvexMobile", package: "convex-swift"),
             ],
-            path: "Sources/KinshasaApp",
+            path: "Sources/JackApp",
             resources: [
                 .process("Resources"),
             ]),
         .testTarget(
-            name: "KinshasaAppTests",
-            dependencies: ["KinshasaApp"],
-            path: "Tests/KinshasaAppTests"
+            name: "JackAppTests",
+            dependencies: ["JackApp"],
+            path: "Tests/JackAppTests"
         ),
     ]
 )
@@ -58,7 +58,7 @@ let package = Package(
 
 **Step 2: Resolve packages**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift package resolve`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift package resolve`
 Expected: All packages resolve successfully. Watch for version conflicts.
 
 **Step 3: Verify build**
@@ -85,7 +85,7 @@ git commit -m "feat: add clerk-ios and convex-swift dependencies"
 **Step 1: Initialize Node.js project at repo root**
 
 ```bash
-cd /Users/txp/Pessoal/actionfy-v2
+cd /Users/txp/Pessoal/jack-v2
 npm init -y
 ```
 
@@ -472,7 +472,7 @@ git commit -m "feat: add Convex recordings CRUD and file storage functions"
 ### Task 8: Create ClerkAuthProvider (Clerk → Convex Bridge)
 
 **Files:**
-- Create: `Sources/KinshasaApp/Auth/ClerkAuthProvider.swift`
+- Create: `Sources/JackApp/Auth/ClerkAuthProvider.swift`
 
 **Step 1: Implement the AuthProvider protocol**
 
@@ -566,7 +566,7 @@ Expected: Build succeeds. There may be warnings about Sendable conformance — a
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/ClerkAuthProvider.swift
+git add Sources/JackApp/Auth/ClerkAuthProvider.swift
 git commit -m "feat: implement ClerkAuthProvider bridging Clerk to Convex"
 ```
 
@@ -575,7 +575,7 @@ git commit -m "feat: implement ClerkAuthProvider bridging Clerk to Convex"
 ### Task 9: Create AuthController
 
 **Files:**
-- Create: `Sources/KinshasaApp/Auth/AuthController.swift`
+- Create: `Sources/JackApp/Auth/AuthController.swift`
 
 **Step 1: Implement AuthController**
 
@@ -697,7 +697,7 @@ Expected: Build succeeds.
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/AuthController.swift
+git add Sources/JackApp/Auth/AuthController.swift
 git commit -m "feat: add AuthController for centralized auth state management"
 ```
 
@@ -706,7 +706,7 @@ git commit -m "feat: add AuthController for centralized auth state management"
 ### Task 10: Create SignInView (macOS)
 
 **Files:**
-- Create: `Sources/KinshasaApp/Auth/Views/SignInView.swift`
+- Create: `Sources/JackApp/Auth/Views/SignInView.swift`
 
 **Step 1: Build the sign-in view**
 
@@ -733,7 +733,7 @@ struct SignInView: View {
                 Image(systemName: "waveform.circle.fill")
                     .font(.system(size: 48))
                     .foregroundStyle(.blue)
-                Text("Actionfy")
+                Text("Jack")
                     .font(.title.bold())
                 Text("Sign in to your account")
                     .font(.subheadline)
@@ -832,7 +832,7 @@ Expected: Build succeeds (SignUpView not yet created — forward reference is fi
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/SignInView.swift
+git add Sources/JackApp/Auth/Views/SignInView.swift
 git commit -m "feat: add macOS SignInView with email/password auth"
 ```
 
@@ -841,8 +841,8 @@ git commit -m "feat: add macOS SignInView with email/password auth"
 ### Task 11: Create SignUpView and VerificationCodeView
 
 **Files:**
-- Create: `Sources/KinshasaApp/Auth/Views/SignUpView.swift`
-- Create: `Sources/KinshasaApp/Auth/Views/VerificationCodeView.swift`
+- Create: `Sources/JackApp/Auth/Views/SignUpView.swift`
+- Create: `Sources/JackApp/Auth/Views/VerificationCodeView.swift`
 
 **Step 1: Create SignUpView**
 
@@ -869,7 +869,7 @@ struct SignUpView: View {
             VStack(spacing: 8) {
                 Text("Create Account")
                     .font(.title.bold())
-                Text("Get started with Actionfy")
+                Text("Get started with Jack")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -1067,7 +1067,7 @@ Expected: Build succeeds.
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/SignUpView.swift Sources/KinshasaApp/Auth/Views/VerificationCodeView.swift
+git add Sources/JackApp/Auth/Views/SignUpView.swift Sources/JackApp/Auth/Views/VerificationCodeView.swift
 git commit -m "feat: add SignUpView and VerificationCodeView for macOS"
 ```
 
@@ -1076,9 +1076,9 @@ git commit -m "feat: add SignUpView and VerificationCodeView for macOS"
 ### Task 12: Create Organization Views
 
 **Files:**
-- Create: `Sources/KinshasaApp/Auth/Views/OrganizationPickerView.swift`
-- Create: `Sources/KinshasaApp/Auth/Views/CreateOrganizationView.swift`
-- Create: `Sources/KinshasaApp/Auth/Views/OrganizationSettingsView.swift`
+- Create: `Sources/JackApp/Auth/Views/OrganizationPickerView.swift`
+- Create: `Sources/JackApp/Auth/Views/CreateOrganizationView.swift`
+- Create: `Sources/JackApp/Auth/Views/OrganizationSettingsView.swift`
 
 **Step 1: Create OrganizationPickerView**
 
@@ -1412,7 +1412,7 @@ Expected: Build succeeds (the `fatalError` TODO in CreateOrganizationView won't 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/OrganizationPickerView.swift Sources/KinshasaApp/Auth/Views/CreateOrganizationView.swift Sources/KinshasaApp/Auth/Views/OrganizationSettingsView.swift
+git add Sources/JackApp/Auth/Views/OrganizationPickerView.swift Sources/JackApp/Auth/Views/CreateOrganizationView.swift Sources/JackApp/Auth/Views/OrganizationSettingsView.swift
 git commit -m "feat: add organization picker, creation, and settings views"
 ```
 
@@ -1421,8 +1421,8 @@ git commit -m "feat: add organization picker, creation, and settings views"
 ### Task 13: Create AuthGateView and Wire Into App Entry Point
 
 **Files:**
-- Create: `Sources/KinshasaApp/Auth/Views/AuthGateView.swift`
-- Modify: `Sources/KinshasaApp/KinshasaApp.swift`
+- Create: `Sources/JackApp/Auth/Views/AuthGateView.swift`
+- Modify: `Sources/JackApp/JackApp.swift`
 
 **Step 1: Create AuthGateView**
 
@@ -1507,7 +1507,7 @@ private struct AuthenticatedRootView: View {
 
 Create a simple config file for environment values:
 
-`Sources/KinshasaApp/Auth/AppConfig.swift`:
+`Sources/JackApp/Auth/AppConfig.swift`:
 ```swift
 import Foundation
 
@@ -1518,14 +1518,14 @@ enum AppConfig {
 }
 ```
 
-**Step 3: Update KinshasaApp.swift**
+**Step 3: Update JackApp.swift**
 
 ```swift
 import SwiftUI
 import ClerkKit
 
 @main
-struct KinshasaApp: App {
+struct JackApp: App {
     init() {
         Clerk.configure(publishableKey: AppConfig.clerkPublishableKey)
     }
@@ -1549,7 +1549,7 @@ Expected: Build succeeds. There will be a runtime crash if you try to run withou
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/AuthGateView.swift Sources/KinshasaApp/Auth/AppConfig.swift Sources/KinshasaApp/KinshasaApp.swift
+git add Sources/JackApp/Auth/Views/AuthGateView.swift Sources/JackApp/Auth/AppConfig.swift Sources/JackApp/JackApp.swift
 git commit -m "feat: wire AuthGateView as app root with Clerk initialization"
 ```
 
@@ -1558,9 +1558,9 @@ git commit -m "feat: wire AuthGateView as app root with Clerk initialization"
 ### Task 14: Create ConvexSyncService for Data Sync
 
 **Files:**
-- Create: `Sources/KinshasaApp/Sync/ConvexSyncService.swift`
-- Create: `Sources/KinshasaApp/Sync/NoteSyncService.swift`
-- Create: `Sources/KinshasaApp/Sync/RecordingSyncService.swift`
+- Create: `Sources/JackApp/Sync/ConvexSyncService.swift`
+- Create: `Sources/JackApp/Sync/NoteSyncService.swift`
+- Create: `Sources/JackApp/Sync/RecordingSyncService.swift`
 
 **Step 1: Create ConvexSyncService**
 
@@ -1710,7 +1710,7 @@ Expected: Build succeeds.
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Sync/
+git add Sources/JackApp/Sync/
 git commit -m "feat: add Convex sync services for notes and recordings"
 ```
 
@@ -1719,7 +1719,7 @@ git commit -m "feat: add Convex sync services for notes and recordings"
 ### Task 15: Add Organization Settings to ContentView Sidebar
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ContentView.swift`
+- Modify: `Sources/JackApp/ContentView.swift`
 
 **Step 1: Add organization section to SettingsSection enum**
 
@@ -1756,7 +1756,7 @@ Expected: Build succeeds.
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/ContentView.swift
 git commit -m "feat: add organization settings section and sign-out to sidebar"
 ```
 
@@ -1780,12 +1780,12 @@ git commit -m "feat: add organization settings section and sign-out to sidebar"
 
 **Step 3: Update AppConfig with real values**
 
-Replace placeholder values in `Sources/KinshasaApp/Auth/AppConfig.swift` with the real publishable key and Convex deployment URL.
+Replace placeholder values in `Sources/JackApp/Auth/AppConfig.swift` with the real publishable key and Convex deployment URL.
 
 **Step 4: Build and run**
 
 ```bash
-swift build && swift run KinshasaApp
+swift build && swift run JackApp
 ```
 
 **Step 5: Test the full flow**
@@ -1824,7 +1824,7 @@ git commit -m "feat: complete Clerk + Convex auth integration"
 | 10 | SignInView | `Auth/Views/SignInView.swift` |
 | 11 | SignUp + Verification | `Auth/Views/SignUpView.swift`, `VerificationCodeView.swift` |
 | 12 | Organization views | `Auth/Views/Organization*.swift` |
-| 13 | AuthGateView + app wiring | `Auth/Views/AuthGateView.swift`, `KinshasaApp.swift` |
+| 13 | AuthGateView + app wiring | `Auth/Views/AuthGateView.swift`, `JackApp.swift` |
 | 14 | Sync services | `Sync/ConvexSyncService.swift`, `NoteSyncService.swift`, `RecordingSyncService.swift` |
 | 15 | ContentView org section | `ContentView.swift` |
 | 16 | E2E integration test | Manual verification |

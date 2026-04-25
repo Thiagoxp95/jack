@@ -5,15 +5,15 @@ CONF=${1:-release}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
-APP_NAME=${APP_NAME:-KinshasaApp}
-APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Actionfy V2}
+APP_NAME=${APP_NAME:-JackApp}
+APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Jack}
 
 # Keep bundle IDs unique per workspace path so macOS TCC/LaunchServices
 # never confuse this app with another clone of the same project.
-DEFAULT_BUNDLE_ID="com.actionfy.app.v2"
+DEFAULT_BUNDLE_ID="com.jack.app.v2"
 if command -v shasum >/dev/null 2>&1; then
   WORKSPACE_HASH=$(printf '%s' "$ROOT" | shasum -a 1 | awk '{print substr($1,1,10)}')
-  DEFAULT_BUNDLE_ID="com.actionfy.app.v2.ws${WORKSPACE_HASH}"
+  DEFAULT_BUNDLE_ID="com.jack.app.v2.ws${WORKSPACE_HASH}"
 fi
 BUNDLE_ID=${BUNDLE_ID:-$DEFAULT_BUNDLE_ID}
 MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-14.0}
@@ -50,10 +50,10 @@ APP="$ROOT/${APP_NAME}.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
-# Convert Icon.icon to Icon.icns if present (requires iconutil).
-ICON_SOURCE="$ROOT/Icon.icon"
+# Convert Icon.iconset to Icon.icns if present (requires iconutil).
+ICON_SOURCE="$ROOT/Icon.iconset"
 ICON_TARGET="$ROOT/Icon.icns"
-if [[ -f "$ICON_SOURCE" ]]; then
+if [[ -d "$ICON_SOURCE" ]]; then
   iconutil --convert icns --output "$ICON_TARGET" "$ICON_SOURCE"
 fi
 
@@ -78,7 +78,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>${MARKETING_VERSION}</string>
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>${MACOS_MIN_VERSION}</string>
-    <key>NSMicrophoneUsageDescription</key><string>Actionfy needs microphone access to transcribe speech.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Jack needs microphone access to transcribe speech.</string>
     <key>LSUIElement</key><${LSUI_VALUE}/>
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>BuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>

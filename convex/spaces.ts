@@ -344,6 +344,42 @@ export const pendingInvitations = query({
   },
 });
 
+export const pendingInvitationsForSpace = query({
+  args: { spaceId: v.id("spaces") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+    if (!user) throw new Error("User not found");
+
+    // Verify caller is a member of the space
+    const membership = await ctx.db
+      .query("space_members")
+      .withIndex("by_space_user", (q) =>
+        q.eq("spaceId", args.spaceId).eq("userId", user._id),
+      )
+      .unique();
+    if (!membership) throw new Error("Not a member of this space");
+
+    const invitations = await ctx.db
+      .query("space_invitations")
+      .withIndex("by_space", (q) => q.eq("spaceId", args.spaceId))
+      .collect();
+
+    return invitations
+      .filter((inv) => inv.status === "pending")
+      .map((inv) => ({
+        _id: inv._id,
+        email: inv.email,
+        createdAt: inv.createdAt,
+      }));
+  },
+});
+
 export const removeMember = mutation({
   args: { spaceId: v.id("spaces"), userId: v.id("users") },
   handler: async (ctx, args) => {

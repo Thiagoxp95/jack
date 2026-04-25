@@ -15,8 +15,8 @@
 ### Task 1: Add Subtitle Data Models to RecordingTypes
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift` (after line 406)
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Modify: `Sources/JackApp/ScreenRecording/RecordingTypes.swift` (after line 406)
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 **Step 1: Write tests for subtitle data models**
 
@@ -66,7 +66,7 @@ final class SubtitleModelTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleModelTests 2>&1 | tail -5`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleModelTests 2>&1 | tail -5`
 Expected: Compilation error — types not defined yet.
 
 **Step 3: Implement the data models**
@@ -133,13 +133,13 @@ struct SubtitleConfiguration: Codable, Equatable, Sendable {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleModelTests 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleModelTests 2>&1 | tail -10`
 Expected: All 4 tests pass.
 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ScreenRecording/RecordingTypes.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(subtitles): add subtitle data models"
 ```
 
@@ -148,8 +148,8 @@ git commit -m "feat(subtitles): add subtitle data models"
 ### Task 2: Extend ParakeetTranscriptionService to Expose Word Timings
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ParakeetTranscriptionService.swift`
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Modify: `Sources/JackApp/ParakeetTranscriptionService.swift`
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 **Step 1: Write test for extended TranscriptionResult**
 
@@ -181,7 +181,7 @@ final class TranscriptionResultTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter TranscriptionResultTests 2>&1 | tail -5`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter TranscriptionResultTests 2>&1 | tail -5`
 Expected: Compilation error — `WordTiming` not defined, `wordTimings` not a member.
 
 **Step 3: Modify ParakeetTranscriptionService**
@@ -232,13 +232,13 @@ return TranscriptionResult(text: result.text, backend: "CoreML Streaming", wordT
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter TranscriptionResultTests 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter TranscriptionResultTests 2>&1 | tail -10`
 Expected: All 2 tests pass.
 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ParakeetTranscriptionService.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ParakeetTranscriptionService.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(subtitles): expose word-level timings from ParakeetTranscriptionService"
 ```
 
@@ -247,8 +247,8 @@ git commit -m "feat(subtitles): expose word-level timings from ParakeetTranscrip
 ### Task 3: Implement Subtitle Chunking Algorithm
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/SubtitleChunker.swift`
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Create: `Sources/JackApp/ScreenRecording/SubtitleChunker.swift`
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 **Step 1: Write tests for the chunking algorithm**
 
@@ -321,12 +321,12 @@ final class SubtitleChunkerTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleChunkerTests 2>&1 | tail -5`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleChunkerTests 2>&1 | tail -5`
 Expected: Compilation error — `SubtitleChunker` not defined.
 
 **Step 3: Implement SubtitleChunker**
 
-Create `Sources/KinshasaApp/ScreenRecording/SubtitleChunker.swift`:
+Create `Sources/JackApp/ScreenRecording/SubtitleChunker.swift`:
 
 ```swift
 import Foundation
@@ -380,13 +380,13 @@ enum SubtitleChunker {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleChunkerTests 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleChunkerTests 2>&1 | tail -10`
 Expected: All 6 tests pass.
 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/SubtitleChunker.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ScreenRecording/SubtitleChunker.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(subtitles): add subtitle chunking algorithm"
 ```
 
@@ -395,8 +395,8 @@ git commit -m "feat(subtitles): add subtitle chunking algorithm"
 ### Task 4: Add Subtitle State to VideoEditorController
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift`
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorController.swift`
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 **Step 1: Write tests for editor subtitle state**
 
@@ -494,7 +494,7 @@ final class SubtitleEditorTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleEditorTests 2>&1 | tail -5`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleEditorTests 2>&1 | tail -5`
 Expected: Compilation error — properties and methods not defined on VideoEditorController.
 
 **Step 3: Add subtitle state and methods to VideoEditorController**
@@ -549,13 +549,13 @@ func deleteSubtitleWord(_ wordId: UUID) {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleEditorTests 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleEditorTests 2>&1 | tail -10`
 Expected: All 7 tests pass.
 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorController.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(subtitles): add subtitle state, editing, and undo/redo to VideoEditorController"
 ```
 
@@ -564,7 +564,7 @@ git commit -m "feat(subtitles): add subtitle state, editing, and undo/redo to Vi
 ### Task 5: Add Transcription Trigger to VideoEditorController
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorController.swift`
 
 **Step 1: Add the transcribe method**
 
@@ -638,13 +638,13 @@ Call `saveSubtitles()` in the existing save flow (wherever session data is persi
 
 **Step 3: Build to verify compilation**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1 | tail -10`
 Expected: Build succeeds.
 
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorController.swift
 git commit -m "feat(subtitles): add transcription trigger and subtitle persistence"
 ```
 
@@ -653,7 +653,7 @@ git commit -m "feat(subtitles): add transcription trigger and subtitle persisten
 ### Task 6: Add Subtitles Sidebar Panel to VideoEditorView
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 **Step 1: Add the subtitles panel to the sidebar**
 
@@ -812,13 +812,13 @@ private func formatTime(_ seconds: TimeInterval) -> String {
 
 **Step 3: Build to verify compilation**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1 | tail -10`
 Expected: Build succeeds.
 
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat(subtitles): add subtitles sidebar panel to video editor"
 ```
 
@@ -827,8 +827,8 @@ git commit -m "feat(subtitles): add subtitles sidebar panel to video editor"
 ### Task 7: Add Subtitle Text Renderer (Core Text)
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/SubtitleRenderer.swift`
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Create: `Sources/JackApp/ScreenRecording/SubtitleRenderer.swift`
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 This renders subtitle text into a `CGImage` that can be composited onto video frames during both preview and export.
 
@@ -891,12 +891,12 @@ final class SubtitleRendererTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleRendererTests 2>&1 | tail -5`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleRendererTests 2>&1 | tail -5`
 Expected: Compilation error.
 
 **Step 3: Implement SubtitleRenderer**
 
-Create `Sources/KinshasaApp/ScreenRecording/SubtitleRenderer.swift`:
+Create `Sources/JackApp/ScreenRecording/SubtitleRenderer.swift`:
 
 ```swift
 import AppKit
@@ -1038,13 +1038,13 @@ extension NSColor {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift test --filter SubtitleRendererTests 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift test --filter SubtitleRendererTests 2>&1 | tail -10`
 Expected: All 4 tests pass.
 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/SubtitleRenderer.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ScreenRecording/SubtitleRenderer.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(subtitles): add Core Text subtitle renderer with karaoke coloring"
 ```
 
@@ -1053,7 +1053,7 @@ git commit -m "feat(subtitles): add Core Text subtitle renderer with karaoke col
 ### Task 8: Composite Subtitles in Export Pipeline
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportService.swift`
+- Modify: `Sources/JackApp/ScreenRecording/ExportService.swift`
 
 **Step 1: Pass subtitle data to ExportService**
 
@@ -1126,13 +1126,13 @@ editor.subtitleConfig,
 
 **Step 4: Build to verify compilation**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1 | tail -10`
 Expected: Build succeeds.
 
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportService.swift
+git add Sources/JackApp/ScreenRecording/ExportService.swift
 git commit -m "feat(subtitles): composite subtitles in export pipeline"
 ```
 
@@ -1141,8 +1141,8 @@ git commit -m "feat(subtitles): composite subtitles in export pipeline"
 ### Task 9: Add Subtitle Preview to Metal Renderer
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/MetalVideoRenderer.swift`
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift` (Metal preview section)
+- Modify: `Sources/JackApp/ScreenRecording/MetalVideoRenderer.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift` (Metal preview section)
 
 **Step 1: Add subtitle overlay to the preview renderer**
 
@@ -1213,13 +1213,13 @@ The exact integration depends on whether the preview uses a Metal layer directly
 
 **Step 3: Build and test visually**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1 | tail -10`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1 | tail -10`
 Expected: Build succeeds. Verify visually by recording a short clip with audio and enabling subtitles in the editor.
 
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/MetalVideoRenderer.swift Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/MetalVideoRenderer.swift Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat(subtitles): add subtitle preview overlay in video editor"
 ```
 
@@ -1228,8 +1228,8 @@ git commit -m "feat(subtitles): add subtitle preview overlay in video editor"
 ### Task 10: Final Integration and Polish
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift` (save on config changes)
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift` (inline text editing)
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorController.swift` (save on config changes)
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift` (inline text editing)
 
 **Step 1: Auto-save subtitle config changes**
 
@@ -1279,7 +1279,7 @@ private func subtitleLineRow(_ line: SubtitleLine) -> some View {
 
 **Step 3: Build and run full integration test**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && ./Scripts/compile_and_run.sh --test`
+Run: `cd /Users/txp/Pessoal/jack-v2 && ./Scripts/compile_and_run.sh --test`
 Expected: All tests pass. App builds and runs.
 
 **Step 4: Manual verification checklist**
@@ -1298,7 +1298,7 @@ Expected: All tests pass. App builds and runs.
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorController.swift Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat(subtitles): add inline transcript editing and auto-save"
 ```
 

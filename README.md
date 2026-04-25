@@ -1,4 +1,4 @@
-# KinshasaApp
+# JackApp
 
 SwiftPM-based macOS app with global voice-to-text dictation powered by local CoreML Parakeet.
 
@@ -13,7 +13,7 @@ SwiftPM-based macOS app with global voice-to-text dictation powered by local Cor
 - Optional background model keep-warm (with plug-in-only mode).
 - Downloads local CoreML Parakeet models automatically on first run.
 - Pastes transcript into the focused input field.
-- Optional in-session Voice Note mode: while recording, press the configured key to save transcription to daily markdown notes at `~/Documents/Actionfy Notes/YYYY-MM-DD.md`.
+- Optional in-session Voice Note mode: while recording, press the configured key to save transcription to daily markdown notes at `~/Documents/Jack Notes/YYYY-MM-DD.md`.
 
 ## Prerequisites
 
@@ -54,19 +54,19 @@ swift test
 
 - The app uses `FluidAudio` CoreML models (`parakeet-tdt-0.6b-v2-coreml` by default).
 - `KINSHASA_COREML_MODEL` (or legacy `PARAKEET_MODEL`) can override model selection (`v2`/`v3`).
-- Packaged builds use a workspace-unique bundle identifier (`com.actionfy.app.v2.ws...`) to avoid macOS permission/relaunch collisions across multiple clones.
+- Packaged builds use a workspace-unique bundle identifier (`com.jack.app.v2.ws...`) to avoid macOS permission/relaunch collisions across multiple clones.
 
 ## Project Layout
 
-- `Sources/KinshasaApp/KinshasaApp.swift`: App entry point.
-- `Sources/KinshasaApp/ContentView.swift`: Main UI.
-- `Sources/KinshasaApp/DictationController.swift`: Orchestration logic.
-- `Sources/KinshasaApp/LocalParakeetBootstrapper.swift`: CoreML model bootstrap/config.
-- `Sources/KinshasaApp/GlobalFnShortcutMonitor.swift`: Global `Fn` shortcut monitor.
-- `Sources/KinshasaApp/AudioCaptureService.swift`: Microphone recording.
-- `Sources/KinshasaApp/ParakeetTranscriptionService.swift`: CoreML streaming transcription service.
-- `Sources/KinshasaApp/PasteService.swift`: Focused-field paste helper.
-- `Sources/KinshasaApp/FloatingBubbleController.swift`: Bubble overlay.
+- `Sources/JackApp/JackApp.swift`: App entry point.
+- `Sources/JackApp/ContentView.swift`: Main UI.
+- `Sources/JackApp/DictationController.swift`: Orchestration logic.
+- `Sources/JackApp/LocalParakeetBootstrapper.swift`: CoreML model bootstrap/config.
+- `Sources/JackApp/GlobalFnShortcutMonitor.swift`: Global `Fn` shortcut monitor.
+- `Sources/JackApp/AudioCaptureService.swift`: Microphone recording.
+- `Sources/JackApp/ParakeetTranscriptionService.swift`: CoreML streaming transcription service.
+- `Sources/JackApp/PasteService.swift`: Focused-field paste helper.
+- `Sources/JackApp/FloatingBubbleController.swift`: Bubble overlay.
 
 ## Packaging
 

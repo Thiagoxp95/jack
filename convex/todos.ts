@@ -231,13 +231,23 @@ export const fireReminder = internalMutation({
     reminderIndex: v.number(),
   },
   handler: async (ctx, args) => {
+    console.log("[fireReminder] Called with todoId:", args.todoId, "reminderIndex:", args.reminderIndex);
     const todo = await ctx.db.get(args.todoId);
-    if (!todo) return;
-    if (todo.status === "done") return;
+    if (!todo) {
+      console.log("[fireReminder] GUARD: todo not found — was deleted");
+      return;
+    }
+    if (todo.status === "done") {
+      console.log("[fireReminder] GUARD: todo is done, skipping");
+      return;
+    }
 
     const reminders = todo.reminders ? [...todo.reminders] : [];
-    if (args.reminderIndex < 0 || args.reminderIndex >= reminders.length)
+    console.log("[fireReminder] reminders count:", reminders.length);
+    if (args.reminderIndex < 0 || args.reminderIndex >= reminders.length) {
+      console.log("[fireReminder] GUARD: reminderIndex", args.reminderIndex, "out of range [0,", reminders.length, ")");
       return;
+    }
 
     reminders[args.reminderIndex] = {
       ...reminders[args.reminderIndex],
@@ -245,6 +255,7 @@ export const fireReminder = internalMutation({
     };
 
     await ctx.db.patch(args.todoId, { reminders });
+    console.log("[fireReminder] SUCCESS: set delivered=true on reminder", args.reminderIndex, "for todo:", todo.title);
   },
 });
 
@@ -295,13 +306,16 @@ export const insertFromAction = internalMutation({
       createdAt: args.createdAt,
     });
 
-    // Schedule future reminders
+    // Schedule future reminders (or mark already-due ones as delivered)
+    console.log("[insertFromAction] reminders arg:", JSON.stringify(args.reminders));
     if (args.reminders && args.reminders.length > 0) {
       const now = Date.now();
+      console.log("[insertFromAction] now=", now, "(" + new Date(now).toISOString() + ")");
       const updatedReminders = [...args.reminders];
 
       for (let i = 0; i < updatedReminders.length; i++) {
         const reminder = updatedReminders[i];
+        console.log("[insertFromAction] reminder[" + i + "].at =", reminder.at, "(" + new Date(reminder.at).toISOString() + ")", "future:", reminder.at > now);
         if (reminder.at > now) {
           const scheduledId = await ctx.scheduler.runAt(
             reminder.at,
@@ -312,10 +326,21 @@ export const insertFromAction = internalMutation({
             ...reminder,
             scheduledFunctionId: scheduledId,
           };
+          console.log("[insertFromAction] Scheduled fireReminder at", new Date(reminder.at).toISOString(), "scheduledId:", scheduledId);
+        } else {
+          // Reminder time already passed — mark as delivered immediately
+          // so the client poll picks it up on the next cycle.
+          updatedReminders[i] = {
+            ...reminder,
+            delivered: true,
+          };
+          console.log("[insertFromAction] Reminder in past — marked delivered immediately");
         }
       }
 
       await ctx.db.patch(todoId, { reminders: updatedReminders });
+    } else {
+      console.log("[insertFromAction] No reminders to schedule");
     }
 
     return todoId;
@@ -358,12 +383,21 @@ export const pendingReminders = query({
     }
 
     // Filter to non-done todos with at least one delivered reminder
-    return allTodos.filter(
+    console.log("[pendingReminders] user:", user._id, "total todos found:", allTodos.length);
+    for (const todo of allTodos) {
+      const hasDelivered = todo.reminders?.some((r) => r.delivered === true);
+      if (todo.reminders && todo.reminders.length > 0) {
+        console.log("[pendingReminders]   todo:", todo.title, "status:", todo.status, "userId:", todo.userId, "reminders:", JSON.stringify(todo.reminders), "hasDelivered:", hasDelivered);
+      }
+    }
+    const result = allTodos.filter(
       (todo) =>
         todo.status !== "done" &&
         todo.userId === user._id &&
         todo.reminders?.some((r) => r.delivered === true),
     );
+    console.log("[pendingReminders] returning", result.length, "todos with pending reminders");
+    return result;
   },
 });
 
@@ -465,6 +499,7 @@ export const processAndCreate = action({
   args: {
     rawText: v.string(),
     spaceId: v.optional(v.id("spaces")),
+    timezone: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<string> => {
     const identity = await ctx.auth.getUserIdentity();
@@ -492,10 +527,20 @@ export const processAndCreate = action({
       apiKey: process.env.OPENROUTER_API_KEY,
     });
 
-    const today = new Date();
-    const todayStr = today.toISOString().split("T")[0];
-    const currentTime = today.toTimeString().split(" ")[0].slice(0, 5);
-    const dayOfWeek = today.toLocaleDateString("en-US", { weekday: "long" });
+    const tz = args.timezone || "UTC";
+    const now = new Date();
+    // Format date/time in the user's timezone
+    const todayStr = now.toLocaleDateString("en-CA", { timeZone: tz }); // yyyy-MM-dd
+    const currentTime = now.toLocaleTimeString("en-GB", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }); // HH:mm
+    const dayOfWeek = now.toLocaleDateString("en-US", {
+      timeZone: tz,
+      weekday: "long",
+    });
 
     const { object: parsed } = await generateObject({
       model: openrouter("google/gemini-2.0-flash-001"),
@@ -537,9 +582,10 @@ export const processAndCreate = action({
       }),
       system: `You are a task extraction assistant. The user will dictate a todo item.
 Your job:
-- Clean up filler words (um, uh, like, etc.) and produce a concise title.
-- Extract an optional longer description if the user provides extra context.
-- Resolve relative dates (e.g. "tomorrow", "next Monday", "in 3 days") against today: ${todayStr} (${dayOfWeek}). Current time: ${currentTime}.
+- Clean up filler words (um, uh, like, etc.) and produce a concise title (short, actionable — like a subject line).
+- If the user provides extra context, details, reasoning, or instructions beyond the core task, put that in the description field. For example: "I need to call the dentist because I have a toothache and I should ask about the crown" → title: "Call the dentist", description: "Have a toothache, ask about the crown". Keep the title short and the description for everything else.
+- Resolve relative dates (e.g. "tomorrow", "next Monday", "in 3 days") against today: ${todayStr} (${dayOfWeek}). Current time: ${currentTime}. Timezone: ${tz}.
+- All dates and times you output must be in the user's local timezone (${tz}), NOT UTC.
 - Extract priority if mentioned (urgent/critical = high, important = medium, low priority = low, otherwise none).
 - Extract tags from hashtags or explicit tag mentions.
 - Extract a list name if the user says "add to <list>" or "put in <list>".
@@ -547,7 +593,8 @@ Your job:
   - For relative reminders like "remind me in X minutes/hours", compute the absolute ISO datetime from the current time and use absoluteTime.
   - For reminders relative to a due date (e.g. "remind me 10 minutes before"), use offsetMinutes.
   - IMPORTANT: "remind me in 2 minutes" means absoluteTime = current time + 2 minutes. Always set absoluteTime for time-relative reminders.
-- If the user says "remind me in X minutes" without specifying a separate due date/time, still set dueDate to today and dueTime to the computed time (current time + X minutes).
+  - IMPORTANT: absoluteTime must be in the user's local timezone. Example: if current time is 17:40 in ${tz} and user says "in 2 minutes", absoluteTime = "${todayStr}T17:42:00".
+- If the user says "remind me in X minutes" without specifying a separate due date/time, still set dueDate to today and dueTime to the computed time (current time + X minutes) in the user's local timezone.
 - Output valid JSON matching the schema.`,
       prompt: args.rawText,
     });
@@ -578,6 +625,29 @@ Your job:
       }
     }
 
+    // Helper: parse a naive datetime string (e.g. "2026-02-27T17:42:00")
+    // as being in the user's timezone, returning a UTC timestamp.
+    function parseLocalDateTime(naive: string, timezone: string): number {
+      // If the string already has a timezone offset (e.g. Z, +05:00, -0500), parse directly.
+      // Anchor to end of string to avoid matching date separators like "-02" in "2026-02-28".
+      if (/Z$|[+-]\d{2}:?\d{2}$/.test(naive.trim())) {
+        console.log("[parseLocalDateTime] Has timezone offset, parsing directly:", naive);
+        return new Date(naive).getTime();
+      }
+      console.log("[parseLocalDateTime] Naive datetime:", naive, "timezone:", timezone);
+      // Compute the UTC offset for this timezone at the given date.
+      // Parse as UTC first, then find the difference.
+      const asUtc = new Date(naive + "Z");
+      const inTz = new Date(
+        asUtc.toLocaleString("en-US", { timeZone: timezone }),
+      );
+      const inUtc = new Date(asUtc.toLocaleString("en-US", { timeZone: "UTC" }));
+      const offsetMs = inUtc.getTime() - inTz.getTime();
+      const result = asUtc.getTime() + offsetMs;
+      console.log("[parseLocalDateTime] asUtc:", asUtc.toISOString(), "offsetMs:", offsetMs, "result:", new Date(result).toISOString());
+      return result;
+    }
+
     // Resolve reminder times to absolute timestamps
     let reminders:
       | Array<{
@@ -587,33 +657,41 @@ Your job:
         }>
       | undefined;
 
+    console.log("[processAndCreate] parsed.reminders:", JSON.stringify(parsed.reminders));
     if (parsed.reminders && parsed.reminders.length > 0) {
       reminders = [];
       for (const r of parsed.reminders) {
+        console.log("[processAndCreate] Processing reminder:", JSON.stringify(r));
         let at: number | undefined;
 
         if (r.absoluteTime) {
-          at = new Date(r.absoluteTime).getTime();
+          console.log("[processAndCreate] Using absoluteTime:", r.absoluteTime);
+          at = parseLocalDateTime(r.absoluteTime, tz);
         } else if (r.offsetMinutes !== undefined && parsed.dueDate) {
-          // Compute from dueDate + dueTime
           const dueDateTimeStr = parsed.dueTime
             ? `${parsed.dueDate}T${parsed.dueTime}:00`
             : `${parsed.dueDate}T09:00:00`;
-          const dueTimestamp = new Date(dueDateTimeStr).getTime();
+          console.log("[processAndCreate] Using offsetMinutes:", r.offsetMinutes, "from dueDateTime:", dueDateTimeStr);
+          const dueTimestamp = parseLocalDateTime(dueDateTimeStr, tz);
           at = dueTimestamp - r.offsetMinutes * 60 * 1000;
         } else if (r.offsetMinutes !== undefined) {
-          // No due date — treat offset as "from now"
           at = Date.now() + r.offsetMinutes * 60 * 1000;
+          console.log("[processAndCreate] Using offsetMinutes from now:", r.offsetMinutes, "at:", at ? new Date(at).toISOString() : "undefined");
         }
 
+        console.log("[processAndCreate] Resolved reminder at:", at, at ? new Date(at).toISOString() : "undefined");
         if (at && !isNaN(at)) {
           reminders.push({ at });
+        } else {
+          console.log("[processAndCreate] *** SKIPPED reminder — at is", at);
         }
       }
       if (reminders.length === 0) reminders = undefined;
+      console.log("[processAndCreate] Final reminders:", JSON.stringify(reminders));
     }
 
     // Insert the todo via internal mutation
+    const createdAt = Date.now();
     const todoId = await ctx.runMutation(internal.todos.insertFromAction, {
       userId: user._id,
       spaceId: args.spaceId,
@@ -627,9 +705,19 @@ Your job:
       dueTime: parsed.dueTime,
       reminders,
       rawTranscription: args.rawText,
-      createdAt: Date.now(),
+      createdAt,
     });
 
-    return todoId;
+    return JSON.stringify({
+      id: todoId,
+      title: parsed.title,
+      description: parsed.description,
+      dueDate: parsed.dueDate,
+      dueTime: parsed.dueTime,
+      priority: parsed.priority,
+      tags: parsed.tags,
+      reminders: reminders?.map((r) => ({ at: r.at })),
+      listName: parsed.listName,
+    });
   },
 });

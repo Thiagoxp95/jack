@@ -13,13 +13,13 @@
 ### Task 1: GestureZoomDetector — Jiggle Detection Tests
 
 **Files:**
-- Create: `Tests/KinshasaAppTests/GestureZoomDetectorTests.swift`
+- Create: `Tests/JackAppTests/GestureZoomDetectorTests.swift`
 
 **Step 1: Write the failing tests**
 
 ```swift
 import XCTest
-@testable import KinshasaApp
+@testable import JackApp
 
 final class GestureZoomDetectorTests: XCTestCase {
 
@@ -98,7 +98,7 @@ Expected: FAIL — `GestureZoomDetector` does not exist yet
 **Step 3: Commit**
 
 ```bash
-git add Tests/KinshasaAppTests/GestureZoomDetectorTests.swift
+git add Tests/JackAppTests/GestureZoomDetectorTests.swift
 git commit -m "test: add jiggle detection tests for GestureZoomDetector"
 ```
 
@@ -107,7 +107,7 @@ git commit -m "test: add jiggle detection tests for GestureZoomDetector"
 ### Task 2: GestureZoomDetector — Implement Jiggle Detection
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/GestureZoomDetector.swift`
+- Create: `Sources/JackApp/ScreenRecording/GestureZoomDetector.swift`
 
 **Step 1: Write the minimal implementation**
 
@@ -287,7 +287,7 @@ Expected: All 5 tests PASS
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/GestureZoomDetector.swift
+git add Sources/JackApp/ScreenRecording/GestureZoomDetector.swift
 git commit -m "feat: add GestureZoomDetector with jiggle detection"
 ```
 
@@ -296,7 +296,7 @@ git commit -m "feat: add GestureZoomDetector with jiggle detection"
 ### Task 3: GestureZoomDetector — Circle Detection Tests
 
 **Files:**
-- Modify: `Tests/KinshasaAppTests/GestureZoomDetectorTests.swift`
+- Modify: `Tests/JackAppTests/GestureZoomDetectorTests.swift`
 
 **Step 1: Add circle detection tests**
 
@@ -359,7 +359,7 @@ Expected: `testCircularMotionTriggersZoom` FAILS, `testSmallArcDoesNotTrigger` p
 **Step 3: Commit**
 
 ```bash
-git add Tests/KinshasaAppTests/GestureZoomDetectorTests.swift
+git add Tests/JackAppTests/GestureZoomDetectorTests.swift
 git commit -m "test: add circle detection tests for GestureZoomDetector"
 ```
 
@@ -368,7 +368,7 @@ git commit -m "test: add circle detection tests for GestureZoomDetector"
 ### Task 4: GestureZoomDetector — Implement Circle Detection
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/GestureZoomDetector.swift`
+- Modify: `Sources/JackApp/ScreenRecording/GestureZoomDetector.swift`
 
 **Step 1: Add circle detector and wire it into detect()**
 
@@ -432,7 +432,7 @@ Expected: All 7 tests PASS
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/GestureZoomDetector.swift
+git add Sources/JackApp/ScreenRecording/GestureZoomDetector.swift
 git commit -m "feat: add circle detection to GestureZoomDetector"
 ```
 
@@ -441,7 +441,7 @@ git commit -m "feat: add circle detection to GestureZoomDetector"
 ### Task 5: GestureZoomDetector — Merge and Edge Case Tests
 
 **Files:**
-- Modify: `Tests/KinshasaAppTests/GestureZoomDetectorTests.swift`
+- Modify: `Tests/JackAppTests/GestureZoomDetectorTests.swift`
 
 **Step 1: Add merge and edge case tests**
 
@@ -545,7 +545,7 @@ Expected: All 11 tests PASS
 **Step 3: Commit**
 
 ```bash
-git add Tests/KinshasaAppTests/GestureZoomDetectorTests.swift
+git add Tests/JackAppTests/GestureZoomDetectorTests.swift
 git commit -m "test: add merge and edge case tests for GestureZoomDetector"
 ```
 
@@ -554,8 +554,8 @@ git commit -m "test: add merge and edge case tests for GestureZoomDetector"
 ### Task 6: Wire GestureZoomDetector into RecordingSessionController
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift:309-361`
-- Modify: `Sources/KinshasaApp/ScreenRecording/EditorWindowController.swift:14-17`
+- Modify: `Sources/JackApp/ScreenRecording/RecordingSessionController.swift:309-361`
+- Modify: `Sources/JackApp/ScreenRecording/EditorWindowController.swift:14-17`
 
 **Step 1: Update EditorWindowController.show() to accept initial zoom keyframes**
 
@@ -645,7 +645,7 @@ Expected: Build succeeds
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift Sources/KinshasaApp/ScreenRecording/EditorWindowController.swift
+git add Sources/JackApp/ScreenRecording/RecordingSessionController.swift Sources/JackApp/ScreenRecording/EditorWindowController.swift
 git commit -m "feat: wire GestureZoomDetector into recording stop flow and editor"
 ```
 
@@ -667,8 +667,8 @@ Expected: Build succeeds with no warnings related to GestureZoomDetector
 
 Run: `git diff main --stat`
 Verify only expected files are changed:
-- `Sources/KinshasaApp/ScreenRecording/GestureZoomDetector.swift` (new)
-- `Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift` (modified)
-- `Sources/KinshasaApp/ScreenRecording/EditorWindowController.swift` (modified)
-- `Tests/KinshasaAppTests/GestureZoomDetectorTests.swift` (new)
+- `Sources/JackApp/ScreenRecording/GestureZoomDetector.swift` (new)
+- `Sources/JackApp/ScreenRecording/RecordingSessionController.swift` (modified)
+- `Sources/JackApp/ScreenRecording/EditorWindowController.swift` (modified)
+- `Tests/JackAppTests/GestureZoomDetectorTests.swift` (new)
 - `docs/plans/` (design doc + plan)

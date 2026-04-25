@@ -67,7 +67,7 @@ export const cleanup = action({
 
 **Step 2: Verify Convex picks up the new module**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 Expected: No errors, `transcription:cleanup` action registered
 
 **Step 3: Commit**
@@ -82,7 +82,7 @@ git commit -m "feat: add transcription cleanup Convex action"
 ### Task 2: Add cleanup settings to DictationController
 
 **Files:**
-- Modify: `Sources/KinshasaApp/DictationController.swift`
+- Modify: `Sources/JackApp/DictationController.swift`
 
 **Step 1: Add the CleanupModel enum after `TranscriptionModelChoice` (after line 37)**
 
@@ -146,7 +146,7 @@ cleanupModel = CleanupModelChoice(rawValue: storedCleanupModel) ?? .geminiFlash
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/DictationController.swift
+git add Sources/JackApp/DictationController.swift
 git commit -m "feat: add cleanup settings properties to DictationController"
 ```
 
@@ -155,7 +155,7 @@ git commit -m "feat: add cleanup settings properties to DictationController"
 ### Task 3: Integrate cleanup into handleTranscriptionResult
 
 **Files:**
-- Modify: `Sources/KinshasaApp/DictationController.swift`
+- Modify: `Sources/JackApp/DictationController.swift`
 
 **Step 1: Make `handleTranscriptionResult` async and add cleanup call**
 
@@ -224,7 +224,7 @@ Expected: Compiles without errors
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/DictationController.swift
+git add Sources/JackApp/DictationController.swift
 git commit -m "feat: integrate LLM cleanup into transcription pipeline"
 ```
 
@@ -233,7 +233,7 @@ git commit -m "feat: integrate LLM cleanup into transcription pipeline"
 ### Task 4: Add cleanup settings UI to ContentView
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ContentView.swift`
+- Modify: `Sources/JackApp/ContentView.swift`
 
 **Step 1: Add cleanup settings card after the "Transcription Model" card (after line 610)**
 
@@ -280,7 +280,7 @@ Expected: Compiles without errors
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/ContentView.swift
 git commit -m "feat: add transcription cleanup settings UI"
 ```
 

@@ -4,7 +4,7 @@
 
 1. Export progress bar shows in ContentView (main settings window) instead of the editor
 2. No export settings UI — codec, quality, resolution are hardcoded to H.264/High/Original
-3. No file picker — output always goes to `~/Documents/Actionfy Recordings/`
+3. No file picker — output always goes to `~/Documents/Jack Recordings/`
 4. Progress gets stuck at 14% (likely the main window state conflict)
 
 ## Design
@@ -13,7 +13,7 @@
 
 1. Click **Export** in editor toolbar
 2. Sheet slides down inside editor window showing codec/quality/resolution pickers
-3. Click **Export** in sheet → NSSavePanel opens, defaulting to `~/Documents/Actionfy Recordings/Recording-<timestamp>.mp4`
+3. Click **Export** in sheet → NSSavePanel opens, defaulting to `~/Documents/Jack Recordings/Recording-<timestamp>.mp4`
 4. User confirms file location → sheet transitions to progress view (bar + percentage + cancel)
 5. Export completes → sheet dismisses, Finder reveals file
 6. Export fails → error message in sheet with Retry/Cancel

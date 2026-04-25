@@ -24,7 +24,7 @@ Redesign the OnboardingWizardView from a basic grouped form into a polished, Ray
 ### Step 1: Welcome (Full-Width Hero, Centered)
 
 - SF Symbol `wand.and.stars.inverse` 56pt with circular gradient glow
-- Title: "Welcome to Actionfy" 28pt bold white
+- Title: "Welcome to Jack" 28pt bold white
 - Subtitle: one-line description, 15pt secondary
 - Checklist: 3 items with dimmed circle-check icons
 - Primary: "Get Started"

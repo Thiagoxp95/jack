@@ -13,7 +13,7 @@
 ### Task 1: Add hover scrubbing to the video timeline
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift:195-248` (videoTimeline section)
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift:195-248` (videoTimeline section)
 
 **Step 1: Replace the DragGesture with `.onContinuousHover`**
 
@@ -106,7 +106,7 @@ Expected: Builds successfully with no errors.
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat(editor): add hover scrubbing on video timeline"
 ```
 
@@ -115,7 +115,7 @@ git commit -m "feat(editor): add hover scrubbing on video timeline"
 ### Task 2: Add seek throttling for smooth scrubbing
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift` (videoTimeline section)
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift` (videoTimeline section)
 
 The `.onContinuousHover` fires on every mouse move event, which can be very frequent (>60fps on a retina display). We should throttle how often we update `editor.currentTime` to ~30fps.
 
@@ -160,7 +160,7 @@ Expected: Builds successfully.
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "perf(editor): throttle hover scrub to 30fps"
 ```
 
@@ -169,7 +169,7 @@ git commit -m "perf(editor): throttle hover scrub to 30fps"
 ### Task 3: Reduce seek threshold for tighter scrubbing
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/MetalPreviewView.swift:36-43`
+- Modify: `Sources/JackApp/ScreenRecording/MetalPreviewView.swift:36-43`
 
 The existing seek-while-paused code in MetalPreviewView has a 50ms threshold (`diff > 0.05`). This was fine for occasional seeks but may feel sluggish during continuous hover scrubbing. Lower it to 16ms (~one frame at 60fps) for tighter response.
 
@@ -195,6 +195,6 @@ Expected: Builds successfully.
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/MetalPreviewView.swift
+git add Sources/JackApp/ScreenRecording/MetalPreviewView.swift
 git commit -m "perf(editor): lower seek threshold for smoother scrubbing"
 ```

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME=${APP_NAME:-KinshasaApp}
+APP_NAME=${APP_NAME:-JackApp}
 APP_PATH="${ROOT_DIR}/${APP_NAME}.app"
 
 usage() {

@@ -141,7 +141,7 @@ No longer needed - space assignment happens at upload time.
 
 ### ExportDialogView
 
-- Export to temp dir (`~/Library/Caches/Actionfy/exports/`)
+- Export to temp dir (`~/Library/Caches/Jack/exports/`)
 - On success, enqueue upload via UploadQueue
 - Remove "Show in Finder" option
 

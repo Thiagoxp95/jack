@@ -45,7 +45,7 @@ recordings: defineTable({
 
 **Step 2: Deploy schema**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev`
 Expected: Schema pushed successfully with new fields and index.
 
 **Step 3: Commit**
@@ -418,7 +418,7 @@ function playerPage(title: string, videoUrl: string, duration: number): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(title)} - Actionfy</title>
+  <title>${escapeHtml(title)} - Jack</title>
   <meta property="og:title" content="${escapeHtml(title)}">
   <meta property="og:type" content="video.other">
   <meta property="og:video" content="${escapeHtml(videoUrl)}">
@@ -501,7 +501,7 @@ function playerPage(title: string, videoUrl: string, duration: number): string {
         Download
       </a>
     </div>
-    <p class="brand">Shared via <a href="https://actionfy.com">Actionfy</a></p>
+    <p class="brand">Shared via <a href="https://jack.com">Jack</a></p>
   </div>
 </body>
 </html>`;
@@ -513,7 +513,7 @@ function notFoundPage(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Recording Not Found - Actionfy</title>
+  <title>Recording Not Found - Jack</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -567,7 +567,7 @@ git commit -m "feat(convex): add HTTP endpoint for shareable recording player pa
 ## Task 5: Create SpaceController (Swift)
 
 **Files:**
-- Create: `Sources/KinshasaApp/SpaceController.swift`
+- Create: `Sources/JackApp/SpaceController.swift`
 
 **Step 1: Create the SpaceController**
 
@@ -625,7 +625,7 @@ final class SpaceController {
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/SpaceController.swift
+git add Sources/JackApp/SpaceController.swift
 git commit -m "feat: add SpaceController for managing spaces (personal + Clerk orgs)"
 ```
 
@@ -634,7 +634,7 @@ git commit -m "feat: add SpaceController for managing spaces (personal + Clerk o
 ## Task 6: Simplify Auth Flow — Remove Mandatory Org Picker
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/Views/AuthGateView.swift:24-39`
+- Modify: `Sources/JackApp/Auth/Views/AuthGateView.swift:24-39`
 
 **Step 1: Remove the organization membership gate**
 
@@ -659,7 +659,7 @@ This removes the `OrganizationPickerView` gate entirely. Users go straight to th
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/AuthGateView.swift
+git add Sources/JackApp/Auth/Views/AuthGateView.swift
 git commit -m "feat(auth): remove mandatory org picker, go directly to app after sign-in"
 ```
 
@@ -668,8 +668,8 @@ git commit -m "feat(auth): remove mandatory org picker, go directly to app after
 ## Task 7: Add Space Selector to Sidebar
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/Views/AuthGateView.swift` (pass SpaceController)
-- Modify: `Sources/KinshasaApp/ContentView.swift`
+- Modify: `Sources/JackApp/Auth/Views/AuthGateView.swift` (pass SpaceController)
+- Modify: `Sources/JackApp/ContentView.swift`
 
 **Step 1: Create SpaceController in AuthGateView and pass it through**
 
@@ -774,7 +774,7 @@ NavigationSplitView {
         }
         .listStyle(.sidebar)
     }
-    .navigationTitle("Actionfy")
+    .navigationTitle("Jack")
     // ... existing safeAreaInset
 ```
 
@@ -789,7 +789,7 @@ In the `SettingsSection` enum, rename:
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/AuthGateView.swift Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/Auth/Views/AuthGateView.swift Sources/JackApp/ContentView.swift
 git commit -m "feat(ui): add space selector to sidebar, pass SpaceController through view hierarchy"
 ```
 
@@ -798,8 +798,8 @@ git commit -m "feat(ui): add space selector to sidebar, pass SpaceController thr
 ## Task 8: Update Sync Services for Optional organizationId
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Sync/NoteSyncService.swift:13-25`
-- Modify: `Sources/KinshasaApp/Sync/RecordingSyncService.swift:15-45`
+- Modify: `Sources/JackApp/Sync/NoteSyncService.swift:13-25`
+- Modify: `Sources/JackApp/Sync/RecordingSyncService.swift:15-45`
 
 **Step 1: Make organizationId optional in NoteSyncService**
 
@@ -864,7 +864,7 @@ func uploadRecording(
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Sync/NoteSyncService.swift Sources/KinshasaApp/Sync/RecordingSyncService.swift
+git add Sources/JackApp/Sync/NoteSyncService.swift Sources/JackApp/Sync/RecordingSyncService.swift
 git commit -m "feat(sync): make organizationId optional in sync services for personal space"
 ```
 
@@ -873,9 +873,9 @@ git commit -m "feat(sync): make organizationId optional in sync services for per
 ## Task 9: Create Recordings Library Window
 
 **Files:**
-- Create: `Sources/KinshasaApp/RecordingsLibrary/RecordingsLibraryView.swift`
-- Create: `Sources/KinshasaApp/RecordingsLibrary/RecordingsLibraryWindowController.swift`
-- Modify: `Sources/KinshasaApp/ContentView.swift` (add "Open Recordings" button)
+- Create: `Sources/JackApp/RecordingsLibrary/RecordingsLibraryView.swift`
+- Create: `Sources/JackApp/RecordingsLibrary/RecordingsLibraryWindowController.swift`
+- Modify: `Sources/JackApp/ContentView.swift` (add "Open Recordings" button)
 
 **Step 1: Create RecordingsLibraryView**
 
@@ -1181,8 +1181,8 @@ You'll also need to pass `authController` through to ContentView (add it as a pa
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/RecordingsLibrary/
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/RecordingsLibrary/
+git add Sources/JackApp/ContentView.swift
 git commit -m "feat: add recordings library window with grid view, share, move, and delete"
 ```
 
@@ -1191,7 +1191,7 @@ git commit -m "feat: add recordings library window with grid view, share, move, 
 ## Task 10: Add convexSiteUrl to AppConfig
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/AppConfig.swift`
+- Modify: `Sources/JackApp/Auth/AppConfig.swift`
 
 **Step 1: Add site URL for share links**
 
@@ -1212,7 +1212,7 @@ enum AppConfig {
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/AppConfig.swift
+git add Sources/JackApp/Auth/AppConfig.swift
 git commit -m "feat(config): add convexSiteUrl for shareable recording links"
 ```
 
@@ -1221,7 +1221,7 @@ git commit -m "feat(config): add convexSiteUrl for shareable recording links"
 ## Task 11: Wire Up Create Space from Sidebar
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ContentView.swift` (add sheet for CreateOrganizationView)
+- Modify: `Sources/JackApp/ContentView.swift` (add sheet for CreateOrganizationView)
 
 **Step 1: Add create space sheet**
 
@@ -1259,7 +1259,7 @@ Add the sheet to the NavigationSplitView:
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/ContentView.swift
 git commit -m "feat(ui): wire up Create Space from sidebar space selector"
 ```
 
@@ -1268,7 +1268,7 @@ git commit -m "feat(ui): wire up Create Space from sidebar space selector"
 ## Task 12: Add Right-Click "Move to..." on Notes
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ContentView.swift` (noteCard function)
+- Modify: `Sources/JackApp/ContentView.swift` (noteCard function)
 
 **Step 1: Add context menu to noteCard**
 
@@ -1310,7 +1310,7 @@ Note: This requires the `VoiceNote` model to include its Convex document ID. If 
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/ContentView.swift
 git commit -m "feat(notes): add right-click 'Move to...' context menu for notes"
 ```
 

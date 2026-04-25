@@ -2,7 +2,7 @@
 
 ## Summary
 
-Integrate Clerk authentication and Convex backend into the Actionfy macOS app to enable user accounts, organization workspaces, and cloud sync of notes and recordings.
+Integrate Clerk authentication and Convex backend into the Jack macOS app to enable user accounts, organization workspaces, and cloud sync of notes and recordings.
 
 ## Architecture
 
@@ -166,7 +166,7 @@ All queries use `organizationId` from the JWT claims to scope data access.
 ## File Structure
 
 ```
-Sources/KinshasaApp/
+Sources/JackApp/
 ├── Auth/
 │   ├── ClerkAuthProvider.swift      # Bridges Clerk → Convex AuthProvider
 │   ├── AuthController.swift         # Central auth state management

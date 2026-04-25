@@ -15,7 +15,7 @@
 ## Task 1: Add New Types to RecordingTypes.swift
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift`
+- Modify: `Sources/JackApp/ScreenRecording/RecordingTypes.swift`
 
 **Step 1: Add MarkerColor enum after CursorStyle (after line ~249)**
 
@@ -96,7 +96,7 @@ feat(types): add TimelineSegment, TimelineMarker, MarkerColor types
 ## Task 2: Add EditorColors Design Tokens
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/EditorColors.swift`
+- Create: `Sources/JackApp/ScreenRecording/EditorColors.swift`
 
 **Step 1: Create the color constants file**
 
@@ -154,7 +154,7 @@ feat(editor): add EditorColors design token system
 ## Task 3: Update VideoEditorController — Segments, Markers, Zoom State, Waveforms
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorController.swift`
 
 This is the core controller rewrite. We add segment-based editing, markers, timeline zoom, and waveform loading.
 
@@ -461,7 +461,7 @@ feat(editor): replace cuts with segments, add markers, zoom state, waveform load
 ## Task 4: Update ExportService to Use Segments
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportService.swift`
+- Modify: `Sources/JackApp/ScreenRecording/ExportService.swift`
 
 **Step 1: Update EditorSnapshot usage in export**
 
@@ -508,7 +508,7 @@ feat(export): update export pipeline to use segment-based editing
 ## Task 5: Update VideoEditorView — Design Language + Timeline Zoom
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 This is the largest UI task. We refactor the existing view to use EditorColors and add zoom support.
 
@@ -604,7 +604,7 @@ feat(editor): apply wizard design language and add timeline zoom
 ## Task 6: Update VideoEditorView — Blade Tool & Segment Rendering
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 **Step 1: Replace video timeline rendering**
 
@@ -695,7 +695,7 @@ feat(editor): add blade tool with segment rendering and ripple delete
 ## Task 7: Update VideoEditorView — Markers
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 **Step 1: Add marker flags to video timeline**
 
@@ -783,7 +783,7 @@ feat(editor): add color-coded timeline markers with snap and context menu
 ## Task 8: Update VideoEditorView — Audio Waveforms
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 **Step 1: Replace audio track placeholders with waveform Canvas**
 
@@ -848,8 +848,8 @@ feat(editor): add audio waveform visualization with Canvas rendering
 ## Task 9: Fix All Remaining Compile Errors & Integration
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/EditorWindowController.swift`
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/EditorWindowController.swift`
+- Modify: `Sources/JackApp/ScreenRecording/ExportDialogView.swift`
 - Modify: Any other files referencing `cuts`, `inPoint`, `outPoint`
 
 **Step 1: Search for all remaining references to old API**
@@ -882,7 +882,7 @@ fix(editor): resolve all compile errors from segment migration
 
 **Step 1: Build and run**
 
-Run: `swift build && open .build/debug/KinshasaApp.app` (or use the app's packaging script)
+Run: `swift build && open .build/debug/JackApp.app` (or use the app's packaging script)
 
 **Step 2: Test checklist**
 

@@ -13,7 +13,7 @@
 ### Task 1: Scaffold the new OnboardingWizardView with design tokens and step enum
 
 **Files:**
-- Replace: `Sources/KinshasaApp/OnboardingWizardView.swift`
+- Replace: `Sources/JackApp/OnboardingWizardView.swift`
 
 **Step 1: Write the design token extensions and updated Step enum**
 
@@ -215,7 +215,7 @@ Expected: Compiles successfully. The wizard shows a dark window with step title 
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift
+git add Sources/JackApp/OnboardingWizardView.swift
 git commit -m "refactor: scaffold new Raycast-inspired onboarding wizard shell"
 ```
 
@@ -224,7 +224,7 @@ git commit -m "refactor: scaffold new Raycast-inspired onboarding wizard shell"
 ### Task 2: Implement Step 1 — Welcome (Full-Width Hero)
 
 **Files:**
-- Modify: `Sources/KinshasaApp/OnboardingWizardView.swift`
+- Modify: `Sources/JackApp/OnboardingWizardView.swift`
 
 **Step 1: Add the welcome step view**
 
@@ -265,7 +265,7 @@ private var welcomeStep: some View {
             size: 56
         )
 
-        Text("Welcome to Actionfy")
+        Text("Welcome to Jack")
             .font(.system(size: 28, weight: .bold))
             .foregroundStyle(.white)
 
@@ -322,7 +322,7 @@ Expected: Compiles. Welcome step shows hero icon, title, subtitle, and checklist
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift
+git add Sources/JackApp/OnboardingWizardView.swift
 git commit -m "feat: add Welcome step with hero icon and checklist"
 ```
 
@@ -331,7 +331,7 @@ git commit -m "feat: add Welcome step with hero icon and checklist"
 ### Task 3: Implement Step 2 — Permissions (Two-Column)
 
 **Files:**
-- Modify: `Sources/KinshasaApp/OnboardingWizardView.swift`
+- Modify: `Sources/JackApp/OnboardingWizardView.swift`
 
 **Step 1: Add the permissions step view**
 
@@ -348,7 +348,7 @@ private var permissionsStep: some View {
         icon: "lock.shield.fill",
         gradient: WizardColors.successGradient,
         title: "Permissions",
-        subtitle: "Actionfy needs three macOS permissions to work."
+        subtitle: "Jack needs three macOS permissions to work."
     ) {
         VStack(spacing: 12) {
             permissionCard(
@@ -509,7 +509,7 @@ Expected: Compiles. Permissions step shows two-column layout with three permissi
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift
+git add Sources/JackApp/OnboardingWizardView.swift
 git commit -m "feat: add Permissions step with two-column layout and permission cards"
 ```
 
@@ -518,7 +518,7 @@ git commit -m "feat: add Permissions step with two-column layout and permission 
 ### Task 4: Implement Step 3 — Shortcut Setup (Two-Column)
 
 **Files:**
-- Modify: `Sources/KinshasaApp/OnboardingWizardView.swift`
+- Modify: `Sources/JackApp/OnboardingWizardView.swift`
 
 **Step 1: Add the shortcut step view**
 
@@ -680,7 +680,7 @@ private func modeTile(mode: ShortcutMode, selected: Bool) -> some View {
 
 **Step 2: Add helper properties to ShortcutMode**
 
-In `Sources/KinshasaApp/ShortcutTypes.swift`, add `iconName` and `shortDescription` to the `ShortcutMode` enum:
+In `Sources/JackApp/ShortcutTypes.swift`, add `iconName` and `shortDescription` to the `ShortcutMode` enum:
 
 ```swift
 // Add to ShortcutMode enum body:
@@ -709,7 +709,7 @@ Expected: Compiles. Shortcut step shows key card, mode tiles, and voice note key
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift Sources/KinshasaApp/ShortcutTypes.swift
+git add Sources/JackApp/OnboardingWizardView.swift Sources/JackApp/ShortcutTypes.swift
 git commit -m "feat: add Shortcut step with key card, mode tiles, and voice note key"
 ```
 
@@ -718,7 +718,7 @@ git commit -m "feat: add Shortcut step with key card, mode tiles, and voice note
 ### Task 5: Implement Step 4 — Finish (Full-Width Hero)
 
 **Files:**
-- Modify: `Sources/KinshasaApp/OnboardingWizardView.swift`
+- Modify: `Sources/JackApp/OnboardingWizardView.swift`
 
 **Step 1: Add the finish step view**
 
@@ -789,7 +789,7 @@ Expected: Compiles. Finish step shows hero checkmark, summary card with key, mod
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift
+git add Sources/JackApp/OnboardingWizardView.swift
 git commit -m "feat: add Finish step with summary card"
 ```
 
@@ -798,7 +798,7 @@ git commit -m "feat: add Finish step with summary card"
 ### Task 6: Polish — verify transitions, test full flow, final adjustments
 
 **Files:**
-- Modify: `Sources/KinshasaApp/OnboardingWizardView.swift` (if needed)
+- Modify: `Sources/JackApp/OnboardingWizardView.swift` (if needed)
 
 **Step 1: Build the full app and run**
 
@@ -827,6 +827,6 @@ Adjust spacing, alignment, or colors as needed.
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift
+git add Sources/JackApp/OnboardingWizardView.swift
 git commit -m "polish: finalize wizard transitions and visual adjustments"
 ```

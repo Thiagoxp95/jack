@@ -17,7 +17,7 @@
 ### Task 1: Recording Types & Enums
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift`
+- Create: `Sources/JackApp/ScreenRecording/RecordingTypes.swift`
 
 **Step 1: Create the types file**
 
@@ -191,7 +191,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RecordingTypes.swift
+git add Sources/JackApp/ScreenRecording/RecordingTypes.swift
 git commit -m "feat(screen-recording): add foundation types and enums"
 ```
 
@@ -202,7 +202,7 @@ git commit -m "feat(screen-recording): add foundation types and enums"
 ### Task 2: CursorTrackingService
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/CursorTrackingService.swift`
+- Create: `Sources/JackApp/ScreenRecording/CursorTrackingService.swift`
 
 **Context:** Reuse the CGEvent tap pattern from `GlobalFnShortcutMonitor.swift` (lines 53-114). That file creates a `CGEvent.tapCreate` with a C callback that routes through userInfo. We do the same but listen for mouse move + click events instead of key events.
 
@@ -337,7 +337,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/CursorTrackingService.swift
+git add Sources/JackApp/ScreenRecording/CursorTrackingService.swift
 git commit -m "feat(screen-recording): add cursor tracking service with CGEvent tap"
 ```
 
@@ -346,7 +346,7 @@ git commit -m "feat(screen-recording): add cursor tracking service with CGEvent 
 ### Task 3: ScreenRecordingService
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/ScreenRecordingService.swift`
+- Create: `Sources/JackApp/ScreenRecording/ScreenRecordingService.swift`
 
 **Context:** Uses ScreenCaptureKit (macOS 13+). `SCStream` delivers `CMSampleBuffer` frames via `SCStreamOutput` delegate. We write video + system audio to separate `AVAssetWriter` instances. The app already targets macOS 14+.
 
@@ -592,7 +592,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ScreenRecordingService.swift
+git add Sources/JackApp/ScreenRecording/ScreenRecordingService.swift
 git commit -m "feat(screen-recording): add ScreenCaptureKit capture service"
 ```
 
@@ -601,7 +601,7 @@ git commit -m "feat(screen-recording): add ScreenCaptureKit capture service"
 ### Task 4: WebcamCaptureService
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/WebcamCaptureService.swift`
+- Create: `Sources/JackApp/ScreenRecording/WebcamCaptureService.swift`
 
 **Context:** Uses AVCaptureSession for camera. The webcam overlay is displayed as an on-screen NSPanel (captured by SCStream as part of the screen), so this service just manages the AVCaptureSession and provides a preview layer.
 
@@ -686,7 +686,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/WebcamCaptureService.swift
+git add Sources/JackApp/ScreenRecording/WebcamCaptureService.swift
 git commit -m "feat(screen-recording): add webcam capture service"
 ```
 
@@ -695,7 +695,7 @@ git commit -m "feat(screen-recording): add webcam capture service"
 ### Task 5: MicrophoneCaptureService (for screen recording)
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/MicrophoneCaptureService.swift`
+- Create: `Sources/JackApp/ScreenRecording/MicrophoneCaptureService.swift`
 
 **Context:** The existing `AudioCaptureService` records 16kHz mono WAV for speech-to-text. Screen recording needs higher quality (48kHz stereo AAC) mic audio as a separate track. Rather than modify the existing service, create a dedicated one.
 
@@ -781,7 +781,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/MicrophoneCaptureService.swift
+git add Sources/JackApp/ScreenRecording/MicrophoneCaptureService.swift
 git commit -m "feat(screen-recording): add microphone capture service for screen recording"
 ```
 
@@ -792,7 +792,7 @@ git commit -m "feat(screen-recording): add microphone capture service for screen
 ### Task 6: RecordingSessionController
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift`
+- Create: `Sources/JackApp/ScreenRecording/RecordingSessionController.swift`
 
 **Context:** Follow the `DictationController` pattern — `@Observable @MainActor` class with `@Published`-like properties (using `@Observable` macro instead since this is new code), service instances as private properties, state machine transitions.
 
@@ -846,12 +846,12 @@ final class RecordingSessionController {
 
     private static var cacheDirectory: URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        return caches.appendingPathComponent("Actionfy/recordings", isDirectory: true)
+        return caches.appendingPathComponent("Jack/recordings", isDirectory: true)
     }
 
     private static var exportDirectory: URL {
         let docs = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Actionfy Recordings", isDirectory: true)
+            .appendingPathComponent("Documents/Jack Recordings", isDirectory: true)
         return docs
     }
 
@@ -1036,7 +1036,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RecordingSessionController.swift
+git add Sources/JackApp/ScreenRecording/RecordingSessionController.swift
 git commit -m "feat(screen-recording): add recording session controller with state machine"
 ```
 
@@ -1047,7 +1047,7 @@ git commit -m "feat(screen-recording): add recording session controller with sta
 ### Task 7: Setup Window Panel Controller
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/SetupWindowController.swift`
+- Create: `Sources/JackApp/ScreenRecording/SetupWindowController.swift`
 
 **Context:** Follow `FloatingBubbleController.swift` pattern for NSPanel creation (lines 389-414). The setup window is a floating panel hosting SwiftUI content via `NSHostingView`.
 
@@ -1107,7 +1107,7 @@ final class SetupWindowController {
 ### Task 8: Recording Setup SwiftUI View
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/RecordingSetupView.swift`
+- Create: `Sources/JackApp/ScreenRecording/RecordingSetupView.swift`
 
 **Context:** Dark theme SwiftUI view matching the Raycast-inspired onboarding style. Uses `@Observable` controller for bindings.
 
@@ -1346,8 +1346,8 @@ Run: `swift build 2>&1 | head -30`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/SetupWindowController.swift \
-      Sources/KinshasaApp/ScreenRecording/RecordingSetupView.swift
+git add Sources/JackApp/ScreenRecording/SetupWindowController.swift \
+      Sources/JackApp/ScreenRecording/RecordingSetupView.swift
 git commit -m "feat(screen-recording): add setup window panel and SwiftUI view"
 ```
 
@@ -1358,7 +1358,7 @@ git commit -m "feat(screen-recording): add setup window panel and SwiftUI view"
 ### Task 9: Recording Status Bubble
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/RecordingBubbleController.swift`
+- Create: `Sources/JackApp/ScreenRecording/RecordingBubbleController.swift`
 
 **Context:** Follow `FloatingBubbleController.swift` NSPanel pattern. Pill-shaped frosted glass bubble with recording indicator, timer, pause, and stop buttons.
 
@@ -1497,7 +1497,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RecordingBubbleController.swift
+git add Sources/JackApp/ScreenRecording/RecordingBubbleController.swift
 git commit -m "feat(screen-recording): add recording status bubble with pill UI"
 ```
 
@@ -1506,7 +1506,7 @@ git commit -m "feat(screen-recording): add recording status bubble with pill UI"
 ### Task 10: Webcam Overlay Panel
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/WebcamOverlayController.swift`
+- Create: `Sources/JackApp/ScreenRecording/WebcamOverlayController.swift`
 
 **Context:** Floating NSPanel with circular mask showing live webcam preview. Draggable and resizable during recording. This window is captured by ScreenCaptureKit as part of the screen.
 
@@ -1616,7 +1616,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/WebcamOverlayController.swift
+git add Sources/JackApp/ScreenRecording/WebcamOverlayController.swift
 git commit -m "feat(screen-recording): add draggable/resizable webcam overlay panel"
 ```
 
@@ -1625,7 +1625,7 @@ git commit -m "feat(screen-recording): add draggable/resizable webcam overlay pa
 ### Task 11: Region Selection Overlay
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/RegionSelectionController.swift`
+- Create: `Sources/JackApp/ScreenRecording/RegionSelectionController.swift`
 
 **Context:** Full-screen semi-transparent overlay for freeform region selection. Similar to macOS screenshot tool. Crosshair cursor, drag to select, shift-snap to aspect ratios.
 
@@ -1802,7 +1802,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/RegionSelectionController.swift
+git add Sources/JackApp/ScreenRecording/RegionSelectionController.swift
 git commit -m "feat(screen-recording): add freeform region selection overlay with shift-snap"
 ```
 
@@ -1813,7 +1813,7 @@ git commit -m "feat(screen-recording): add freeform region selection overlay wit
 ### Task 12: Countdown Overlay
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/CountdownOverlayController.swift`
+- Create: `Sources/JackApp/ScreenRecording/CountdownOverlayController.swift`
 
 **Step 1: Write the controller**
 
@@ -1885,7 +1885,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/CountdownOverlayController.swift
+git add Sources/JackApp/ScreenRecording/CountdownOverlayController.swift
 git commit -m "feat(screen-recording): add 3-2-1 countdown overlay"
 ```
 
@@ -1896,7 +1896,7 @@ git commit -m "feat(screen-recording): add 3-2-1 countdown overlay"
 ### Task 13: Metal Compute Shader
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/Shaders/ZoomCursorCompositor.metal`
+- Create: `Sources/JackApp/ScreenRecording/Shaders/ZoomCursorCompositor.metal`
 
 **Step 1: Write the Metal shader**
 
@@ -2025,7 +2025,7 @@ kernel void zoomCursorComposite(
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/Shaders/ZoomCursorCompositor.metal
+git add Sources/JackApp/ScreenRecording/Shaders/ZoomCursorCompositor.metal
 git commit -m "feat(screen-recording): add Metal compute shader for zoom and cursor compositing"
 ```
 
@@ -2034,7 +2034,7 @@ git commit -m "feat(screen-recording): add Metal compute shader for zoom and cur
 ### Task 14: MetalVideoRenderer
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/MetalVideoRenderer.swift`
+- Create: `Sources/JackApp/ScreenRecording/MetalVideoRenderer.swift`
 
 **Step 1: Write the renderer**
 
@@ -2225,7 +2225,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/MetalVideoRenderer.swift
+git add Sources/JackApp/ScreenRecording/MetalVideoRenderer.swift
 git commit -m "feat(screen-recording): add Metal video renderer with zoom and cursor compositing"
 ```
 
@@ -2236,7 +2236,7 @@ git commit -m "feat(screen-recording): add Metal video renderer with zoom and cu
 ### Task 15: VideoEditorController
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift`
+- Create: `Sources/JackApp/ScreenRecording/VideoEditorController.swift`
 
 **Step 1: Write the controller**
 
@@ -2443,7 +2443,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorController.swift
 git commit -m "feat(screen-recording): add video editor controller with cut, zoom, and undo"
 ```
 
@@ -2452,7 +2452,7 @@ git commit -m "feat(screen-recording): add video editor controller with cut, zoo
 ### Task 16: Video Editor View (Preview + Toolbar)
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift`
+- Create: `Sources/JackApp/ScreenRecording/VideoEditorView.swift`
 
 **Context:** Full SwiftUI window with MetalKit preview, timelines, and controls. This is a large view — build it as the main container with sub-views extracted as needed.
 
@@ -2757,7 +2757,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat(screen-recording): add video editor view with timeline and controls"
 ```
 
@@ -2766,7 +2766,7 @@ git commit -m "feat(screen-recording): add video editor view with timeline and c
 ### Task 17: MTKView Preview Integration
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/MetalPreviewView.swift`
+- Create: `Sources/JackApp/ScreenRecording/MetalPreviewView.swift`
 
 **Context:** NSViewRepresentable wrapping MTKView that renders composited frames from MetalVideoRenderer based on the editor's current playhead position.
 
@@ -2881,7 +2881,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/MetalPreviewView.swift
+git add Sources/JackApp/ScreenRecording/MetalPreviewView.swift
 git commit -m "feat(screen-recording): add MTKView preview integration for editor"
 ```
 
@@ -2892,7 +2892,7 @@ git commit -m "feat(screen-recording): add MTKView preview integration for edito
 ### Task 18: ExportService
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/ExportService.swift`
+- Create: `Sources/JackApp/ScreenRecording/ExportService.swift`
 
 **Step 1: Write the export service**
 
@@ -3080,7 +3080,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportService.swift
+git add Sources/JackApp/ScreenRecording/ExportService.swift
 git commit -m "feat(screen-recording): add export service with Metal rendering pipeline"
 ```
 
@@ -3091,7 +3091,7 @@ git commit -m "feat(screen-recording): add export service with Metal rendering p
 ### Task 19: Sidebar Integration
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ContentView.swift`
+- Modify: `Sources/JackApp/ContentView.swift`
 
 **Step 1: Add Screen Recording to SettingsSection enum**
 
@@ -3169,7 +3169,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 6: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/ContentView.swift
 git commit -m "feat(screen-recording): add Screen Recording sidebar section"
 ```
 
@@ -3178,7 +3178,7 @@ git commit -m "feat(screen-recording): add Screen Recording sidebar section"
 ### Task 20: App Entry Point Integration
 
 **Files:**
-- Modify: `Sources/KinshasaApp/KinshasaApp.swift`
+- Modify: `Sources/JackApp/JackApp.swift`
 
 **Step 1: Add RecordingSessionController to RootView**
 
@@ -3207,7 +3207,7 @@ Run: `swift build 2>&1 | head -30`
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/KinshasaApp.swift
+git add Sources/JackApp/JackApp.swift
 git commit -m "feat(screen-recording): wire RecordingSessionController into app entry point"
 ```
 
@@ -3216,7 +3216,7 @@ git commit -m "feat(screen-recording): wire RecordingSessionController into app 
 ### Task 21: Onboarding Wizard — Screen Recording Permission Step
 
 **Files:**
-- Modify: `Sources/KinshasaApp/OnboardingWizardView.swift`
+- Modify: `Sources/JackApp/OnboardingWizardView.swift`
 
 **Step 1: Add new wizard step**
 
@@ -3246,7 +3246,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/OnboardingWizardView.swift
+git add Sources/JackApp/OnboardingWizardView.swift
 git commit -m "feat(screen-recording): add optional permissions step to onboarding wizard"
 ```
 
@@ -3255,7 +3255,7 @@ git commit -m "feat(screen-recording): add optional permissions step to onboardi
 ### Task 22: AppMode Integration in DictationController
 
 **Files:**
-- Modify: `Sources/KinshasaApp/DictationController.swift`
+- Modify: `Sources/JackApp/DictationController.swift`
 
 **Step 1: Add appMode property**
 
@@ -3282,7 +3282,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/DictationController.swift
+git add Sources/JackApp/DictationController.swift
 git commit -m "feat(screen-recording): add AppMode to DictationController for mode separation"
 ```
 
@@ -3293,7 +3293,7 @@ git commit -m "feat(screen-recording): add AppMode to DictationController for mo
 ### Task 23: Export Dialog View
 
 **Files:**
-- Create: `Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift`
+- Create: `Sources/JackApp/ScreenRecording/ExportDialogView.swift`
 
 **Step 1: Write the export dialog**
 
@@ -3358,7 +3358,7 @@ struct ExportDialogView: View {
             HStack {
                 Text("Save to:")
                     .foregroundStyle(.secondary)
-                Text("~/Documents/Actionfy Recordings/")
+                Text("~/Documents/Jack Recordings/")
                     .font(.system(.caption, design: .monospaced))
             }
 
@@ -3396,7 +3396,7 @@ Run: `swift build 2>&1 | head -20`
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift
+git add Sources/JackApp/ScreenRecording/ExportDialogView.swift
 git commit -m "feat(screen-recording): add export dialog with codec/quality/resolution options"
 ```
 
@@ -3436,7 +3436,7 @@ Fix any compilation errors.
 
 **Step 2: Verify all new files exist**
 
-Expected new files in `Sources/KinshasaApp/ScreenRecording/`:
+Expected new files in `Sources/JackApp/ScreenRecording/`:
 - `RecordingTypes.swift`
 - `ScreenRecordingService.swift`
 - `CursorTrackingService.swift`
@@ -3459,7 +3459,7 @@ Expected new files in `Sources/KinshasaApp/ScreenRecording/`:
 
 Modified files:
 - `ContentView.swift`
-- `KinshasaApp.swift`
+- `JackApp.swift`
 - `OnboardingWizardView.swift`
 - `DictationController.swift`
 

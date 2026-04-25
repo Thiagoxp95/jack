@@ -5,3 +5,21 @@
 .DS_Store
 *.swp
 node_modules/
+.gstack/
+
+# Build artifacts and packaging output
+*.xcarchive/
+*.dmg
+Icon.iconset/
+JackApp 2026-*/
+
+# SPM checkout cache (regenerable via `swift package resolve`)
+Packages/
+
+# Parakeet local model + venv (regenerable, multi-GB)
+.context/parakeet-cache/
+.context/parakeet-venv/
+
+# Xcode user-specific state
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/

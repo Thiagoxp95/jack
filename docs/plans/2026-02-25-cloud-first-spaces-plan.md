@@ -105,7 +105,7 @@ export default defineSchema({
 
 **Step 2: Verify schema compiles**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 
 Expected: Schema pushes successfully (existing data has `organizationId` which becomes an extra field — Convex allows extra fields not in schema).
 
@@ -481,7 +481,7 @@ export const members = query({
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 
 Expected: Deploys successfully.
 
@@ -764,7 +764,7 @@ export const moveToSpace = mutation({
 
 **Step 2: Verify**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 
 **Step 3: Commit**
 
@@ -908,7 +908,7 @@ export const moveToSpace = mutation({
 
 **Step 2: Verify**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 
 **Step 3: Commit**
 
@@ -1015,7 +1015,7 @@ export const currentUser = query({
 
 **Step 2: Verify**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 
 **Step 3: Commit**
 
@@ -1029,7 +1029,7 @@ git commit -m "feat(convex): auto-accept pending space invitations on syncUser"
 ## Task 6: Clean up AuthController — remove Clerk org properties
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/AuthController.swift`
+- Modify: `Sources/JackApp/Auth/AuthController.swift`
 
 **Step 1: Remove org-related code**
 
@@ -1099,14 +1099,14 @@ final class AuthController {
 
 **Step 2: Verify it builds**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1 | head -30`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1 | head -30`
 
 Expected: May have downstream compile errors (e.g., `SpaceSettingsSheet` referencing Clerk orgs). That's expected — we fix those in later tasks.
 
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/AuthController.swift
+git add Sources/JackApp/Auth/AuthController.swift
 git commit -m "refactor: remove Clerk organization properties from AuthController"
 ```
 
@@ -1115,7 +1115,7 @@ git commit -m "refactor: remove Clerk organization properties from AuthControlle
 ## Task 7: Refactor SpaceController — query Convex instead of Clerk orgs
 
 **Files:**
-- Modify: `Sources/KinshasaApp/SpaceController.swift`
+- Modify: `Sources/JackApp/SpaceController.swift`
 
 **Step 1: Remove ClerkKit import and rewrite space operations**
 
@@ -1416,12 +1416,12 @@ enum SpaceError: LocalizedError {
 
 **Step 2: Verify it compiles (may have downstream errors, that's OK)**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1 | head -50`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1 | head -50`
 
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/SpaceController.swift
+git add Sources/JackApp/SpaceController.swift
 git commit -m "refactor: SpaceController queries Convex spaces instead of Clerk orgs"
 ```
 
@@ -1430,7 +1430,7 @@ git commit -m "refactor: SpaceController queries Convex spaces instead of Clerk 
 ## Task 8: Update NoteListController — organizationId to spaceId
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Sync/NoteListController.swift`
+- Modify: `Sources/JackApp/Sync/NoteListController.swift`
 
 **Step 1: Replace all organizationId references**
 
@@ -1443,7 +1443,7 @@ git commit -m "refactor: SpaceController queries Convex spaces instead of Clerk 
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Sync/NoteListController.swift
+git add Sources/JackApp/Sync/NoteListController.swift
 git commit -m "refactor: NoteListController uses spaceId instead of organizationId"
 ```
 
@@ -1452,7 +1452,7 @@ git commit -m "refactor: NoteListController uses spaceId instead of organization
 ## Task 9: Update RecordingSyncService — organizationId to spaceId
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Sync/RecordingSyncService.swift`
+- Modify: `Sources/JackApp/Sync/RecordingSyncService.swift`
 
 **Step 1: Replace organizationId param**
 
@@ -1462,7 +1462,7 @@ git commit -m "refactor: NoteListController uses spaceId instead of organization
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Sync/RecordingSyncService.swift
+git add Sources/JackApp/Sync/RecordingSyncService.swift
 git commit -m "refactor: RecordingSyncService uses spaceId instead of organizationId"
 ```
 
@@ -1471,15 +1471,15 @@ git commit -m "refactor: RecordingSyncService uses spaceId instead of organizati
 ## Task 10: Create UploadQueue — background upload with retry
 
 **Files:**
-- Create: `Sources/KinshasaApp/Sync/UploadQueue.swift`
+- Create: `Sources/JackApp/Sync/UploadQueue.swift`
 
 **Step 1: Implement UploadQueue**
 
-Create `Sources/KinshasaApp/Sync/UploadQueue.swift` with:
+Create `Sources/JackApp/Sync/UploadQueue.swift` with:
 
 - `PendingUpload` struct (Codable): id, filePath, title, duration, spaceId, status, retryCount, createdAt
 - `UploadStatus` enum: queued, uploading, failed, completed
-- Persistence: save/load queue as JSON from `~/Library/Application Support/Actionfy/upload_queue.json`
+- Persistence: save/load queue as JSON from `~/Library/Application Support/Jack/upload_queue.json`
 - `enqueue(filePath:, title:, duration:, spaceId:)` — adds item, saves, starts processing
 - `processQueue()` — iterates queued items, uploads via `ConvexHTTPClient`, deletes local file on success
 - `retryFailed()` — resets failed items to queued
@@ -1492,7 +1492,7 @@ The UploadQueue should NOT be `@MainActor` — it does network I/O. Use `@Observ
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Sync/UploadQueue.swift
+git add Sources/JackApp/Sync/UploadQueue.swift
 git commit -m "feat: add UploadQueue with background upload and retry"
 ```
 
@@ -1501,11 +1501,11 @@ git commit -m "feat: add UploadQueue with background upload and retry"
 ## Task 11: Update ExportDialogView — export to temp + enqueue upload
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift`
+- Modify: `Sources/JackApp/ScreenRecording/ExportDialogView.swift`
 
 **Step 1: Change export output to temp directory**
 
-- Change `generateOutputURL()` to use `~/Library/Caches/Actionfy/exports/` instead of `RecordingSessionController.exportDirectory`
+- Change `generateOutputURL()` to use `~/Library/Caches/Jack/exports/` instead of `RecordingSessionController.exportDirectory`
 - After export success, call `UploadQueue.shared.enqueue(...)` instead of `RecordingSpaceStore.assign()`
 - Use `spaceController.currentSpaceId` instead of `spaceController.currentOrganizationId`
 - Remove "Show in Finder" button from `doneContent`
@@ -1514,7 +1514,7 @@ git commit -m "feat: add UploadQueue with background upload and retry"
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportDialogView.swift
+git add Sources/JackApp/ScreenRecording/ExportDialogView.swift
 git commit -m "refactor: ExportDialogView exports to temp dir and enqueues cloud upload"
 ```
 
@@ -1523,7 +1523,7 @@ git commit -m "refactor: ExportDialogView exports to temp dir and enqueues cloud
 ## Task 12: Rewrite RecordingsLibraryView — Convex-only, no local files
 
 **Files:**
-- Modify: `Sources/KinshasaApp/RecordingsLibrary/RecordingsLibraryView.swift`
+- Modify: `Sources/JackApp/RecordingsLibrary/RecordingsLibraryView.swift`
 
 **Step 1: Rewrite to fetch from Convex**
 
@@ -1542,7 +1542,7 @@ Major changes:
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/RecordingsLibrary/RecordingsLibraryView.swift
+git add Sources/JackApp/RecordingsLibrary/RecordingsLibraryView.swift
 git commit -m "refactor: RecordingsLibraryView fetches from Convex, shows upload queue status"
 ```
 
@@ -1551,12 +1551,12 @@ git commit -m "refactor: RecordingsLibraryView fetches from Convex, shows upload
 ## Task 13: Delete RecordingSpaceStore.swift
 
 **Files:**
-- Delete: `Sources/KinshasaApp/RecordingsLibrary/RecordingSpaceStore.swift`
+- Delete: `Sources/JackApp/RecordingsLibrary/RecordingSpaceStore.swift`
 
 **Step 1: Delete the file**
 
 ```bash
-git rm Sources/KinshasaApp/RecordingsLibrary/RecordingSpaceStore.swift
+git rm Sources/JackApp/RecordingsLibrary/RecordingSpaceStore.swift
 ```
 
 **Step 2: Search for any remaining references**
@@ -1576,7 +1576,7 @@ git commit -m "chore: delete RecordingSpaceStore (replaced by cloud-first upload
 ## Task 14: Refactor CreateOrganizationView → CreateSpaceView
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/Views/CreateOrganizationView.swift`
+- Modify: `Sources/JackApp/Auth/Views/CreateOrganizationView.swift`
 
 **Step 1: Rewrite to call Convex instead of Clerk API**
 
@@ -1592,7 +1592,7 @@ git commit -m "chore: delete RecordingSpaceStore (replaced by cloud-first upload
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/CreateOrganizationView.swift
+git add Sources/JackApp/Auth/Views/CreateOrganizationView.swift
 git commit -m "refactor: CreateOrganizationView → CreateSpaceView, uses Convex spaces"
 ```
 
@@ -1601,7 +1601,7 @@ git commit -m "refactor: CreateOrganizationView → CreateSpaceView, uses Convex
 ## Task 15: Refactor OrganizationSettingsView → SpaceMembersView
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/Views/OrganizationSettingsView.swift`
+- Modify: `Sources/JackApp/Auth/Views/OrganizationSettingsView.swift`
 
 **Step 1: Rewrite to use SpaceController for members/invitations**
 
@@ -1617,7 +1617,7 @@ git commit -m "refactor: CreateOrganizationView → CreateSpaceView, uses Convex
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/OrganizationSettingsView.swift
+git add Sources/JackApp/Auth/Views/OrganizationSettingsView.swift
 git commit -m "refactor: OrganizationSettingsView → SpaceMembersView, uses Convex spaces"
 ```
 
@@ -1626,7 +1626,7 @@ git commit -m "refactor: OrganizationSettingsView → SpaceMembersView, uses Con
 ## Task 16: Update SpaceSettingsSheet — remove Clerk org lookup
 
 **Files:**
-- Modify: `Sources/KinshasaApp/SpaceSettingsSheet.swift`
+- Modify: `Sources/JackApp/SpaceSettingsSheet.swift`
 
 **Step 1: Replace Clerk org member lookup with SpaceMembersView**
 
@@ -1642,7 +1642,7 @@ git commit -m "refactor: OrganizationSettingsView → SpaceMembersView, uses Con
 **Step 2: Commit**
 
 ```bash
-git add Sources/KinshasaApp/SpaceSettingsSheet.swift
+git add Sources/JackApp/SpaceSettingsSheet.swift
 git commit -m "refactor: SpaceSettingsSheet uses SpaceMembersView instead of Clerk orgs"
 ```
 
@@ -1651,7 +1651,7 @@ git commit -m "refactor: SpaceSettingsSheet uses SpaceMembersView instead of Cle
 ## Task 17: Update ContentView — wire up new space types
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ContentView.swift`
+- Modify: `Sources/JackApp/ContentView.swift`
 
 **Step 1: Update CreateSpace sheet**
 
@@ -1673,7 +1673,7 @@ Check if `import ClerkKit` is still needed in ContentView. It's used for `Clerk.
 **Step 4: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ContentView.swift
+git add Sources/JackApp/ContentView.swift
 git commit -m "refactor: ContentView uses CreateSpaceView and spaceId throughout"
 ```
 
@@ -1682,7 +1682,7 @@ git commit -m "refactor: ContentView uses CreateSpaceView and spaceId throughout
 ## Task 18: Update AuthGateView — remove Clerk org refresh
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Auth/Views/AuthGateView.swift`
+- Modify: `Sources/JackApp/Auth/Views/AuthGateView.swift`
 
 **Step 1: Minor updates**
 
@@ -1694,14 +1694,14 @@ Actually, looking at this file, the only reference is line 238 which calls `refr
 
 **Step 2: Verify no Clerk org references remain**
 
-Run: `grep -rn "organizationMemberships\|Organization\b\|org\.id\|org\.name\|setActiveOrganization\|getOrganizationMemberships" Sources/KinshasaApp/`
+Run: `grep -rn "organizationMemberships\|Organization\b\|org\.id\|org\.name\|setActiveOrganization\|getOrganizationMemberships" Sources/JackApp/`
 
 Expected: No matches (except possibly `Organization` type references in files we haven't touched — those should be gone after Tasks 14-15).
 
 **Step 3: Commit (if changes made)**
 
 ```bash
-git add Sources/KinshasaApp/Auth/Views/AuthGateView.swift
+git add Sources/JackApp/Auth/Views/AuthGateView.swift
 git commit -m "refactor: AuthGateView cleaned up for Convex-based spaces"
 ```
 
@@ -1714,7 +1714,7 @@ git commit -m "refactor: AuthGateView cleaned up for Convex-based spaces"
 
 **Step 1: Build the project**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && swift build 2>&1`
+Run: `cd /Users/txp/Pessoal/jack-v2 && swift build 2>&1`
 
 **Step 2: Fix any remaining compile errors**
 
@@ -1739,7 +1739,7 @@ git commit -m "fix: resolve remaining compile errors from spaces refactor"
 
 **Step 1: Push Convex changes**
 
-Run: `cd /Users/txp/Pessoal/actionfy-v2 && npx convex dev --once`
+Run: `cd /Users/txp/Pessoal/jack-v2 && npx convex dev --once`
 
 Expected: All functions deploy successfully.
 

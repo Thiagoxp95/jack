@@ -1,5 +1,5 @@
 {
-  "name": "actionfy-v2",
+  "name": "jack-v2",
   "version": "1.0.0",
   "description": "SwiftPM-based macOS app with global voice-to-text dictation powered by local CoreML Parakeet.",
   "main": "index.js",

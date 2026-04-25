@@ -1,5 +1,11 @@
 import { v } from "convex/values";
-import { action, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 
 // ── 1. listThreads ──────────────────────────────────────────────────────────────
 export const listThreads = query({
@@ -279,6 +285,70 @@ export const saveAssistantMessage = mutation({
     // Update the thread's updatedAt
     await ctx.db.patch(args.threadId, { updatedAt: Date.now() });
 
+    return messageId;
+  },
+});
+
+// ── Internal functions (for HTTP actions, no auth check) ────────────────────
+
+export const internalSendMessage = internalMutation({
+  args: {
+    threadId: v.id("chatThreads"),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const thread = await ctx.db.get(args.threadId);
+    if (!thread) throw new Error("Thread not found");
+
+    const messageId = await ctx.db.insert("chatMessages", {
+      threadId: args.threadId,
+      role: "user",
+      content: args.content,
+      createdAt: Date.now(),
+    });
+
+    await ctx.db.patch(args.threadId, { updatedAt: Date.now() });
+    return messageId;
+  },
+});
+
+export const internalGetThread = internalQuery({
+  args: { threadId: v.id("chatThreads") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.threadId);
+  },
+});
+
+export const internalGetMessages = internalQuery({
+  args: { threadId: v.id("chatThreads") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("chatMessages")
+      .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
+      .order("asc")
+      .collect();
+  },
+});
+
+export const internalSaveAssistantMessage = internalMutation({
+  args: {
+    threadId: v.id("chatThreads"),
+    content: v.string(),
+    model: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const thread = await ctx.db.get(args.threadId);
+    if (!thread) throw new Error("Thread not found");
+
+    const messageId = await ctx.db.insert("chatMessages", {
+      threadId: args.threadId,
+      role: "assistant",
+      content: args.content,
+      model: args.model,
+      createdAt: Date.now(),
+    });
+
+    await ctx.db.patch(args.threadId, { updatedAt: Date.now() });
     return messageId;
   },
 });

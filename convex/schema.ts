@@ -62,6 +62,7 @@ export default defineSchema({
     duration: v.number(),
     storageId: v.optional(v.id("_storage")),
     thumbnailStorageId: v.optional(v.id("_storage")),
+    ogImageStorageId: v.optional(v.id("_storage")),
     shareToken: v.optional(v.string()),
     shareEnabled: v.optional(v.boolean()),
     // Legacy fields from pre-auth recordings

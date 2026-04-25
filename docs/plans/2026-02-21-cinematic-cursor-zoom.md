@@ -15,12 +15,12 @@
 Replace the symmetric 0.3s smoothstep easing with asymmetric 0.6s cinematic curves.
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/MetalVideoRenderer.swift:225-281`
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Modify: `Sources/JackApp/ScreenRecording/MetalVideoRenderer.swift:225-281`
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 **Step 1: Write failing tests for the new easing behavior**
 
-Add a new test class to `Tests/KinshasaAppTests/KinshasaAppTests.swift`:
+Add a new test class to `Tests/JackAppTests/JackAppTests.swift`:
 
 ```swift
 final class ZoomInterpolationTests: XCTestCase {
@@ -158,7 +158,7 @@ Expected: All 7 tests PASS
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/MetalVideoRenderer.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ScreenRecording/MetalVideoRenderer.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(editor): replace smoothstep with cinematic asymmetric easing for zoom"
 ```
 
@@ -167,7 +167,7 @@ git commit -m "feat(editor): replace smoothstep with cinematic asymmetric easing
 ### Task 2: Update ExportService ramp duration
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportService.swift:239-243`
+- Modify: `Sources/JackApp/ScreenRecording/ExportService.swift:239-243`
 
 **Step 1: Update the ramp duration constant**
 
@@ -189,7 +189,7 @@ Expected: Build succeeds
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportService.swift
+git add Sources/JackApp/ScreenRecording/ExportService.swift
 git commit -m "feat(export): use cinematic ramp duration constant"
 ```
 
@@ -200,7 +200,7 @@ git commit -m "feat(export): use cinematic ramp duration constant"
 Add soft clamping to the zoom center so the viewport decelerates near screen edges instead of revealing black space.
 
 **Files:**
-- Modify: `Sources/KinshasaApp/Resources/ZoomCursorCompositor.metal:88-94`
+- Modify: `Sources/JackApp/Resources/ZoomCursorCompositor.metal:88-94`
 
 **Step 1: Add the soft clamp function and update zoom transform**
 
@@ -259,7 +259,7 @@ Expected: Build succeeds (Metal shaders are compiled at runtime from source, but
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/Resources/ZoomCursorCompositor.metal
+git add Sources/JackApp/Resources/ZoomCursorCompositor.metal
 git commit -m "feat(shader): add soft edge clamping for cinematic zoom viewport"
 ```
 
@@ -268,12 +268,12 @@ git commit -m "feat(shader): add soft edge clamping for cinematic zoom viewport"
 ### Task 4: updateZoomLevel method on VideoEditorController
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift:203-207`
-- Test: `Tests/KinshasaAppTests/KinshasaAppTests.swift`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorController.swift:203-207`
+- Test: `Tests/JackAppTests/JackAppTests.swift`
 
 **Step 1: Write failing test**
 
-Add to `Tests/KinshasaAppTests/KinshasaAppTests.swift`:
+Add to `Tests/JackAppTests/JackAppTests.swift`:
 
 ```swift
 @MainActor
@@ -398,7 +398,7 @@ Expected: All 4 tests PASS
 **Step 5: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorController.swift Tests/KinshasaAppTests/KinshasaAppTests.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorController.swift Tests/JackAppTests/JackAppTests.swift
 git commit -m "feat(editor): add updateZoomLevel with clamping and overlap prevention"
 ```
 
@@ -409,7 +409,7 @@ git commit -m "feat(editor): add updateZoomLevel with clamping and overlap preve
 Add click-drag gesture to the zoom timeline in `VideoEditorView` so users can draw zoom blocks by dragging.
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift:5-9,274-308`
+- Modify: `Sources/JackApp/ScreenRecording/VideoEditorView.swift:5-9,274-308`
 
 **Step 1: Add drag state properties**
 
@@ -590,7 +590,7 @@ Expected: All tests pass
 **Step 6: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift
+git add Sources/JackApp/ScreenRecording/VideoEditorView.swift
 git commit -m "feat(editor): add click-drag zoom creation, double-click cycle, and scroll-wheel adjustment"
 ```
 
@@ -601,7 +601,7 @@ git commit -m "feat(editor): add click-drag zoom creation, double-click cycle, a
 The Metal shader now does soft clamping, but the export service calculates `zoomCenter` on the CPU before passing it to the shader. We need to apply the same soft clamping logic to the CPU-side zoom center calculation for consistency between the shader's hard clamp and the CPU's centering logic.
 
 **Files:**
-- Modify: `Sources/KinshasaApp/ScreenRecording/ExportService.swift:277-287`
+- Modify: `Sources/JackApp/ScreenRecording/ExportService.swift:277-287`
 
 **Step 1: Update zoom center calculation**
 
@@ -634,7 +634,7 @@ Expected: Build succeeds
 **Step 3: Commit**
 
 ```bash
-git add Sources/KinshasaApp/ScreenRecording/ExportService.swift
+git add Sources/JackApp/ScreenRecording/ExportService.swift
 git commit -m "feat(export): clamp zoom center to valid viewport range"
 ```
 

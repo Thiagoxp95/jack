@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 
 function escapeHtml(str: string): string {
   return str
@@ -45,9 +46,17 @@ http.route({
     }
 
     const title = recording.title ?? "Untitled Recording";
+    const shareUrl = request.url;
+    const previewImage = recording.ogImageUrl ?? recording.thumbnailUrl;
 
     return new Response(
-      playerPage(title, recording.duration, recording.videoUrl),
+      playerPage(
+        title,
+        recording.duration,
+        recording.videoUrl,
+        previewImage,
+        shareUrl,
+      ),
       {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -93,20 +102,36 @@ function playerPage(
   title: string,
   duration: number,
   videoUrl: string,
+  thumbnailUrl: string | null,
+  shareUrl: string,
 ): string {
   const safeTitle = escapeHtml(title);
   const safeVideoUrl = escapeHtml(videoUrl);
+  const safeThumbnailUrl = thumbnailUrl ? escapeHtml(thumbnailUrl) : null;
+  const safeShareUrl = escapeHtml(shareUrl);
   const formattedDuration = formatDuration(duration);
+  const description = `Screen recording · ${formattedDuration}`;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${safeTitle} — Actionfy</title>
+  <title>${safeTitle} — Jack</title>
+
+  <!-- Open Graph -->
   <meta property="og:title" content="${safeTitle}" />
+  <meta property="og:description" content="${description}" />
   <meta property="og:type" content="video.other" />
+  <meta property="og:url" content="${safeShareUrl}" />
+  <meta property="og:site_name" content="Jack" />
   <meta property="og:video" content="${safeVideoUrl}" />
+  <meta property="og:video:type" content="video/mp4" />${safeThumbnailUrl ? `\n  <meta property="og:image" content="${safeThumbnailUrl}" />\n  <meta property="og:image:width" content="1280" />\n  <meta property="og:image:height" content="720" />` : ""}
+
+  <!-- Twitter / Slack -->
+  <meta name="twitter:card" content="${safeThumbnailUrl ? "summary_large_image" : "summary"}" />
+  <meta name="twitter:title" content="${safeTitle}" />
+  <meta name="twitter:description" content="${description}" />${safeThumbnailUrl ? `\n  <meta name="twitter:image" content="${safeThumbnailUrl}" />` : ""}
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -178,7 +203,7 @@ function playerPage(
       </div>
       <a class="download" href="${safeVideoUrl}" download>Download</a>
     </div>
-    <div class="brand">Shared via Actionfy</div>
+    <div class="brand">Shared via Jack</div>
   </div>
 </body>
 </html>`;
@@ -226,14 +251,14 @@ http.route({
       );
     }
 
-    // 4. Save user message
-    await ctx.runMutation(api.chats.sendMessage, {
+    // 4. Save user message (internal — no auth needed, HTTP action validates auth)
+    await ctx.runMutation(internal.chats.internalSendMessage, {
       threadId: threadId as any,
       content: messageContent,
     });
 
     // 5. Load the thread to get model
-    const thread = await ctx.runQuery(api.chats.getThread, {
+    const thread = await ctx.runQuery(internal.chats.internalGetThread, {
       threadId: threadId as any,
     });
     if (!thread) {
@@ -244,7 +269,7 @@ http.route({
     }
 
     // 6. Load message history
-    const messages = await ctx.runQuery(api.chats.getMessages, {
+    const messages = await ctx.runQuery(internal.chats.internalGetMessages, {
       threadId: threadId as any,
     });
 
@@ -298,18 +323,10 @@ http.route({
         const { done, value } = await reader.read();
 
         if (done) {
-          // Send terminal event and close
+          // Send terminal event and close.
+          // The client saves the assistant message via mutation after streaming.
           controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
           controller.close();
-
-          // Save the full assistant message
-          if (fullContent) {
-            await ctx.runMutation(api.chats.saveAssistantMessage, {
-              threadId: threadId as any,
-              content: fullContent,
-              model: thread.model,
-            });
-          }
           return;
         }
 

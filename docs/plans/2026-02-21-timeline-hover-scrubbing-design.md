@@ -32,5 +32,5 @@ Use SwiftUI `.onContinuousHover` modifier (Approach 1 — simplest, leverages ex
 
 ## Files Changed
 
-- `Sources/KinshasaApp/ScreenRecording/VideoEditorView.swift` — timeline gesture/hover logic
-- `Sources/KinshasaApp/ScreenRecording/MetalPreviewView.swift` — minor seek throttling adjustment if needed
+- `Sources/JackApp/ScreenRecording/VideoEditorView.swift` — timeline gesture/hover logic
+- `Sources/JackApp/ScreenRecording/MetalPreviewView.swift` — minor seek throttling adjustment if needed
