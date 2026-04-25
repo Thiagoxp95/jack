@@ -1,0 +1,24 @@
+{
+  "name": "jack-v2",
+  "version": "1.0.0",
+  "description": "SwiftPM-based macOS app with global voice-to-text dictation powered by local CoreML Parakeet.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "^2.2.3",
+    "ai": "^6.0.104",
+    "convex": "^1.32.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0"
+  }
+}

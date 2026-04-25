@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add a Screen Studio-like screen recording feature to Actionfy. Users record their screen (full display, specific window, or freeform region), optionally with microphone, system audio, and webcam overlay. After recording, a built-in video editor supports cutting, cinematic auto-zoom (follows cursor with smooth interpolation), cursor enlargement, and click highlights. The rendering pipeline uses Metal compute shaders for real-time preview and export.
+Add a Screen Studio-like screen recording feature to Jack. Users record their screen (full display, specific window, or freeform region), optionally with microphone, system audio, and webcam overlay. After recording, a built-in video editor supports cutting, cinematic auto-zoom (follows cursor with smooth interpolation), cursor enlargement, and click highlights. The rendering pipeline uses Metal compute shaders for real-time preview and export.
 
 ## Decisions
 
@@ -17,7 +17,7 @@ Add a Screen Studio-like screen recording feature to Actionfy. Users record thei
 - **Region selection**: Freeform drag + shift-snap to aspect ratios (16:9, 4:3, 1:1, 9:16)
 - **Audio**: Separate tracks (system + mic) with independent volume/mute in editor
 - **Export**: H.264 and H.265 with quality presets (Low/Medium/High/Lossless)
-- **Storage**: Exports to `~/Documents/Actionfy Recordings/`, raw files discarded after export
+- **Storage**: Exports to `~/Documents/Jack Recordings/`, raw files discarded after export
 - **Cursor tracking**: Record mouse position + clicks during capture as JSON sidecar
 
 ---
@@ -50,7 +50,7 @@ AVCaptureSession ──► Webcam frames ──► AVAssetWriter (webcam.mov)
 CGEvent tap ──► cursor positions + clicks ──► JSON sidecar (cursor-data.json)
 ```
 
-All raw files go to a temp session directory: `~/Library/Caches/Actionfy/recordings/<session-uuid>/`
+All raw files go to a temp session directory: `~/Library/Caches/Jack/recordings/<session-uuid>/`
 
 ### Data Flow — Editing/Export
 
@@ -144,7 +144,7 @@ Raw video + cursor data ──► MetalVideoRenderer ──► MTKView (preview)
 
 ### Window Specs
 - Standard `NSWindow`, resizable, minimum 900 x 600
-- Dark theme, title: "Actionfy — Edit Recording"
+- Dark theme, title: "Jack — Edit Recording"
 
 ### Layout
 
@@ -197,7 +197,7 @@ Raw video + cursor data ──► MetalVideoRenderer ──► MTKView (preview)
 - Codec: H.264 | H.265
 - Quality: Low | Medium | High | Lossless (with estimated file size)
 - Resolution: Original | 1080p | 720p
-- Destination: `~/Documents/Actionfy Recordings/` + filename preview
+- Destination: `~/Documents/Jack Recordings/` + filename preview
 - Progress bar during export
 
 ### Keyboard Shortcuts

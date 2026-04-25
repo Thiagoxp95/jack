@@ -5,21 +5,29 @@ CONF=${1:-release}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
-APP_NAME=${APP_NAME:-KinshasaApp}
-APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Actionfy V2}
+APP_NAME=${APP_NAME:-JackApp}
+APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Jack}
 
 # Keep bundle IDs unique per workspace path so macOS TCC/LaunchServices
 # never confuse this app with another clone of the same project.
-DEFAULT_BUNDLE_ID="com.actionfy.app.v2"
+DEFAULT_BUNDLE_ID="com.jack.app.v2"
 if command -v shasum >/dev/null 2>&1; then
   WORKSPACE_HASH=$(printf '%s' "$ROOT" | shasum -a 1 | awk '{print substr($1,1,10)}')
-  DEFAULT_BUNDLE_ID="com.actionfy.app.v2.ws${WORKSPACE_HASH}"
+  DEFAULT_BUNDLE_ID="com.jack.app.v2.ws${WORKSPACE_HASH}"
 fi
 BUNDLE_ID=${BUNDLE_ID:-$DEFAULT_BUNDLE_ID}
 MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-14.0}
 MENU_BAR_APP=${MENU_BAR_APP:-0}
 SIGNING_MODE=${SIGNING_MODE:-}
 APP_IDENTITY=${APP_IDENTITY:-}
+
+# Prefer a stable signing identity when available, unless ad-hoc was explicitly requested.
+if [[ -z "$APP_IDENTITY" && "$SIGNING_MODE" != "adhoc" ]]; then
+  if command -v security >/dev/null 2>&1; then
+    APP_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+      | awk '/[0-9]+\) [0-9A-F]{40} / { print $2; exit }')
+  fi
+fi
 
 if [[ -f "$ROOT/version.env" ]]; then
   source "$ROOT/version.env"
@@ -42,10 +50,10 @@ APP="$ROOT/${APP_NAME}.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
-# Convert Icon.icon to Icon.icns if present (requires iconutil).
-ICON_SOURCE="$ROOT/Icon.icon"
+# Convert Icon.iconset to Icon.icns if present (requires iconutil).
+ICON_SOURCE="$ROOT/Icon.iconset"
 ICON_TARGET="$ROOT/Icon.icns"
-if [[ -f "$ICON_SOURCE" ]]; then
+if [[ -d "$ICON_SOURCE" ]]; then
   iconutil --convert icns --output "$ICON_TARGET" "$ICON_SOURCE"
 fi
 
@@ -70,7 +78,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>${MARKETING_VERSION}</string>
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>${MACOS_MIN_VERSION}</string>
-    <key>NSMicrophoneUsageDescription</key><string>Actionfy needs microphone access to transcribe speech.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Jack needs microphone access to transcribe speech.</string>
     <key>LSUIElement</key><${LSUI_VALUE}/>
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>BuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>
@@ -182,16 +190,30 @@ if [[ ! -f "$APP_ENTITLEMENTS" ]]; then
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Add entitlements here if needed. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>
 PLIST
 fi
 
+# For hardened runtime development builds, keep microphone entitlement present
+# so TCC microphone authorization can be granted for this signed app identity.
+ENABLE_AUDIO_INPUT_ENTITLEMENT=${ENABLE_AUDIO_INPUT_ENTITLEMENT:-1}
+if [[ "$ENABLE_AUDIO_INPUT_ENTITLEMENT" == "1" ]]; then
+  if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.audio-input' "$APP_ENTITLEMENTS" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c 'Set :com.apple.security.device.audio-input true' "$APP_ENTITLEMENTS" >/dev/null
+  else
+    /usr/libexec/PlistBuddy -c 'Add :com.apple.security.device.audio-input bool true' "$APP_ENTITLEMENTS" >/dev/null
+  fi
+fi
+
 if [[ "$SIGNING_MODE" == "adhoc" || -z "$APP_IDENTITY" ]]; then
   CODESIGN_ARGS=(--force --sign "-")
+  echo "Signing mode: ad-hoc"
 else
   CODESIGN_ARGS=(--force --timestamp --options runtime --sign "$APP_IDENTITY")
+  echo "Signing mode: identity ($APP_IDENTITY)"
 fi
 
 # Sign embedded frameworks and their nested binaries before the app bundle.
