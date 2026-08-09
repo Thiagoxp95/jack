@@ -14,7 +14,6 @@ final class EditorWindowController {
     func show(
         session: RecordingSession,
         initialZoomKeyframes: [ZoomKeyframe] = [],
-        authController: AuthController?,
         spaceController: SpaceController?,
         onSave: @escaping @MainActor (VideoEditorController, String) -> Void,
         onDiscard: @escaping @MainActor () -> Void
@@ -27,7 +26,6 @@ final class EditorWindowController {
 
         let editorView = VideoEditorView(
             editor: editor,
-            authController: authController,
             spaceController: spaceController,
             onSave: { [weak self] title in
                 guard let self, let editor = self.editorController else { return }

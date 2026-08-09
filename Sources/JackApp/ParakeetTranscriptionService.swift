@@ -130,7 +130,7 @@ private actor CoreMLParakeetEngine {
         }
 
         do {
-            let result = try await manager.transcribeStreaming(targetURL, source: .microphone)
+            let result = try await manager.transcribe(targetURL, source: .microphone)
             let wordTimings: [WordTiming] = (result.tokenTimings ?? []).map { timing in
                 WordTiming(
                     word: timing.token,
@@ -150,7 +150,7 @@ private actor CoreMLParakeetEngine {
         let warmupURL = try makeWarmupAudioURL()
 
         do {
-            _ = try await manager.transcribeStreaming(warmupURL, source: .microphone)
+            _ = try await manager.transcribe(warmupURL, source: .microphone)
         } catch {
             throw ParakeetTranscriptionError.transcriptionFailed(error.localizedDescription)
         }
@@ -175,9 +175,7 @@ private actor CoreMLParakeetEngine {
             let manager = AsrManager(
                 config: ASRConfig(
                     sampleRate: 16_000,
-                    tdtConfig: .default,
-                    streamingEnabled: true,
-                    streamingThreshold: 1
+                    tdtConfig: .default
                 )
             )
             try await manager.initialize(models: models)

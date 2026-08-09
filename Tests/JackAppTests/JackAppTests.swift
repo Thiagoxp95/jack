@@ -351,7 +351,7 @@ final class SubtitleModelTests: XCTestCase {
         XCTAssertFalse(config.enabled)
         XCTAssertEqual(config.position, .bottom)
         XCTAssertEqual(config.audioSource, .microphone)
-        XCTAssertEqual(config.fontSize, 24)
+        XCTAssertEqual(config.fontSize, 72)
         XCTAssertTrue(config.backgroundEnabled)
     }
 }

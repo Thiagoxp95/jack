@@ -1,11 +1,8 @@
-import ClerkKit
 import Foundation
 
 /// Lightweight HTTP client for the Convex HTTP API.
 ///
-/// Bypasses ConvexMobile's Rust bridge entirely — uses `URLSession` with a
-/// Clerk JWT. This avoids the deadlock where the Rust bridge needs MainActor
-/// for token refresh but MainActor is saturated with subscription callbacks.
+/// Uses `URLSession` directly, bypassing ConvexMobile's Rust bridge.
 enum ConvexHTTPClient {
 
     enum Error: LocalizedError {
@@ -26,17 +23,11 @@ enum ConvexHTTPClient {
         }
     }
 
-    /// Get a Clerk JWT for the Convex template. Must be called from MainActor
-    /// or with a captured session reference.
+    /// Auth has been removed from the app, so there is never a token.
+    /// Cloud-backed features catch this error and degrade gracefully.
     @MainActor
     static func getToken() async throws -> String {
-        guard let session = Clerk.shared.session else {
-            throw Error.notSignedIn
-        }
-        guard let jwt = try await session.getToken(.init(template: "convex")) else {
-            throw Error.noToken
-        }
-        return jwt
+        throw Error.notSignedIn
     }
 
     /// Call a Convex mutation via the HTTP API.

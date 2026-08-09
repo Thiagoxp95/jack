@@ -10,8 +10,8 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Thiago Pereira",
+  "license": "MIT",
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^2.2.3",
     "ai": "^6.0.104",

@@ -1,48 +1,83 @@
-import ClerkKit
 import SwiftUI
 import UserNotifications
-
-/// App-level debug logger (mirrors TodoListController's diagLog).
-private func appDiagLog(_ message: String) {
-    NSLog("%@", message)
-    let logFile = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("jack-reminder-diag.log")
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let line = "[\(timestamp)] \(message)\n"
-    if let data = line.data(using: .utf8) {
-        if FileManager.default.fileExists(atPath: logFile.path) {
-            if let handle = try? FileHandle(forWritingTo: logFile) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            }
-        } else {
-            try? data.write(to: logFile)
-        }
-    }
-}
 
 @main
 struct JackApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    init() {
-        NSLog("[Jack] Configuring Clerk with key prefix: %@", String(AppConfig.clerkPublishableKey.prefix(20)))
-        let redirectConfig = Clerk.Options.RedirectConfig(
-            redirectUrl: "jack://oauth-callback",
-            callbackUrlScheme: "jack"
-        )
-        Clerk.configure(
-            publishableKey: AppConfig.clerkPublishableKey,
-            options: .init(redirectConfig: redirectConfig)
-        )
-        NSLog("[Jack] Clerk configured. isLoaded=%d", Clerk.shared.isLoaded ? 1 : 0)
-    }
-
     var body: some Scene {
         WindowGroup {
-            AuthGateView()
-                .environment(Clerk.shared)
+            RootView()
+        }
+    }
+}
+
+// MARK: - Root
+
+/// Creates the ``DictationController`` and ``RecordingSessionController``,
+/// initializes them, and presents ``ContentView`` (or the onboarding wizard).
+private struct RootView: View {
+    @StateObject private var controller = DictationController()
+    @State private var recordingController = RecordingSessionController()
+    @State private var spaceController = SpaceController()
+
+    var body: some View {
+        Group {
+            if controller.shouldShowOnboardingWizard {
+                OnboardingWizardView(controller: controller)
+                    .frame(minWidth: 760, minHeight: 680)
+            } else {
+                ContentView(
+                    controller: controller,
+                    recordingController: recordingController,
+                    spaceController: spaceController,
+                    todoListController: TodoListController.shared
+                )
+                .frame(minWidth: 640, minHeight: 460)
+            }
+        }
+            .task {
+                // Wire up controllers immediately (synchronous, no network)
+                recordingController.spaceController = spaceController
+                controller.spaceController = spaceController
+                TodoSideSheetController.shared.todoListController = TodoListController.shared
+                TodoSideSheetController.shared.spaceController = spaceController
+                ChatSideSheetController.shared.chatController = ChatController.shared
+                ChatSideSheetController.shared.spaceController = spaceController
+
+                // Check local permissions (fast, no network)
+                await controller.initialize()
+                await recordingController.initialize()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleScreenRecording)) { _ in
+                Task {
+                    await toggleScreenRecordingFromShortcut()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .todoSheetCommitInput)) { _ in
+                TodoSideSheetController.shared.commitTextInput()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                controller.applicationWillTerminate()
+            }
+    }
+
+    private func toggleScreenRecordingFromShortcut() async {
+        switch recordingController.state {
+        case .recording, .paused:
+            await recordingController.stopRecording()
+        case .idle:
+            do {
+                // Refresh sources so the display list is current, then
+                // auto-select the display under the mouse cursor.
+                await recordingController.refreshAvailableSources()
+                recordingController.selectDisplayUnderCursor()
+                try await recordingController.startRecording()
+            } catch {
+                NSLog("[Jack] Quick screen recording failed: %@", "\(error)")
+            }
+        default:
+            break
         }
     }
 }
@@ -62,6 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
         statusBarController.setup()
 
+        // Delay the first update check slightly so launch work settles.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            AppUpdater.shared.start()
+        }
+
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
@@ -75,23 +116,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let showInStatusBar = defaults.object(forKey: "show_in_status_bar") as? Bool ?? true
         if !showInStatusBar {
             statusBarController.hide()
-        }
-
-        appDiagLog("[APP] applicationDidFinishLaunching — starting Clerk watch loop")
-
-        // Start reminder polling once Clerk session is available.
-        // Poll every 2s until Clerk is loaded + has a session, then start.
-        Task { @MainActor in
-            let clerk = Clerk.shared
-            var waitCount = 0
-            // Wait for Clerk to load and have a session
-            while !clerk.isLoaded || clerk.session == nil {
-                waitCount += 1
-                appDiagLog("[APP] Waiting for Clerk... attempt \(waitCount), isLoaded=\(clerk.isLoaded), session=\(clerk.session != nil ? "YES" : "nil")")
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-            appDiagLog("[APP] Clerk session ready — starting reminder polling")
-            TodoListController.shared.startReminderPolling()
         }
     }
 

@@ -1,4 +1,3 @@
-import ClerkKit
 import SwiftUI
 
 
@@ -6,7 +5,6 @@ struct ContentView: View {
     @ObservedObject var controller: DictationController
     @Bindable var recordingController: RecordingSessionController
     var spaceController: SpaceController
-    var authController: AuthController
     @State private var selectedSection: SettingsSection = .overview
     @State private var isLoadingSetup = false
     @State private var setupWindow = SetupWindowController()
@@ -81,56 +79,7 @@ struct ContentView: View {
             }
             .navigationTitle("")
             .safeAreaInset(edge: .bottom) {
-                if let user = Clerk.shared.user {
-                    HStack(spacing: 10) {
-                        AsyncImage(url: URL(string: user.imageUrl)) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            default:
-                                Text(userInitials(user))
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .background(spaceController.activeSpaceColor.color.gradient)
-                            }
-                        }
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            if let firstName = user.firstName, let lastName = user.lastName {
-                                Text("\(firstName) \(lastName)")
-                                    .font(.caption.weight(.semibold))
-                                    .lineLimit(1)
-                            }
-                            if let email = user.emailAddresses.first?.emailAddress {
-                                Text(email)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button {
-                            Task {
-                                try? await Clerk.shared.auth.signOut()
-                            }
-                        } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Sign Out")
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                }
+                UpdateCardView(updater: AppUpdater.shared, accent: spaceController.activeSpaceColor.color)
             }
             .tint(spaceController.activeSpaceColor.color)
         } detail: {
@@ -976,13 +925,6 @@ struct ContentView: View {
             Text(char)
                 .font(.system(size: size))
         }
-    }
-
-    private func userInitials(_ user: ClerkKit.User) -> String {
-        let first = user.firstName?.prefix(1) ?? ""
-        let last = user.lastName?.prefix(1) ?? ""
-        let initials = "\(first)\(last)"
-        return initials.isEmpty ? "?" : initials.uppercased()
     }
 
     private func permissionRow(title: String, granted: Bool, detail: String, action: @escaping () -> Void) -> some View {

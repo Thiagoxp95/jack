@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ZIP=${1:?
 "Usage: $0 JackApp-<ver>.zip"}
-FEED_URL=${2:-"https://example.com/appcast.xml"}
+FEED_URL=${2:-"https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml"}
 PRIVATE_KEY_FILE=${SPARKLE_PRIVATE_KEY_FILE:-}
 if [[ -z "$PRIVATE_KEY_FILE" ]]; then
   echo "Set SPARKLE_PRIVATE_KEY_FILE to your ed25519 private key (Sparkle)." >&2
@@ -55,7 +55,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-DOWNLOAD_URL_PREFIX=${SPARKLE_DOWNLOAD_URL_PREFIX:-"https://example.com/downloads/v${VERSION}/"}
+DOWNLOAD_URL_PREFIX=${SPARKLE_DOWNLOAD_URL_PREFIX:-"https://github.com/Thiagoxp95/jack/releases/download/v${VERSION}/"}
 
 if ! command -v generate_appcast >/dev/null; then
   echo "generate_appcast not found in PATH. Install Sparkle tools." >&2
@@ -64,7 +64,9 @@ fi
 
 WORK_DIR=$(mktemp -d /tmp/appcast.XXXXXX)
 
-cp "$ROOT/appcast.xml" "$WORK_DIR/appcast.xml"
+if [[ -f "$ROOT/appcast.xml" ]]; then
+  cp "$ROOT/appcast.xml" "$WORK_DIR/appcast.xml"
+fi
 cp "$ZIP" "$WORK_DIR/$ZIP_NAME"
 cp "$NOTES_HTML" "$WORK_DIR/$ZIP_BASE.html"
 

@@ -104,7 +104,6 @@ final class CameraTracker {
 
 struct VideoEditorView: View {
     @Bindable var editor: VideoEditorController
-    var authController: AuthController?
     var spaceController: SpaceController?
     var onSave: (String) -> Void
     var onDiscard: () -> Void

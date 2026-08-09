@@ -13,13 +13,17 @@ settings:
 
 packages:
   FluidAudio:
-    path: Packages/FluidAudio
-  clerk-ios:
-    url: https://github.com/clerk/clerk-ios.git
-    from: "1.0.0"
+    url: https://github.com/FluidInference/FluidAudio.git
+    exactVersion: "0.7.12"
   convex-swift:
     url: https://github.com/get-convex/convex-swift.git
     from: "0.5.0"
+  swift-markdown-ui:
+    url: https://github.com/gonzalezreal/swift-markdown-ui.git
+    from: "2.4.1"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    from: "2.6.0"
 
 targets:
   JackApp:
@@ -38,8 +42,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jack.app.v2
-        MARKETING_VERSION: "1.0.1"
-        CURRENT_PROJECT_VERSION: "2"
+        MARKETING_VERSION: "1.1.0"
+        CURRENT_PROJECT_VERSION: "3"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Jackly
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.productivity"
@@ -60,10 +64,12 @@ targets:
     dependencies:
       - package: FluidAudio
         product: FluidAudio
-      - package: clerk-ios
-        product: ClerkKit
       - package: convex-swift
         product: ConvexMobile
+      - package: swift-markdown-ui
+        product: MarkdownUI
+      - package: Sparkle
+        product: Sparkle
     entitlements:
       path: JackApp.entitlements
       properties:

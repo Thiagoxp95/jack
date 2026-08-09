@@ -8,14 +8,21 @@ cd "$ROOT"
 APP_NAME=${APP_NAME:-JackApp}
 APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Jack}
 
-# Keep bundle IDs unique per workspace path so macOS TCC/LaunchServices
-# never confuse this app with another clone of the same project.
+# Keep bundle IDs unique per workspace path for DEV builds so macOS
+# TCC/LaunchServices never confuse this app with another clone of the same
+# project. Release/distribution builds MUST use the stable bundle id, or
+# Sparkle cannot update the installed app in place (RELEASE_BUILD=1).
 DEFAULT_BUNDLE_ID="com.jack.app.v2"
-if command -v shasum >/dev/null 2>&1; then
+RELEASE_BUILD=${RELEASE_BUILD:-0}
+if [[ "$RELEASE_BUILD" != "1" ]] && command -v shasum >/dev/null 2>&1; then
   WORKSPACE_HASH=$(printf '%s' "$ROOT" | shasum -a 1 | awk '{print substr($1,1,10)}')
   DEFAULT_BUNDLE_ID="com.jack.app.v2.ws${WORKSPACE_HASH}"
 fi
 BUNDLE_ID=${BUNDLE_ID:-$DEFAULT_BUNDLE_ID}
+
+# Sparkle auto-update configuration (see Sources/JackApp/Updater/).
+SPARKLE_FEED_URL=${SPARKLE_FEED_URL:-https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml}
+SPARKLE_PUBLIC_ED_KEY=${SPARKLE_PUBLIC_ED_KEY:-6B0KocpR2cegqfvRlSVZ+JdMXQ/uuLcJlEf/AAgH90Y=}
 MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-14.0}
 MENU_BAR_APP=${MENU_BAR_APP:-0}
 SIGNING_MODE=${SIGNING_MODE:-}
@@ -83,6 +90,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>BuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>
     <key>GitCommit</key><string>${GIT_COMMIT}</string>
+    <key>SUFeedURL</key><string>${SPARKLE_FEED_URL}</string>
+    <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_ED_KEY}</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><true/>
 </dict>
 </plist>
 PLIST

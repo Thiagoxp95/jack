@@ -45,7 +45,6 @@ final class RecordingSessionController {
 
     // MARK: - External Controllers
 
-    var authController: AuthController?
     var spaceController: SpaceController?
 
     // MARK: - User-Editable Setup Config
@@ -485,7 +484,6 @@ final class RecordingSessionController {
             editorWindow.show(
                 session: session,
                 initialZoomKeyframes: detectedZoomKeyframes,
-                authController: authController,
                 spaceController: spaceController,
                 onSave: { [weak self] editor, title in
                     self?.saveEditing(editor: editor, title: title)

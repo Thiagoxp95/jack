@@ -110,6 +110,11 @@ final class StatusBarController: NSObject {
 
         menu.addItem(.separator())
 
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)
+        menu.addItem(updateItem)
+
         let quitItem = NSMenuItem(title: "Quit Jack", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         quitItem.target = self
@@ -119,6 +124,10 @@ final class StatusBarController: NSObject {
     }
 
     // MARK: - Actions
+
+    @objc private func checkForUpdates() {
+        AppUpdater.shared.checkForUpdates()
+    }
 
     @objc func toggleTodoSheet() {
         TodoSideSheetController.shared.toggle()

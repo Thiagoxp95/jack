@@ -1825,11 +1825,7 @@ final class DictationController: ObservableObject {
         let version: AsrModelVersion = choice == .parakeetV3 ? .v3 : .v2
         Task {
             do {
-                try await AsrModels.download(version: version) { completed, total in
-                    Task { @MainActor in
-                        self.modelDownloadProgress = Double(completed) / Double(max(total, 1))
-                    }
-                }
+                try await AsrModels.download(version: version)
                 self.modelDownloadProgress = 1.0
                 self.isDownloadingModel = false
             } catch {
