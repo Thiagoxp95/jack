@@ -31,6 +31,9 @@ concurrency:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      HAVE_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      HAVE_NOTARY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +70,7 @@ jobs:
           restore-keys: spm-release-${{ runner.os }}-
 
       - name: Import signing certificate
-        if: steps.guard.outputs.skip == 'false' && secrets.MACOS_CERT_P12 != ''
+        if: steps.guard.outputs.skip == 'false' && env.HAVE_CERT == 'true'
         env:
           CERT: ${{ secrets.MACOS_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -95,7 +98,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent JackApp.app "JackApp-${{ steps.version.outputs.version }}.zip"
 
       - name: Notarize
-        if: steps.guard.outputs.skip == 'false' && secrets.APP_STORE_CONNECT_API_KEY_P8 != ''
+        if: steps.guard.outputs.skip == 'false' && env.HAVE_NOTARY_KEY == 'true'
         env:
           API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
