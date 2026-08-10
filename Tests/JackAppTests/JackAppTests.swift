@@ -180,3 +180,74 @@ final class TranscriptionResultTests: XCTestCase {
         XCTAssertEqual(result.wordTimings[0].word, "hello")
     }
 }
+
+final class FuzzyMatchTests: XCTestCase {
+    private let catalog = [
+        OpenRouterModelInfo(id: "google/gemini-3.1-flash-lite", name: "Google: Gemini 3.1 Flash Lite", contextLength: 1_048_576, isFree: false),
+        OpenRouterModelInfo(id: "google/gemini-3.1-flash-lite-image", name: "Google: Gemini 3.1 Flash Lite Image", contextLength: 65_536, isFree: false),
+        OpenRouterModelInfo(id: "anthropic/claude-haiku-4.5", name: "Anthropic: Claude Haiku 4.5", contextLength: 200_000, isFree: false),
+        OpenRouterModelInfo(id: "openai/gpt-5-nano", name: "OpenAI: GPT-5 Nano", contextLength: 400_000, isFree: false),
+    ]
+
+    func testAbbreviationMatchesAcrossSegments() {
+        // "g31fl" is a subsequence of the id — a contains() filter finds nothing.
+        let ranked = FuzzyMatch.rank(query: "g31fl", models: catalog)
+        XCTAssertEqual(ranked.first?.id, "google/gemini-3.1-flash-lite")
+    }
+
+    func testShorterCandidateWinsTieOnPrefixMatch() {
+        let ranked = FuzzyMatch.rank(query: "gemini31flashlite", models: catalog)
+        XCTAssertEqual(ranked.first?.id, "google/gemini-3.1-flash-lite")
+        XCTAssertEqual(ranked.count, 2)
+    }
+
+    func testNonSubsequenceIsExcluded() {
+        XCTAssertNil(FuzzyMatch.score(query: "zzz", candidate: "google/gemini-3.1-flash-lite"))
+        XCTAssertTrue(FuzzyMatch.rank(query: "zzz", models: catalog).isEmpty)
+    }
+
+    func testEmptyQueryReturnsCatalogUnchanged() {
+        XCTAssertEqual(FuzzyMatch.rank(query: "   ", models: catalog).map(\.id), catalog.map(\.id))
+    }
+
+    func testMatchesOnDisplayNameNotJustId() {
+        let ranked = FuzzyMatch.rank(query: "anthropic claude", models: catalog)
+        XCTAssertEqual(ranked.first?.id, "anthropic/claude-haiku-4.5")
+    }
+}
+
+final class CleanupGuardTests: XCTestCase {
+    func testRejectsAnswerToTheTranscript() {
+        // The reported failure: the model answered instead of cleaning.
+        XCTAssertFalse(DictationController.resemblesCleanup(
+            of: "Witch LLM model are you?",
+            candidate: "I am Google Gemini."
+        ))
+    }
+
+    func testAcceptsOrdinaryFillerRemoval() {
+        XCTAssertTrue(DictationController.resemblesCleanup(
+            of: "so um I mean like the thing is you know basically it works",
+            candidate: "The thing is, it works."
+        ))
+    }
+
+    func testAcceptsTechNameCorrections() {
+        XCTAssertTrue(DictationController.resemblesCleanup(
+            of: "I was using cloud code with super base and versa cell yesterday",
+            candidate: "I was using Claude Code with Supabase and Vercel yesterday."
+        ))
+    }
+
+    func testAcceptsQuestionCleanedAsAQuestion() {
+        XCTAssertTrue(DictationController.resemblesCleanup(
+            of: "Witch LLM model are you?",
+            candidate: "Which LLM model are you?"
+        ))
+    }
+
+    func testShortTranscriptsSkipTheGuard() {
+        // Too few words for the ratio to mean anything; upstream handles empties.
+        XCTAssertTrue(DictationController.resemblesCleanup(of: "cloud code", candidate: "Claude Code"))
+    }
+}

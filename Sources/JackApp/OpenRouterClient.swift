@@ -27,14 +27,29 @@ enum OpenRouterClient {
     static let chatCompletionsURL = "https://openrouter.ai/api/v1/chat/completions"
     static let modelsURL = "https://openrouter.ai/api/v1/models"
 
-    /// Fast and cheap — cleanup sits on the paste hot path.
-    static let defaultCleanupModel = "google/gemini-2.5-flash-lite"
-    /// Note-vs-todo is a one-line classification; the same fast model is plenty.
+    /// Fast, cheap, and — unlike 2.5 Flash Lite — reliable at treating the
+    /// transcript as data instead of answering questions inside it.
+    static let defaultCleanupModel = "google/gemini-3.1-flash-lite"
+    /// Note-vs-todo is a one-line classification; a cheaper model is plenty.
     static let defaultRoutingModel = "google/gemini-2.5-flash-lite"
 
     /// Model ids Jack once shipped as defaults that OpenRouter has since
     /// retired. Stored settings pointing at these are silently re-pointed.
     static let retiredDefaults: Set<String> = ["google/gemini-2.0-flash-001"]
+
+    /// Cleanup models Jack shipped as the default before and has since moved
+    /// off, plus the unversioned "latest" aliases — those silently drift onto
+    /// whatever Google promotes next, which is how a cleanup setting ends up on
+    /// a model nobody chose. These still work, so they are only re-pointed by
+    /// the one-time migration in `DictationController` — never on every launch,
+    /// or a user who deliberately picks one would have it overwritten forever.
+    static let supersededCleanupDefaults: Set<String> = [
+        "google/gemini-2.5-flash-lite",
+        "google/gemini-flash-latest",
+        "~google/gemini-flash-latest",
+        "google/gemini-flash-lite-latest",
+        "~google/gemini-flash-lite-latest",
+    ]
 
     struct Message {
         let role: String
@@ -90,6 +105,10 @@ enum OpenRouterClient {
             "model": model,
             "temperature": 0,
             "max_tokens": maxTokens,
+            // Cleanup and routing need zero reasoning, and thinking tokens are
+            // pure latency on the paste hot path. OpenRouter drops this for
+            // providers that don't support it.
+            "reasoning": ["enabled": false],
             "messages": messages.map { message -> [String: String] in
                 let content = (isQwen3 && message.role == "user")
                     ? "\(message.content) /no_think"

@@ -22,8 +22,6 @@ struct ContentView: View {
     @State private var showTodoSheetCapture = false
     @State private var showChatSheetCapture = false
     @State private var knowledgeTab: KnowledgeTab = .notes
-    @State private var cleanupModelSearch = ""
-    @State private var routingModelSearch = ""
 
     var body: some View {
         NavigationSplitView {
@@ -562,11 +560,11 @@ struct ContentView: View {
                 Toggle("Enable cleanup", isOn: $controller.cleanupEnabled)
 
                 if controller.cleanupEnabled {
-                    modelPickerRow(
+                    ModelPickerField(
                         icon: "wand.and.rays",
                         title: "Cleanup Model",
-                        selection: $controller.cleanupModelId,
-                        searchText: $cleanupModelSearch
+                        models: controller.openRouterModels,
+                        selection: $controller.cleanupModelId
                     )
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -915,11 +913,11 @@ struct ContentView: View {
             title: "Smart Routing (Auto Mode)",
             subtitle: "Press \(controller.autoSwitchKeyDisplayName) while recording and a model decides: note or todo."
         ) {
-            modelPickerRow(
+            ModelPickerField(
                 icon: "arrow.triangle.branch",
                 title: "Routing Model",
-                selection: $controller.routingModelId,
-                searchText: $routingModelSearch
+                models: controller.openRouterModels,
+                selection: $controller.routingModelId
             )
 
             if let verdict = controller.lastIntentVerdictSummary {
@@ -932,80 +930,6 @@ struct ContentView: View {
             Text("The transcript, OCR text from any screenshots you grabbed, and the frontmost app/window are sent to the model. Screenshots go as recognized text, not as images. Undecidable captures become notes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    /// Model id chooser backed by OpenRouter's catalog. The catalog runs to
-    /// hundreds of entries, so the menu is filtered by a search field.
-    @ViewBuilder
-    private func modelPickerRow(
-        icon: String,
-        title: String,
-        selection: Binding<String>,
-        searchText: Binding<String>
-    ) -> some View {
-        let query = searchText.wrappedValue.trimmingCharacters(in: .whitespaces)
-        let matches = controller.openRouterModels.filter { model in
-            query.isEmpty
-                || model.name.localizedCaseInsensitiveContains(query)
-                || model.id.localizedCaseInsensitiveContains(query)
-        }
-
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-                Text(title)
-                    .font(.body.weight(.medium))
-
-                Spacer()
-
-                Menu {
-                    if controller.openRouterModels.isEmpty {
-                        Text("No models loaded — hit Refresh Models above")
-                    } else {
-                        // Cap the menu: macOS chokes rendering 300+ items.
-                        ForEach(matches.prefix(60)) { model in
-                            Button {
-                                selection.wrappedValue = model.id
-                            } label: {
-                                Text(model.isFree ? "\(model.displayName) · free" : model.displayName)
-                            }
-                        }
-                        if matches.count > 60 {
-                            Divider()
-                            Text("\(matches.count - 60) more — narrow the search")
-                        }
-                    }
-                } label: {
-                    Text(controller.displayName(forModelId: selection.wrappedValue))
-                        .lineLimit(1)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            }
-
-            HStack(spacing: 8) {
-                TextField("Search models…", text: searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-
-                Text(selection.wrappedValue)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .textSelection(.enabled)
-            }
-
-            // A model id that isn't in the catalog 404s at request time, which
-            // would otherwise only show up as a silent cleanup failure.
-            if !controller.openRouterModels.isEmpty,
-               !controller.openRouterModels.contains(where: { $0.id == selection.wrappedValue }) {
-                Label("Not in OpenRouter's catalog — requests will fail. Pick another.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
         }
     }
 
