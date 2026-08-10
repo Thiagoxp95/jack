@@ -146,6 +146,55 @@ final class NoteService {
         return fileURL
     }
 
+    /// Remove a single note (`## <timestamp>` section) from its daily file.
+    /// Deletes the file entirely when no notes remain.
+    func deleteNote(dayStamp: String, timestamp: String) throws {
+        let fileURL = notesDirectoryURL.appendingPathComponent("\(dayStamp).md")
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        var kept: [String] = []
+        var skipping = false
+
+        for line in content.components(separatedBy: "\n") {
+            if line.hasPrefix("## ") {
+                let ts = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                skipping = (ts == timestamp)
+                if skipping { continue }
+            }
+            if !skipping {
+                kept.append(line)
+            }
+        }
+
+        let remaining = kept.joined(separator: "\n")
+        if remaining.components(separatedBy: "\n").contains(where: { $0.hasPrefix("## ") }) {
+            try remaining.write(to: fileURL, atomically: true, encoding: .utf8)
+        } else {
+            try fileManager.removeItem(at: fileURL)
+        }
+    }
+
+    /// Directory for note screenshot attachments: `Jack Notes/attachments/yyyy-MM-dd/`.
+    /// Created on demand.
+    func attachmentsDirectoryURL(for date: Date = .now) throws -> URL {
+        let dayStamp = Self.dayFormatter.string(from: date)
+        let url = notesDirectoryURL
+            .appendingPathComponent("attachments", isDirectory: true)
+            .appendingPathComponent(dayStamp, isDirectory: true)
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Markdown-relative path (from the notes directory) for an attachment URL.
+    func relativeAttachmentPath(for fileURL: URL) -> String {
+        let base = notesDirectoryURL.path.hasSuffix("/") ? notesDirectoryURL.path : notesDirectoryURL.path + "/"
+        if fileURL.path.hasPrefix(base) {
+            return String(fileURL.path.dropFirst(base.count))
+        }
+        return fileURL.path
+    }
+
     static func defaultNotesDirectoryURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents", isDirectory: true)

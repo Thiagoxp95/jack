@@ -2,6 +2,7 @@ import ApplicationServices
 import AppKit
 import FluidAudio
 import Foundation
+import JackKnowledgeKit
 import os.log
 import ServiceManagement
 import UniformTypeIdentifiers
@@ -413,6 +414,11 @@ final class DictationController: ObservableObject {
     private let transcription = ParakeetTranscriptionService()
     private let pasteService = PasteService()
     private let noteService = NoteService()
+    let knowledgeService = KnowledgeService()
+    private let noteScreenshot = NoteScreenshotController()
+    /// Screenshots captured during the current note-mode recording, attached to
+    /// the note once the transcript lands.
+    private var pendingNoteScreenshots: [URL] = []
     private let duckingService = SystemAudioDuckingService()
     private let slackMuteService = SlackMuteService()
     private let bubble = FloatingBubbleController()
@@ -795,7 +801,34 @@ final class DictationController: ObservableObject {
         shortcutMonitor.onEscapePressed = { [weak self] in
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
-                self.cancelRecording()
+                // ESC first dismisses the note-screenshot overlay; only a second
+                // ESC (or ESC outside note mode) cancels the recording.
+                if self.noteScreenshot.isVisible {
+                    self.noteScreenshot.hide()
+                } else {
+                    self.cancelRecording()
+                }
+            }
+        }
+
+        noteScreenshot.attachmentsDirectoryProvider = { [noteService] in
+            try noteService.attachmentsDirectoryURL()
+        }
+        noteScreenshot.onCapture = { [weak self] fileURL, ocrText in
+            guard let self else { return }
+            self.pendingNoteScreenshots.append(fileURL)
+            self.showBubble(message: "Screenshot attached", isRecording: self.isRecording)
+            // OCR text joins the knowledge base alongside the spoken note.
+            let trimmedOCR = ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedOCR.isEmpty {
+                let knowledge = self.knowledgeService
+                Task.detached(priority: .utility) {
+                    _ = await knowledge.ingest(
+                        text: trimmedOCR,
+                        source: .screenshotOCR,
+                        imagePath: fileURL.path
+                    )
+                }
             }
         }
 
@@ -817,6 +850,38 @@ final class DictationController: ObservableObject {
             _ = startParakeetPreparationIfNeeded(showReadyStatus: shortcutStarted)
         } else {
             statusText = "Ready. Press \(invocationKeyDisplayName) globally (\(mode.title))."
+        }
+
+        bootstrapKnowledgeBase()
+    }
+
+    /// One-time migration of pre-existing notes into the knowledge base, then
+    /// embed any backlog. Runs off the main actor; failures are non-fatal.
+    private func bootstrapKnowledgeBase() {
+        let knowledge = knowledgeService
+        let existingNotes = noteService.loadAllNotes()
+        Task.detached(priority: .utility) {
+            let storeDirectory = knowledge.store.directoryURL
+            let markerURL = storeDirectory.appendingPathComponent(".migrated")
+            if !FileManager.default.fileExists(atPath: markerURL.path) {
+                try? FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+                for note in existingNotes {
+                    _ = await knowledge.ingest(
+                        text: note.text,
+                        source: .note,
+                        date: note.date,
+                        dayStamp: note.dayStamp
+                    )
+                }
+                try? Data().write(to: markerURL)
+                if !existingNotes.isEmpty {
+                    NSLog("[Jack] Knowledge base: migrated %d existing notes", existingNotes.count)
+                }
+            }
+            let embedded = await knowledge.backfillMissingEmbeddings()
+            if embedded > 0 {
+                NSLog("[Jack] Knowledge base: backfilled %d embeddings", embedded)
+            }
         }
     }
 
@@ -1443,6 +1508,7 @@ final class DictationController: ObservableObject {
         recordingOutputMode = recordingOutputMode == .voiceNote ? .paste : .voiceNote
         statusText = listeningStatusText(isLive: false)
         showBubble(message: listeningBubbleMessage(), isRecording: true)
+        updateNoteScreenshotOverlay()
     }
 
     private func setTodoMode() {
@@ -1452,6 +1518,7 @@ final class DictationController: ObservableObject {
         recordingOutputMode = recordingOutputMode == .todo ? .paste : .todo
         statusText = listeningStatusText(isLive: false)
         showBubble(message: listeningBubbleMessage(), isRecording: true)
+        updateNoteScreenshotOverlay()
     }
 
     private func setAiChatMode() {
@@ -1461,6 +1528,17 @@ final class DictationController: ObservableObject {
         recordingOutputMode = recordingOutputMode == .aiChat ? .paste : .aiChat
         statusText = listeningStatusText(isLive: false)
         showBubble(message: listeningBubbleMessage(), isRecording: true)
+        updateNoteScreenshotOverlay()
+    }
+
+    /// The screenshot crosshair covers the screen whenever note-mode dictation
+    /// is live; leaving note mode (or stopping) tears it down.
+    private func updateNoteScreenshotOverlay() {
+        if isRecording, !isTranscribing, recordingOutputMode == .voiceNote {
+            noteScreenshot.show()
+        } else {
+            noteScreenshot.hide()
+        }
     }
 
     private func cycleSpace(direction: GlobalFnShortcutMonitor.SpaceCycleDirection) {
@@ -1657,6 +1735,7 @@ final class DictationController: ObservableObject {
         isStartingRecording = false
         isRecording = false
         shortcutMonitor.setRecordingControlsActive(false)
+        noteScreenshot.hide() // keep pendingNoteScreenshots for the note attach
         playSoundEffect()
         performHaptic()
         duckingService.restoreIfNeeded()
@@ -1731,6 +1810,8 @@ final class DictationController: ObservableObject {
         stopLiveTranscriptionLoop()
         stopHoldReleaseWatchdog()
         stopRiveReactiveLoop(resetInputs: true)
+        noteScreenshot.hide()
+        pendingNoteScreenshots = []
         recordingOutputMode = .paste
         statusText = "Recording cancelled."
         showTransientBubble(message: "Cancelled", duration: 0.8)
@@ -2021,13 +2102,35 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// Note text plus markdown image links for any screenshots captured during
+    /// this note-mode recording (paths relative to the notes directory).
+    private func noteBodyWithScreenshots(_ text: String) -> String {
+        guard !pendingNoteScreenshots.isEmpty else { return text }
+        let links = pendingNoteScreenshots
+            .map { "![Screenshot](\(noteService.relativeAttachmentPath(for: $0)))" }
+            .joined(separator: "\n")
+        return text.isEmpty ? links : "\(text)\n\n\(links)"
+    }
+
     private func handleTranscriptionResult(_ text: String) async {
         isTranscribing = false
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            // No speech, but screenshots were captured in note mode — keep them
+            // as an image-only note rather than dropping them.
+            if recordingOutputMode == .voiceNote, !pendingNoteScreenshots.isEmpty {
+                let noteBody = noteBodyWithScreenshots("")
+                if let fileURL = try? noteService.appendVoiceNote(noteBody) {
+                    statusText = "Saved screenshots to Voice Note (\(fileURL.lastPathComponent))."
+                } else {
+                    statusText = "No speech detected."
+                }
+                pendingNoteScreenshots = []
+            } else {
+                statusText = "No speech detected."
+            }
             recordingOutputMode = .paste
-            statusText = "No speech detected."
             bubble.hide()
             return
         }
@@ -2062,6 +2165,21 @@ final class DictationController: ObservableObject {
         }
         lastTranscript = finalText
 
+        // Everything the user says goes into the local knowledge base,
+        // regardless of output mode. Fire-and-forget: never on the paste hot path.
+        let knowledgeSource: KnowledgeSource
+        switch recordingOutputMode {
+        case .paste: knowledgeSource = .paste
+        case .voiceNote: knowledgeSource = .note
+        case .todo: knowledgeSource = .todo
+        case .aiChat: knowledgeSource = .chat
+        }
+        let knowledge = knowledgeService
+        let transcriptForKnowledge = finalText
+        Task.detached(priority: .utility) {
+            _ = await knowledge.ingest(text: transcriptForKnowledge, source: knowledgeSource)
+        }
+
         switch recordingOutputMode {
         case .paste:
             let pasteStartedAt = Date()
@@ -2091,12 +2209,14 @@ final class DictationController: ObservableObject {
             bubble.hide()
         case .voiceNote:
             do {
-                let fileURL = try noteService.appendVoiceNote(finalText)
+                let noteBody = noteBodyWithScreenshots(finalText)
+                let fileURL = try noteService.appendVoiceNote(noteBody)
                 statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
-                Task { await syncNoteToConvex(text: finalText) }
+                Task { await syncNoteToConvex(text: noteBody) }
             } catch {
                 handleError("Could not save voice note. \(error.localizedDescription)")
             }
+            pendingNoteScreenshots = []
             bubble.hide()
         case .todo:
             statusText = "Creating todo..."

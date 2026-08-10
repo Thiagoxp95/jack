@@ -1,8 +1,11 @@
+import JackKnowledgeKit
+import MarkdownUI
 import SwiftUI
 
 
 struct ContentView: View {
     @ObservedObject var controller: DictationController
+    @ObservedObject private var permissionCenter = PermissionCenter.shared
     @Bindable var recordingController: RecordingSessionController
     var spaceController: SpaceController
     @State private var selectedSection: SettingsSection = .overview
@@ -13,6 +16,11 @@ struct ContentView: View {
     var todoListController: TodoListController
     @State private var showSpaceSettings = false
     @State private var showWordReplacements = false
+    @State private var knowledgeStats: KnowledgeStats?
+    @State private var embeddingAssetsAvailable: Bool?
+    @State private var isDownloadingAssets = false
+    @State private var isBackfilling = false
+    @State private var didCopyMCPCommand = false
     @State private var showShortcutCapture = false
     @State private var showScreenRecordingCapture = false
     @State private var showTodoSheetCapture = false
@@ -179,6 +187,8 @@ struct ContentView: View {
             todosSection
         case .screenRecording:
             screenRecordingSection
+        case .knowledge:
+            knowledgeSection
         }
     }
 
@@ -547,49 +557,16 @@ struct ContentView: View {
             }
 
             // 6. Permissions (at bottom)
-            settingsCard(title: "Permissions", subtitle: "Input Monitoring, Accessibility, Microphone, and Screen Recording.") {
-                permissionRow(
-                    title: "Input Monitoring",
-                    granted: controller.keyboardMonitoringGranted,
-                    detail: "Global invocation shortcut",
-                    action: { controller.openInputMonitoringSettings() }
-                )
-
-                permissionRow(
-                    title: "Accessibility",
-                    granted: controller.accessibilityGranted,
-                    detail: "Paste transcript into focused app",
-                    action: { controller.openAccessibilitySettings() }
-                )
-
-                permissionRow(
-                    title: "Microphone",
-                    granted: controller.microphoneGranted,
-                    detail: "Voice capture input",
-                    action: { controller.openMicrophoneSettings() }
-                )
-
-                permissionRow(
-                    title: "Screen Recording",
-                    granted: recordingController.hasScreenPermission,
-                    detail: "Capture screen content",
-                    action: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                )
-
-                permissionRow(
-                    title: "Notifications",
-                    granted: controller.notificationsGranted,
-                    detail: "Todo reminders and alerts",
-                    action: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Notifications") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                )
+            settingsCard(title: "Permissions", subtitle: "Live status — drag & drop Jack into System Settings to grant.") {
+                ForEach(JackPermission.allCases) { permission in
+                    permissionRow(
+                        title: permission.title,
+                        granted: permissionCenter.isGranted(permission),
+                        detail: permission.detail,
+                        dragInstall: permission.supportsDragInstall,
+                        action: { permissionCenter.beginGrant(permission) }
+                    )
+                }
             }
         }
     }
@@ -599,7 +576,7 @@ struct ContentView: View {
     private var notesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             if noteListController.isLoading {
-                settingsCard(title: "Loading Notes...", subtitle: "Fetching from server.") {
+                settingsCard(title: "Loading Notes...", subtitle: "Reading local notes.") {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -609,11 +586,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                     Button("Retry") {
-                        Task {
-                            await noteListController.fetchNotes(
-                                spaceId: spaceController.currentSpaceId
-                            )
-                        }
+                        noteListController.refresh()
                     }
                     .buttonStyle(.bordered)
                     .font(.caption)
@@ -639,27 +612,50 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
 
                         ForEach(dayNotes) { note in
-                            convexNoteCard(note)
+                            noteCard(note)
                         }
                     }
                 }
             }
         }
-        .task(id: spaceController.activeSpace.id) {
-            await noteListController.fetchNotes(
-                spaceId: spaceController.currentSpaceId
-            )
+        .task {
+            noteListController.refresh()
         }
         .onChange(of: controller.lastNoteSavedAt) { _, _ in
-            Task {
-                await noteListController.fetchNotes(
-                    spaceId: spaceController.currentSpaceId
-                )
-            }
+            noteListController.refresh()
         }
     }
 
-    private func convexNoteCard(_ note: ConvexNote) -> some View {
+    /// Note text; when the note carries screenshot markdown links, render as
+    /// markdown with relative image paths resolved against the local notes dir.
+    @ViewBuilder
+    private func noteBodyView(_ text: String) -> some View {
+        if text.contains("![") {
+            Markdown(rewriteRelativeImagePaths(in: text))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        } else {
+            Text(text)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+    }
+
+    /// Rewrite `![...](attachments/...)` links to absolute file:// URLs so
+    /// MarkdownUI can load the local screenshots.
+    private func rewriteRelativeImagePaths(in text: String) -> String {
+        // absoluteString is percent-encoded (the notes dir contains a space).
+        var base = NoteService.defaultNotesDirectoryURL().absoluteString
+        if !base.hasSuffix("/") { base += "/" }
+        return text.replacingOccurrences(
+            of: #"\]\((attachments/[^)]+)\)"#,
+            with: "](\(base)$1)",
+            options: .regularExpression
+        )
+    }
+
+    private func noteCard(_ note: VoiceNote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "mic.fill")
@@ -671,10 +667,7 @@ struct ContentView: View {
                 Spacer()
             }
 
-            Text(note.text)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            noteBodyView(note.text)
         }
         .padding(14)
         .background(
@@ -686,33 +679,17 @@ struct ContentView: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
         .contextMenu {
-            if spaceController.availableSpaces.count > 1 {
-                Menu("Move to...") {
-                    ForEach(spaceController.availableSpaces) { space in
-                        let targetSpaceId = space.isPersonal ? nil : space.id
-                        if targetSpaceId != note.spaceId {
-                            Button(space.name) {
-                                Task {
-                                    await noteListController.moveNote(
-                                        noteId: note.id,
-                                        toSpaceId: targetSpaceId
-                                    )
-                                    await noteListController.fetchNotes(
-                                        spaceId: spaceController.currentSpaceId
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(note.text, forType: .string)
+            } label: {
+                Label("Copy Text", systemImage: "doc.on.doc")
             }
 
             Divider()
 
             Button(role: .destructive) {
-                Task {
-                    await noteListController.deleteNote(noteId: note.id)
-                }
+                noteListController.deleteNote(note)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -836,6 +813,130 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Knowledge Base
+
+    private var knowledgeSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            settingsCard(title: "Long-Term Memory", subtitle: "Everything you dictate is stored and embedded locally.") {
+                if let stats = knowledgeStats {
+                    HStack(spacing: 24) {
+                        knowledgeStat(value: stats.entryCount, label: "entries")
+                        knowledgeStat(value: stats.embeddedCount, label: "embedded")
+                        knowledgeStat(value: stats.backlogCount, label: "pending")
+                    }
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Text("Stored at \(KnowledgeStore.defaultDirectoryURL().path)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            settingsCard(title: "On-Device Embeddings", subtitle: "Semantic search runs fully offline via Apple's NaturalLanguage model.") {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(embeddingAssetsAvailable == true ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text(embeddingAssetsAvailable == true
+                         ? "Embedding model ready"
+                         : "Embedding model not downloaded — search falls back to keyword matching")
+                        .font(.caption)
+                }
+
+                if embeddingAssetsAvailable != true {
+                    Button(isDownloadingAssets ? "Downloading..." : "Download Embedding Model") {
+                        isDownloadingAssets = true
+                        Task {
+                            _ = await controller.knowledgeService.embeddings.downloadAssetsIfNeeded()
+                            await refreshKnowledgeStatus()
+                            isDownloadingAssets = false
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                    .disabled(isDownloadingAssets)
+                }
+
+                if let stats = knowledgeStats, stats.backlogCount > 0, embeddingAssetsAvailable == true {
+                    Button(isBackfilling ? "Embedding \(stats.backlogCount) entries..." : "Embed \(stats.backlogCount) Pending Entries") {
+                        isBackfilling = true
+                        Task {
+                            _ = await controller.knowledgeService.backfillMissingEmbeddings()
+                            await refreshKnowledgeStatus()
+                            isBackfilling = false
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                    .disabled(isBackfilling)
+                }
+            }
+
+            settingsCard(title: "Agent Access (MCP)", subtitle: "Let Claude Code or any MCP client search everything you've said.") {
+                Text("Jack ships an MCP server that exposes semantic search over your knowledge base. Register it with:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Text(mcpSetupCommand)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    Button(didCopyMCPCommand ? "Copied" : "Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(mcpSetupCommand, forType: .string)
+                        didCopyMCPCommand = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            didCopyMCPCommand = false
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+
+                Text("Tools: search_knowledge (semantic search), recent_entries. The server reads the local store only — nothing leaves your Mac until an agent you run queries it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            await refreshKnowledgeStatus()
+        }
+    }
+
+    private func knowledgeStat(value: Int, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)")
+                .font(.title3.weight(.semibold).monospacedDigit())
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var mcpSetupCommand: String {
+        let mcpURL = (Bundle.main.executableURL?.deletingLastPathComponent() ?? URL(fileURLWithPath: "/Applications/Jackly.app/Contents/MacOS"))
+            .appendingPathComponent("JackMCP")
+        return "claude mcp add jack -- \"\(mcpURL.path)\""
+    }
+
+    private func refreshKnowledgeStatus() async {
+        knowledgeStats = await controller.knowledgeService.stats()
+        embeddingAssetsAvailable = await controller.knowledgeService.embeddings.assetState() == .available
+    }
+
     // MARK: - Reusable Components
 
     private func settingsCard<Content: View>(
@@ -927,7 +1028,7 @@ struct ContentView: View {
         }
     }
 
-    private func permissionRow(title: String, granted: Bool, detail: String, action: @escaping () -> Void) -> some View {
+    private func permissionRow(title: String, granted: Bool, detail: String, dragInstall: Bool = false, action: @escaping () -> Void) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
@@ -953,11 +1054,19 @@ struct ContentView: View {
 
             Spacer()
 
-            Button("Open Settings") {
-                action()
+            if !granted {
+                Button(dragInstall ? "Grant…" : "Grant") {
+                    action()
+                }
+                .buttonStyle(.borderedProminent)
+                .font(.caption)
+            } else {
+                Button("Open Settings") {
+                    action()
+                }
+                .buttonStyle(.bordered)
+                .font(.caption)
             }
-            .buttonStyle(.bordered)
-            .font(.caption)
         }
     }
 }
@@ -968,6 +1077,7 @@ private extension ContentView {
         case notes
         case todos
         case screenRecording
+        case knowledge
 
         var id: String { rawValue }
 
@@ -981,6 +1091,8 @@ private extension ContentView {
                 return "Todos"
             case .screenRecording:
                 return "Screen Recording"
+            case .knowledge:
+                return "Knowledge Base"
             }
         }
 
@@ -994,6 +1106,8 @@ private extension ContentView {
                 return "checklist"
             case .screenRecording:
                 return "record.circle"
+            case .knowledge:
+                return "brain"
             }
         }
     }

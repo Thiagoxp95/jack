@@ -298,7 +298,7 @@ private struct PermissionsStep: View {
                         description: "Detect your global invocation shortcut",
                         granted: controller.keyboardMonitoringGranted,
                         buttonLabel: "Grant Access",
-                        openAction: { controller.openInputMonitoringSettings() }
+                        openAction: { PermissionCenter.shared.beginGrant(.inputMonitoring) }
                     )
 
                     permissionCard(
@@ -307,7 +307,7 @@ private struct PermissionsStep: View {
                         description: "Auto-paste transcribed text into focused apps",
                         granted: controller.accessibilityGranted,
                         buttonLabel: "Grant Access",
-                        openAction: { controller.openAccessibilitySettings() }
+                        openAction: { PermissionCenter.shared.beginGrant(.accessibility) }
                     )
 
                     permissionCard(
@@ -473,7 +473,7 @@ private struct ScreenRecordingPermissionsStep: View {
                         title: "Screen Recording",
                         description: "Capture your screen for recordings and demos",
                         granted: screenPermission,
-                        openAction: { openScreenRecordingSettings() }
+                        openAction: { PermissionCenter.shared.beginGrant(.screenRecording) }
                     )
 
                     permissionCard(

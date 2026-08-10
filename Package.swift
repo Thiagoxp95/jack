@@ -13,9 +13,24 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
     ],
     targets: [
+        .target(
+            name: "JackKnowledgeKit",
+            path: "Sources/JackKnowledgeKit"
+        ),
+        .target(
+            name: "JackMCPCore",
+            dependencies: ["JackKnowledgeKit"],
+            path: "Sources/JackMCPCore"
+        ),
+        .executableTarget(
+            name: "JackMCP",
+            dependencies: ["JackMCPCore"],
+            path: "Sources/JackMCP"
+        ),
         .executableTarget(
             name: "JackApp",
             dependencies: [
+                "JackKnowledgeKit",
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "ConvexMobile", package: "convex-swift"),
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
@@ -29,6 +44,11 @@ let package = Package(
             name: "JackAppTests",
             dependencies: ["JackApp"],
             path: "Tests/JackAppTests"
+        ),
+        .testTarget(
+            name: "JackKnowledgeKitTests",
+            dependencies: ["JackKnowledgeKit", "JackMCPCore"],
+            path: "Tests/JackKnowledgeKitTests"
         ),
     ]
 )

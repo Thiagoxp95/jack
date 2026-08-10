@@ -48,6 +48,15 @@ private struct RootView: View {
                 // Check local permissions (fast, no network)
                 await controller.initialize()
                 await recordingController.initialize()
+                PermissionCenter.shared.startMonitoring()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .jackPermissionsChanged)) { _ in
+                Task {
+                    // Keep the controllers' cached flags in lockstep with the
+                    // live TCC state so features unlock the moment macOS grants.
+                    await controller.refreshPermissions(prompt: false)
+                    await recordingController.refreshPermissions()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleScreenRecording)) { _ in
                 Task {

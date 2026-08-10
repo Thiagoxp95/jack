@@ -151,6 +151,9 @@ install_binary() {
 
 install_binary "$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
 
+# Bundle the MCP server CLI next to the app binary (agents exec it directly).
+install_binary "JackMCP" "$APP/Contents/MacOS/JackMCP"
+
 # Bundle app resources (if any).
 APP_RESOURCES_DIR="$ROOT/Sources/$APP_NAME/Resources"
 if [[ -d "$APP_RESOURCES_DIR" ]]; then
@@ -241,6 +244,9 @@ sign_frameworks() {
   done
 }
 sign_frameworks
+
+# Nested binaries must be signed before the outer bundle seal.
+codesign "${CODESIGN_ARGS[@]}" "$APP/Contents/MacOS/JackMCP"
 
 codesign "${CODESIGN_ARGS[@]}" \
   --entitlements "$APP_ENTITLEMENTS" \

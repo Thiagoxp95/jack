@@ -26,6 +26,44 @@ packages:
     from: "2.6.0"
 
 targets:
+  JackKnowledgeKit:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/JackKnowledgeKit
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  JackMCPCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/JackMCPCore
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+    dependencies:
+      - target: JackKnowledgeKit
+
+  JackMCP:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/JackMCP
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        DEVELOPMENT_TEAM: 6BJ89V75F2
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: JackMCPCore
+      - target: JackKnowledgeKit
+
   JackApp:
     type: application
     platform: macOS
@@ -62,6 +100,7 @@ targets:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
     dependencies:
+      - target: JackKnowledgeKit
       - package: FluidAudio
         product: FluidAudio
       - package: convex-swift
