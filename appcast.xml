@@ -3,6 +3,26 @@
     <channel>
         <title>JackApp</title>
         <item>
+            <title>1.2.0</title>
+            <pubDate>Mon, 10 Aug 2026 00:50:33 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>JackApp-1.2.0</title>
+<body>
+<h2>JackApp-1.2.0</h2>
+<p>Release notes not provided.</p>
+</body>
+</html>
+]]></description>
+            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.2.0/JackApp-1.2.0.zip" length="10316877" type="application/octet-stream" sparkle:edSignature="KWPc2dsWjyOZi/gKF2S/OCmvHkXodnxtbYK+nwo8Ch9H7u1GlfmbUcrn5/r7q45JMSWSWQsw9/hu5FCMoR12Bg=="/>
+        </item>
+        <item>
             <title>1.1.1</title>
             <pubDate>Sun, 09 Aug 2026 22:52:11 +0000</pubDate>
             <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
