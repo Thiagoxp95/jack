@@ -71,55 +71,6 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
     }
 }
 
-enum CleanupProvider: String {
-    case groq
-    case cerebras
-
-    var baseURL: String {
-        switch self {
-        case .groq: return "https://api.groq.com/openai/v1/chat/completions"
-        case .cerebras: return "https://api.cerebras.ai/v1/chat/completions"
-        }
-    }
-}
-
-enum CleanupModelChoice: String, CaseIterable, Identifiable {
-    // Groq models
-    case llama4Scout = "meta-llama/llama-4-scout-17b-16e-instruct"
-    case qwen332b = "qwen/qwen3-32b"
-    case llama31_8b = "meta-llama/llama-3.1-8b-instant"
-    case llama33_70b = "llama-3.3-70b-versatile"
-    case gemma2_9b = "gemma2-9b-it"
-    // Cerebras models
-    case llama31_8bCerebras = "llama-3.1-8b"
-    case llama33_70bCerebras = "llama-3.3-70b"
-    case qwen325_32bCerebras = "qwen-3-32b"
-
-    var id: String { rawValue }
-
-    var provider: CleanupProvider {
-        switch self {
-        case .llama4Scout, .qwen332b, .llama31_8b, .llama33_70b, .gemma2_9b:
-            return .groq
-        case .llama31_8bCerebras, .llama33_70bCerebras, .qwen325_32bCerebras:
-            return .cerebras
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .llama4Scout: return "Llama 4 Scout (Groq)"
-        case .qwen332b: return "Qwen3 32B (Groq)"
-        case .llama31_8b: return "Llama 3.1 8B (Groq)"
-        case .llama33_70b: return "Llama 3.3 70B (Groq)"
-        case .gemma2_9b: return "Gemma 2 9B (Groq)"
-        case .llama31_8bCerebras: return "Llama 3.1 8B (Cerebras)"
-        case .llama33_70bCerebras: return "Llama 3.3 70B (Cerebras)"
-        case .qwen325_32bCerebras: return "Qwen3 32B (Cerebras)"
-        }
-    }
-}
-
 @MainActor
 final class DictationController: ObservableObject {
     static let defaultWordReplacements: [WordReplacement] = [
@@ -182,18 +133,31 @@ final class DictationController: ObservableObject {
     }
     @Published private(set) var invocationShortcut: InvocationShortcut
     @Published private(set) var voiceNoteSwitchKeyCode: Int64
-    @Published private(set) var screenRecordingShortcut: InvocationShortcut?
     @Published private(set) var todoSheetShortcut: InvocationShortcut?
     @Published private(set) var chatSheetShortcut: InvocationShortcut?
     @Published private(set) var todoSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
     @Published var isCapturingVoiceNoteSwitchKey = false
-    @Published var isCapturingScreenRecordingKey = false
     @Published var isCapturingTodoSwitchKey = false
     @Published var isCapturingTodoSheetKey = false
     @Published var isCapturingChatSheetKey = false
     @Published private(set) var aiSwitchKeyCode: Int64
     @Published var isCapturingAiSwitchKey = false
+    @Published private(set) var autoSwitchKeyCode: Int64
+    @Published var isCapturingAutoSwitchKey = false
+    @Published var postActionPillEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(postActionPillEnabled, forKey: DefaultsKey.postActionPillEnabled)
+            if !postActionPillEnabled {
+                dismissPostActionPill()
+            }
+        }
+    }
+    @Published private(set) var postActionAiKeyCode: Int64
+    @Published private(set) var postActionNoteKeyCode: Int64
+    @Published private(set) var postActionTodoKeyCode: Int64
+    /// Last auto-mode routing decision, surfaced in settings.
+    @Published private(set) var lastIntentVerdictSummary: String?
     @Published var statusText: String
     @Published var lastTranscript: String
     @Published private(set) var isStartingRecording = false
@@ -350,7 +314,6 @@ final class DictationController: ObservableObject {
     @Published var lastShortcutEventAt: Date?
     @Published var lastTranscriptionLatency: TimeInterval?
     @Published var lastTranscriptionBackend: String?
-    @Published var appMode: AppMode = .dictation
     @Published private(set) var recordingOutputMode: RecordingOutputMode = .paste
     @Published private(set) var lastNoteSavedAt: Date?
     @Published private(set) var lastTodoSavedAt: Date?
@@ -380,21 +343,27 @@ final class DictationController: ObservableObject {
             UserDefaults.standard.set(cleanupPrompt, forKey: DefaultsKey.cleanupPrompt)
         }
     }
-    @Published var cleanupModel: CleanupModelChoice {
+    /// Everything LLM-shaped in Jack runs through OpenRouter with the user's
+    /// own key — no Jack-operated backend sits in the path.
+    @Published var openRouterApiKey: String {
         didSet {
-            UserDefaults.standard.set(cleanupModel.rawValue, forKey: DefaultsKey.cleanupModel)
+            UserDefaults.standard.set(openRouterApiKey, forKey: DefaultsKey.openRouterApiKey)
         }
     }
-    @Published var groqApiKey: String {
+    @Published var cleanupModelId: String {
         didSet {
-            UserDefaults.standard.set(groqApiKey, forKey: DefaultsKey.groqApiKey)
+            UserDefaults.standard.set(cleanupModelId, forKey: DefaultsKey.cleanupModelId)
         }
     }
-    @Published var cerebrasApiKey: String {
+    @Published var routingModelId: String {
         didSet {
-            UserDefaults.standard.set(cerebrasApiKey, forKey: DefaultsKey.cerebrasApiKey)
+            UserDefaults.standard.set(routingModelId, forKey: DefaultsKey.routingModelId)
         }
     }
+    /// OpenRouter's catalog, loaded on demand for the model pickers.
+    @Published private(set) var openRouterModels: [OpenRouterModelInfo] = []
+    @Published private(set) var isLoadingOpenRouterModels = false
+    @Published private(set) var openRouterModelsError: String?
     @Published var mouseDictationEnabled: Bool {
         didSet {
             UserDefaults.standard.set(mouseDictationEnabled, forKey: DefaultsKey.mouseDictationEnabled)
@@ -419,9 +388,19 @@ final class DictationController: ObservableObject {
     /// Screenshots captured during the current note-mode recording, attached to
     /// the note once the transcript lands.
     private var pendingNoteScreenshots: [URL] = []
+    /// OCR text for those screenshots, kept so auto mode can show the judge
+    /// what was on screen (the routing model gets text, never image parts).
+    private var pendingNoteScreenshotOCR: [String] = []
+    private let intentClassifier = IntentClassifier()
+    /// Frontmost app + window title captured when auto mode was engaged.
+    private var autoModeAppMetadata: (app: String?, window: String?)?
     private let duckingService = SystemAudioDuckingService()
     private let slackMuteService = SlackMuteService()
     private let bubble = FloatingBubbleController()
+    private let postActionPill = PostActionPillController()
+    /// Transcript + paste bookkeeping held while the post-action split pill is
+    /// on screen. `pastedCharacterCount` is nil when nothing was auto-pasted.
+    private var pendingPostAction: (text: String, pastedCharacterCount: Int?)?
     private let todoConfirmation = TodoConfirmationController()
     var spaceController: SpaceController? {
         didSet { syncSpaceAppearance() }
@@ -504,8 +483,7 @@ final class DictationController: ObservableObject {
         static let voiceNoteSwitchKeyCode = "voice_note_switch_key_code"
         static let todoSwitchKeyCode = "todo_switch_key_code"
         static let aiSwitchKeyCode = "ai_switch_key_code"
-        static let screenRecordingKeyCode = "screen_recording_key_code" // Legacy
-        static let screenRecordingShortcutJSON = "screen_recording_shortcut_json"
+        static let autoSwitchKeyCode = "auto_switch_key_code"
         static let todoSheetShortcutJSON = "todo_sheet_shortcut_json"
         static let chatSheetShortcutJSON = "chat_sheet_shortcut_json"
         static let onboardingCompleted = "onboarding_completed"
@@ -533,20 +511,24 @@ final class DictationController: ObservableObject {
         static let transcriptionModel = "transcription_model"
         static let cleanupEnabled = "transcription_cleanup_enabled"
         static let cleanupPrompt = "transcription_cleanup_prompt"
-        static let cleanupModel = "transcription_cleanup_model"
-        static let groqApiKey = "groq_api_key"
-        static let cerebrasApiKey = "cerebras_api_key"
+        static let openRouterApiKey = "openrouter_api_key"
+        static let cleanupModelId = "openrouter_cleanup_model_id"
+        static let routingModelId = "openrouter_routing_model_id"
         static let mouseDictationEnabled = "mouse_dictation_enabled"
+        static let postActionPillEnabled = "post_action_pill_enabled"
+        static let postActionAiKeyCode = "post_action_ai_key_code"
+        static let postActionNoteKeyCode = "post_action_note_key_code"
+        static let postActionTodoKeyCode = "post_action_todo_key_code"
     }
 
     private enum KeyCaptureTarget {
         case invocation
         case voiceNoteSwitch
-        case screenRecording
         case todoSwitch
         case todoSheet
         case chatSheet
         case aiSwitch
+        case autoSwitch
     }
 
     nonisolated static func inferOnboardingCompletion(
@@ -609,20 +591,11 @@ final class DictationController: ObservableObject {
             initialAiSwitchKeyCode = 0 // A key default
         }
 
-        // Migrate screen recording shortcut from legacy key code
-        let initialScreenRecordingShortcut: InvocationShortcut?
-        if let jsonData = defaults.data(forKey: DefaultsKey.screenRecordingShortcutJSON),
-           let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
-            initialScreenRecordingShortcut = decoded
-        } else if let legacyCode = defaults.object(forKey: DefaultsKey.screenRecordingKeyCode) as? Int {
-            initialScreenRecordingShortcut = InvocationShortcut.fromLegacyKeyCode(Int64(legacyCode))
-            if let data = try? JSONEncoder().encode(initialScreenRecordingShortcut) {
-                defaults.set(data, forKey: DefaultsKey.screenRecordingShortcutJSON)
-            }
+        let initialAutoSwitchKeyCode: Int64
+        if let stored = defaults.object(forKey: DefaultsKey.autoSwitchKeyCode) as? Int {
+            initialAutoSwitchKeyCode = Int64(stored)
         } else {
-            // Default: ⇧⌘R (Shift+Command+R)
-            let shiftCommand = NSEvent.ModifierFlags.shift.rawValue | NSEvent.ModifierFlags.command.rawValue
-            initialScreenRecordingShortcut = InvocationShortcut(primaryKeyCode: 15, modifiers: shiftCommand)
+            initialAutoSwitchKeyCode = 38 // J key default
         }
 
         let initialTodoSheetShortcut: InvocationShortcut?
@@ -656,7 +629,7 @@ final class DictationController: ObservableObject {
         voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
         todoSwitchKeyCode = initialTodoSwitchKeyCode
         aiSwitchKeyCode = initialAiSwitchKeyCode
-        screenRecordingShortcut = initialScreenRecordingShortcut
+        autoSwitchKeyCode = initialAutoSwitchKeyCode
         todoSheetShortcut = initialTodoSheetShortcut
         chatSheetShortcut = initialChatSheetShortcut
 
@@ -714,11 +687,22 @@ final class DictationController: ObservableObject {
 
         cleanupEnabled = defaults.object(forKey: DefaultsKey.cleanupEnabled) as? Bool ?? true
         cleanupPrompt = defaults.string(forKey: DefaultsKey.cleanupPrompt) ?? defaultCleanupPrompt
-        let storedCleanupModel = defaults.string(forKey: DefaultsKey.cleanupModel) ?? ""
-        cleanupModel = CleanupModelChoice(rawValue: storedCleanupModel) ?? .llama4Scout
-        groqApiKey = defaults.string(forKey: DefaultsKey.groqApiKey) ?? ""
-        cerebrasApiKey = defaults.string(forKey: DefaultsKey.cerebrasApiKey) ?? ""
+        openRouterApiKey = defaults.string(forKey: DefaultsKey.openRouterApiKey) ?? ""
+
+        let storedCleanupModel = defaults.string(forKey: DefaultsKey.cleanupModelId)
+        cleanupModelId = (storedCleanupModel.map(OpenRouterClient.retiredDefaults.contains) ?? true)
+            ? OpenRouterClient.defaultCleanupModel
+            : storedCleanupModel!
+
+        let storedRoutingModel = defaults.string(forKey: DefaultsKey.routingModelId)
+        routingModelId = (storedRoutingModel.map(OpenRouterClient.retiredDefaults.contains) ?? true)
+            ? OpenRouterClient.defaultRoutingModel
+            : storedRoutingModel!
         mouseDictationEnabled = defaults.object(forKey: DefaultsKey.mouseDictationEnabled) as? Bool ?? false
+        postActionPillEnabled = defaults.object(forKey: DefaultsKey.postActionPillEnabled) as? Bool ?? true
+        postActionAiKeyCode = defaults.object(forKey: DefaultsKey.postActionAiKeyCode) as? Int64 ?? 0 // A
+        postActionNoteKeyCode = defaults.object(forKey: DefaultsKey.postActionNoteKeyCode) as? Int64 ?? 1 // S
+        postActionTodoKeyCode = defaults.object(forKey: DefaultsKey.postActionTodoKeyCode) as? Int64 ?? 2 // D
 
         accessibilityGranted = initialAccessibilityGranted
         keyboardMonitoringGranted = initialKeyboardMonitoringGranted
@@ -731,7 +715,8 @@ final class DictationController: ObservableObject {
         shortcutMonitor.setVoiceNoteSwitchKeyCode(initialVoiceNoteSwitchKeyCode)
         shortcutMonitor.setTodoSwitchKeyCode(initialTodoSwitchKeyCode)
         shortcutMonitor.setAiSwitchKeyCode(initialAiSwitchKeyCode)
-        shortcutMonitor.setScreenRecordingShortcut(initialScreenRecordingShortcut)
+        shortcutMonitor.setAutoSwitchKeyCode(initialAutoSwitchKeyCode)
+        shortcutMonitor.setPostActionKeyCodes([postActionAiKeyCode, postActionNoteKeyCode, postActionTodoKeyCode])
         shortcutMonitor.escapeToCancelEnabled = escapeToCancelEnabled
 
         if defaults.object(forKey: DefaultsKey.onboardingCompleted) == nil, inferredOnboardingCompleted {
@@ -768,16 +753,16 @@ final class DictationController: ObservableObject {
                 self.setAiChatMode()
             }
         }
+        shortcutMonitor.onAutoSwitchKeyPressed = { [weak self] in
+            guard let self else { return }
+            runOnMainActorImmediatelyIfPossible {
+                self.setAutoMode()
+            }
+        }
         shortcutMonitor.onSpaceCycleKeyPressed = { [weak self] direction in
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
                 self.cycleSpace(direction: direction)
-            }
-        }
-        shortcutMonitor.onScreenRecordingKeyPressed = { [weak self] in
-            guard let self else { return }
-            runOnMainActorImmediatelyIfPossible {
-                self.handleScreenRecordingShortcut()
             }
         }
         if let initialTodoSheetShortcut = todoSheetShortcut {
@@ -796,6 +781,19 @@ final class DictationController: ObservableObject {
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
                 self.handleChatSheetShortcut()
+            }
+        }
+        shortcutMonitor.onPostActionKeyPressed = { [weak self] index in
+            guard let self else { return }
+            runOnMainActorImmediatelyIfPossible {
+                guard let action = PostDictationAction(rawValue: index) else { return }
+                self.handlePostAction(action)
+            }
+        }
+        shortcutMonitor.onPostActionDismissRequested = { [weak self] in
+            guard let self else { return }
+            runOnMainActorImmediatelyIfPossible {
+                self.dismissPostActionPill()
             }
         }
         shortcutMonitor.onEscapePressed = { [weak self] in
@@ -821,6 +819,7 @@ final class DictationController: ObservableObject {
             // OCR text joins the knowledge base alongside the spoken note.
             let trimmedOCR = ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedOCR.isEmpty {
+                self.pendingNoteScreenshotOCR.append(trimmedOCR)
                 let knowledge = self.knowledgeService
                 Task.detached(priority: .utility) {
                     _ = await knowledge.ingest(
@@ -935,8 +934,8 @@ final class DictationController: ObservableObject {
         InvocationKey.displayName(for: aiSwitchKeyCode)
     }
 
-    var screenRecordingKeyDisplayName: String {
-        screenRecordingShortcut?.displayName ?? "Not Set"
+    var autoSwitchKeyDisplayName: String {
+        InvocationKey.displayName(for: autoSwitchKeyCode)
     }
 
     var todoSheetKeyDisplayName: String {
@@ -1026,11 +1025,6 @@ final class DictationController: ObservableObject {
         statusText = "Invocation key set to \(invocationKeyDisplayName)."
     }
 
-    func applyScreenRecordingShortcut(_ shortcut: InvocationShortcut) {
-        setScreenRecordingShortcut(shortcut)
-        statusText = "Screen recording shortcut set to \(screenRecordingKeyDisplayName)."
-    }
-
     func applyTodoSheetShortcut(_ shortcut: InvocationShortcut) {
         setTodoSheetShortcut(shortcut)
         statusText = "Todo sheet shortcut set to \(todoSheetKeyDisplayName)."
@@ -1042,7 +1036,7 @@ final class DictationController: ObservableObject {
     }
 
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1065,7 +1059,7 @@ final class DictationController: ObservableObject {
     }
 
     func startVoiceNoteSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1087,30 +1081,8 @@ final class DictationController: ObservableObject {
         statusText = "Voice Note key capture canceled."
     }
 
-    func startScreenRecordingKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
-            return
-        }
-
-        keyCaptureTarget = .screenRecording
-        isCapturingScreenRecordingKey = true
-        statusText = "Press a key for the quick screen recording shortcut."
-        installInvocationKeyCaptureMonitors()
-    }
-
-    func cancelScreenRecordingKeyCapture() {
-        guard isCapturingScreenRecordingKey else {
-            return
-        }
-
-        isCapturingScreenRecordingKey = false
-        keyCaptureTarget = nil
-        removeInvocationKeyCaptureMonitors()
-        statusText = "Screen recording key capture canceled."
-    }
-
     func startTodoSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1132,7 +1104,7 @@ final class DictationController: ObservableObject {
     }
 
     func startAiSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1153,8 +1125,30 @@ final class DictationController: ObservableObject {
         statusText = "AI key capture canceled."
     }
 
+    func startAutoSwitchKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+            return
+        }
+
+        keyCaptureTarget = .autoSwitch
+        isCapturingAutoSwitchKey = true
+        statusText = "Press the key to switch to Auto mode while recording."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelAutoSwitchKeyCapture() {
+        guard isCapturingAutoSwitchKey else {
+            return
+        }
+
+        isCapturingAutoSwitchKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Auto key capture canceled."
+    }
+
     func startTodoSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1175,12 +1169,6 @@ final class DictationController: ObservableObject {
         statusText = "Todo Sheet key capture canceled."
     }
 
-    func clearScreenRecordingKey() {
-        screenRecordingShortcut = nil
-        shortcutMonitor.setScreenRecordingShortcut(nil)
-        UserDefaults.standard.removeObject(forKey: DefaultsKey.screenRecordingShortcutJSON)
-    }
-
     func clearTodoSheetKey() {
         todoSheetShortcut = nil
         shortcutMonitor.setTodoSheetShortcut(nil)
@@ -1188,7 +1176,7 @@ final class DictationController: ObservableObject {
     }
 
     func startChatSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1353,7 +1341,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             holdDebugLog("handleShortcutEvent: BLOCKED by capture mode")
             return
         }
@@ -1421,7 +1409,7 @@ final class DictationController: ObservableObject {
     /// Mouse dictation always uses hold semantics: both buttons down → start,
     /// either button released → stop.
     private func handleMouseDictationEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
 
@@ -1444,22 +1432,15 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private func handleScreenRecordingShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
-            return
-        }
-        NotificationCenter.default.post(name: .toggleScreenRecording, object: nil)
-    }
-
     private func handleTodoSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
         TodoSideSheetController.shared.toggle()
     }
 
     private func handleChatSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingScreenRecordingKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
             return
         }
         ChatSideSheetController.shared.toggle()
@@ -1531,10 +1512,27 @@ final class DictationController: ObservableObject {
         updateNoteScreenshotOverlay()
     }
 
+    private func setAutoMode() {
+        guard isRecording, !isTranscribing else {
+            return
+        }
+        recordingOutputMode = recordingOutputMode == .auto ? .paste : .auto
+        if recordingOutputMode == .auto {
+            // Snapshot where the user was *while speaking* — by the time the
+            // transcript lands they may have switched apps.
+            autoModeAppMetadata = IntentContext.currentAppMetadata()
+        } else {
+            autoModeAppMetadata = nil
+        }
+        statusText = listeningStatusText(isLive: false)
+        showBubble(message: listeningBubbleMessage(), isRecording: true)
+        updateNoteScreenshotOverlay()
+    }
+
     /// The screenshot crosshair covers the screen whenever note-mode dictation
     /// is live; leaving note mode (or stopping) tears it down.
     private func updateNoteScreenshotOverlay() {
-        if isRecording, !isTranscribing, recordingOutputMode == .voiceNote {
+        if isRecording, !isTranscribing, recordingOutputMode == .voiceNote || recordingOutputMode == .auto {
             noteScreenshot.show()
         } else {
             noteScreenshot.hide()
@@ -1578,6 +1576,8 @@ final class DictationController: ObservableObject {
             return "Listening (Todo Mode)..."
         case .aiChat:
             return "Listening (AI Mode)..."
+        case .auto:
+            return "Listening (Auto Mode)..."
         }
     }
 
@@ -1599,15 +1599,18 @@ final class DictationController: ObservableObject {
             return "Listening... (AI mode)"
         case (.aiChat, true):
             return "Listening... (AI mode, live)"
+        case (.auto, false):
+            return "Listening... (auto mode)"
+        case (.auto, true):
+            return "Listening... (auto mode, live)"
         }
     }
 
     private func beginRecording() {
-        holdDebugLog("beginRecording: START appMode=\(appMode) isRecording=\(isRecording) isTranscribing=\(isTranscribing) wantRecording=\(wantRecording)")
-        guard appMode == .dictation else {
-            holdDebugLog("beginRecording: BAIL appMode != dictation")
-            return
-        }
+        holdDebugLog("beginRecording: START isRecording=\(isRecording) isTranscribing=\(isTranscribing) wantRecording=\(wantRecording)")
+
+        // A new dictation supersedes any lingering post-action split pill.
+        dismissPostActionPill()
 
         guard !isStartingRecording, !isRecording, !isTranscribing else {
             holdDebugLog("beginRecording: BAIL isStartingRecording=\(isStartingRecording) isRecording=\(isRecording) isTranscribing=\(isTranscribing)")
@@ -1811,8 +1814,9 @@ final class DictationController: ObservableObject {
         stopHoldReleaseWatchdog()
         stopRiveReactiveLoop(resetInputs: true)
         noteScreenshot.hide()
-        pendingNoteScreenshots = []
+        clearPendingNoteScreenshots()
         recordingOutputMode = .paste
+        autoModeAppMetadata = nil
         statusText = "Recording cancelled."
         showTransientBubble(message: "Cancelled", duration: 0.8)
         playSoundEffect()
@@ -2119,14 +2123,16 @@ final class DictationController: ObservableObject {
         guard !trimmed.isEmpty else {
             // No speech, but screenshots were captured in note mode — keep them
             // as an image-only note rather than dropping them.
-            if recordingOutputMode == .voiceNote, !pendingNoteScreenshots.isEmpty {
+            // Screenshots with no speech are always a note — there is nothing
+            // for the classifier to judge.
+            if recordingOutputMode == .voiceNote || recordingOutputMode == .auto, !pendingNoteScreenshots.isEmpty {
                 let noteBody = noteBodyWithScreenshots("")
                 if let fileURL = try? noteService.appendVoiceNote(noteBody) {
                     statusText = "Saved screenshots to Voice Note (\(fileURL.lastPathComponent))."
                 } else {
                     statusText = "No speech detected."
                 }
-                pendingNoteScreenshots = []
+                clearPendingNoteScreenshots()
             } else {
                 statusText = "No speech detected."
             }
@@ -2139,21 +2145,18 @@ final class DictationController: ObservableObject {
 
         var finalText = cleaned
         if cleanupEnabled, !cleanupPrompt.isEmpty {
-            let provider = cleanupModel.provider
-            let apiKey = provider == .groq ? groqApiKey : cerebrasApiKey
-            guard !apiKey.isEmpty else {
-                NSLog("[Jack] Cleanup skipped: no %@ API key configured", provider.rawValue)
+            guard !openRouterApiKey.isEmpty else {
+                NSLog("[Jack] Cleanup skipped: no OpenRouter API key configured")
                 lastTranscript = finalText
                 return
             }
-            NSLog("[Jack] Cleanup enabled, calling %@ directly with model=%@", provider.rawValue, cleanupModel.rawValue)
+            NSLog("[Jack] Cleanup enabled, calling OpenRouter with model=%@", cleanupModelId)
             do {
                 let result = try await callCleanupDirect(
                     text: cleaned,
                     prompt: cleanupPrompt,
-                    model: cleanupModel.rawValue,
-                    apiKey: apiKey,
-                    endpoint: provider.baseURL
+                    model: cleanupModelId,
+                    apiKey: openRouterApiKey
                 )
                 NSLog("[Jack] Cleanup returned %d chars: %@", result.count, String(result.prefix(200)))
                 if !result.isEmpty {
@@ -2165,14 +2168,33 @@ final class DictationController: ObservableObject {
         }
         lastTranscript = finalText
 
+        // Auto mode resolves to a real destination before anything is stored,
+        // so the knowledge entry carries the source the user actually got.
+        var effectiveMode = recordingOutputMode
+        if recordingOutputMode == .auto {
+            statusText = "Deciding note or todo..."
+            showBubble(message: "Deciding...", isRecording: false, isTranscribing: true)
+            let verdict = await classifyAutoModeIntent(transcript: finalText)
+            effectiveMode = verdict.intent == .todo ? .todo : .voiceNote
+            lastIntentVerdictSummary = String(
+                format: "%@ · %.0f%% · %@ · %@",
+                verdict.intent.rawValue,
+                verdict.confidence * 100,
+                verdict.backend,
+                verdict.reason.isEmpty ? "no reason given" : verdict.reason
+            )
+            NSLog("[Jack] Auto mode → %@ (%@)", verdict.intent.rawValue, lastIntentVerdictSummary ?? "")
+        }
+
         // Everything the user says goes into the local knowledge base,
         // regardless of output mode. Fire-and-forget: never on the paste hot path.
         let knowledgeSource: KnowledgeSource
-        switch recordingOutputMode {
+        switch effectiveMode {
         case .paste: knowledgeSource = .paste
         case .voiceNote: knowledgeSource = .note
         case .todo: knowledgeSource = .todo
         case .aiChat: knowledgeSource = .chat
+        case .auto: knowledgeSource = .note
         }
         let knowledge = knowledgeService
         let transcriptForKnowledge = finalText
@@ -2180,7 +2202,9 @@ final class DictationController: ObservableObject {
             _ = await knowledge.ingest(text: transcriptForKnowledge, source: knowledgeSource)
         }
 
-        switch recordingOutputMode {
+        let routedByClassifier = recordingOutputMode == .auto
+
+        switch effectiveMode {
         case .paste:
             let pasteStartedAt = Date()
             let didPaste: Bool
@@ -2207,78 +2231,170 @@ final class DictationController: ObservableObject {
             // The indicator was already hidden when recording stopped;
             // don't re-show it with a transient bubble.
             bubble.hide()
+            if postActionPillEnabled {
+                presentPostActionPill(
+                    text: finalText,
+                    pastedCharacterCount: didPaste ? finalText.count : nil
+                )
+            }
         case .voiceNote:
             do {
                 let noteBody = noteBodyWithScreenshots(finalText)
                 let fileURL = try noteService.appendVoiceNote(noteBody)
-                statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
+                statusText = routedByClassifier
+                    ? "Auto → Note (\(fileURL.lastPathComponent))."
+                    : "Saved to Voice Note (\(fileURL.lastPathComponent))."
                 Task { await syncNoteToConvex(text: noteBody) }
             } catch {
                 handleError("Could not save voice note. \(error.localizedDescription)")
             }
-            pendingNoteScreenshots = []
+            clearPendingNoteScreenshots()
             bubble.hide()
         case .todo:
-            statusText = "Creating todo..."
+            statusText = routedByClassifier ? "Auto → Todo. Creating..." : "Creating todo..."
+            // Screenshots don't ride along to Convex, but they're already on
+            // disk and indexed in the knowledge base with their OCR text.
+            clearPendingNoteScreenshots()
             Task { await syncTodoToConvex(text: finalText) }
             bubble.hide()
         case .aiChat:
             statusText = "Sending to AI..."
             ChatSideSheetController.shared.openWithMessage(finalText)
             bubble.hide()
+        case .auto:
+            // Unreachable: auto is resolved above.
+            bubble.hide()
         }
 
         recordingOutputMode = .paste
+        autoModeAppMetadata = nil
     }
 
-    /// Call Groq or Cerebras directly for transcription cleanup, bypassing Convex + OpenRouter.
+    // MARK: - Post-dictation action pill
+
+    /// After a paste-mode transcript lands, the pill splits into AI/Note/Todo
+    /// boxes so the capture can be rerouted with one keypress (default A/S/D).
+    private func presentPostActionPill(text: String, pastedCharacterCount: Int?) {
+        pendingPostAction = (text, pastedCharacterCount)
+        shortcutMonitor.setPostActionKeyCodes([postActionAiKeyCode, postActionNoteKeyCode, postActionTodoKeyCode])
+        shortcutMonitor.setPostActionArmed(true)
+        postActionPill.show(
+            keyLabels: [
+                .aiChat: InvocationKey.displayName(for: postActionAiKeyCode),
+                .note: InvocationKey.displayName(for: postActionNoteKeyCode),
+                .todo: InvocationKey.displayName(for: postActionTodoKeyCode),
+            ],
+            onAction: { [weak self] action in
+                self?.handlePostAction(action)
+            },
+            onDismiss: { [weak self] in
+                self?.dismissPostActionPill()
+            }
+        )
+    }
+
+    private func dismissPostActionPill() {
+        guard postActionPill.isVisible || pendingPostAction != nil else { return }
+        shortcutMonitor.setPostActionArmed(false)
+        postActionPill.hide()
+        pendingPostAction = nil
+    }
+
+    private func handlePostAction(_ action: PostDictationAction) {
+        guard let pending = pendingPostAction else {
+            dismissPostActionPill()
+            return
+        }
+        shortcutMonitor.setPostActionArmed(false)
+        postActionPill.hide()
+        pendingPostAction = nil
+
+        // The transcript was auto-pasted into whatever input had focus, but the
+        // reroute means it was never meant to stay there — erase it first.
+        if let pastedCount = pending.pastedCharacterCount {
+            pasteService.deleteBackward(count: pastedCount)
+        }
+
+        let text = pending.text
+        switch action {
+        case .aiChat:
+            statusText = "Sending to AI..."
+            ChatSideSheetController.shared.openWithMessage(text)
+        case .note:
+            do {
+                let fileURL = try noteService.appendVoiceNote(text)
+                statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
+                Task { await syncNoteToConvex(text: text) }
+            } catch {
+                handleError("Could not save voice note. \(error.localizedDescription)")
+            }
+        case .todo:
+            statusText = "Creating todo..."
+            Task { await syncTodoToConvex(text: text) }
+        }
+    }
+
+    /// Ask the routing model whether this capture is a note or a todo.
+    private func classifyAutoModeIntent(transcript: String) async -> IntentVerdict {
+        let metadata = autoModeAppMetadata ?? IntentContext.currentAppMetadata()
+        let context = IntentContext(
+            transcript: transcript,
+            screenshotOCR: pendingNoteScreenshotOCR,
+            frontmostApp: metadata.app,
+            windowTitle: metadata.window,
+            spaceName: spaceController?.activeSpace.name,
+            capturedAt: .now
+        )
+
+        return await intentClassifier.classify(
+            context,
+            model: routingModelId,
+            apiKey: openRouterApiKey
+        )
+    }
+
+    /// Load OpenRouter's catalog for the model pickers.
+    func refreshOpenRouterModels() async {
+        guard !isLoadingOpenRouterModels else { return }
+        isLoadingOpenRouterModels = true
+        openRouterModelsError = nil
+        do {
+            openRouterModels = try await OpenRouterClient.fetchModels(apiKey: openRouterApiKey)
+        } catch {
+            openRouterModelsError = error.localizedDescription
+            NSLog("[Jack] Failed to load OpenRouter models: %@", String(describing: error))
+        }
+        isLoadingOpenRouterModels = false
+    }
+
+    /// Human-readable label for a model id, falling back to the raw id when the
+    /// catalog hasn't loaded.
+    func displayName(forModelId id: String) -> String {
+        openRouterModels.first { $0.id == id }?.name ?? id
+    }
+
+    private func clearPendingNoteScreenshots() {
+        pendingNoteScreenshots = []
+        pendingNoteScreenshotOCR = []
+    }
+
+    /// Transcription cleanup via OpenRouter, straight from this Mac.
     private nonisolated func callCleanupDirect(
         text: String,
         prompt: String,
         model: String,
-        apiKey: String,
-        endpoint: String
+        apiKey: String
     ) async throws -> String {
-        let url = URL(string: endpoint)!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 10
-
-        // Qwen3 emits <think>...</think> reasoning by default. To disable reasoning mode,
-        // append the Qwen3-documented /no_think switch to the user message (where it's
-        // handled by the model's chat template). Without this, Qwen3 burns through the
-        // token budget thinking before producing a final answer.
-        let isQwen3 = model.lowercased().contains("qwen3") || model.lowercased().contains("qwen-3")
-        let userContent = isQwen3
-            ? "<dictation>\(text)</dictation> /no_think"
-            : "<dictation>\(text)</dictation>"
-
-        let body: [String: Any] = [
-            "model": model,
-            "temperature": 0,
-            "max_tokens": max(256, text.count / 2),
-            "messages": [
-                ["role": "system", "content": prompt],
-                ["role": "user", "content": userContent],
+        let content = try await OpenRouterClient.complete(
+            model: model,
+            messages: [
+                .system(prompt),
+                .user("<dictation>\(text)</dictation>"),
             ],
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard statusCode == 200 else {
-            let body = String(data: data.prefix(500), encoding: .utf8) ?? ""
-            throw NSError(domain: "CleanupDirect", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(statusCode): \(body)"])
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            throw NSError(domain: "CleanupDirect", code: -1, userInfo: [NSLocalizedDescriptionKey: "No content in response"])
-        }
+            apiKey: apiKey,
+            maxTokens: max(256, text.count / 2),
+            timeout: 10
+        )
 
         // Defense in depth: strip any <think>...</think> blocks that slipped through
         // (e.g., provider ignored /no_think). If a <think> is unclosed, thinking was
@@ -2955,6 +3071,7 @@ final class DictationController: ObservableObject {
             || keyCaptureTarget == .voiceNoteSwitch
             || keyCaptureTarget == .todoSwitch
             || keyCaptureTarget == .aiSwitch
+            || keyCaptureTarget == .autoSwitch
         if isSingleKeyCapture {
             if event.type == .flagsChanged {
                 // Modifier key pressed — use it as the single key
@@ -3016,7 +3133,7 @@ final class DictationController: ObservableObject {
     private func finalizeCapturedShortcut(_ shortcut: InvocationShortcut, for target: KeyCaptureTarget) {
         // Switch keys accept any single key (no modifier required), so skip
         // the isValid check which requires modifiers for regular keys.
-        let isSwitchKeyTarget = target == .voiceNoteSwitch || target == .todoSwitch || target == .aiSwitch
+        let isSwitchKeyTarget = target == .voiceNoteSwitch || target == .todoSwitch || target == .aiSwitch || target == .autoSwitch
         if !isSwitchKeyTarget {
             guard shortcut.isValid else {
                 statusText = "Invalid shortcut. Try again."
@@ -3040,9 +3157,6 @@ final class DictationController: ObservableObject {
                 statusText = "Voice Note key must be a single key."
                 return
             }
-        case .screenRecording:
-            setScreenRecordingShortcut(shortcut)
-            statusText = "Screen recording key set to \(screenRecordingKeyDisplayName)."
         case .todoSwitch:
             if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
                 setTodoSwitchKeyCode(primaryKey)
@@ -3057,6 +3171,14 @@ final class DictationController: ObservableObject {
                 statusText = "AI key set to \(aiSwitchKeyDisplayName)."
             } else {
                 statusText = "AI key must be a single key."
+                return
+            }
+        case .autoSwitch:
+            if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
+                setAutoSwitchKeyCode(primaryKey)
+                statusText = "Auto key set to \(autoSwitchKeyDisplayName)."
+            } else {
+                statusText = "Auto key must be a single key."
                 return
             }
         case .todoSheet:
@@ -3075,11 +3197,11 @@ final class DictationController: ObservableObject {
 
         isCapturingInvocationKey = false
         isCapturingVoiceNoteSwitchKey = false
-        isCapturingScreenRecordingKey = false
         isCapturingTodoSwitchKey = false
         isCapturingTodoSheetKey = false
         isCapturingChatSheetKey = false
         isCapturingAiSwitchKey = false
+        isCapturingAutoSwitchKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
     }
@@ -3096,14 +3218,6 @@ final class DictationController: ObservableObject {
         voiceNoteSwitchKeyCode = keyCode
         UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.voiceNoteSwitchKeyCode)
         shortcutMonitor.setVoiceNoteSwitchKeyCode(keyCode)
-    }
-
-    private func setScreenRecordingShortcut(_ shortcut: InvocationShortcut) {
-        screenRecordingShortcut = shortcut
-        if let data = try? JSONEncoder().encode(shortcut) {
-            UserDefaults.standard.set(data, forKey: DefaultsKey.screenRecordingShortcutJSON)
-        }
-        shortcutMonitor.setScreenRecordingShortcut(shortcut)
     }
 
     private func setTodoSheetShortcut(_ shortcut: InvocationShortcut) {
@@ -3135,6 +3249,12 @@ final class DictationController: ObservableObject {
         aiSwitchKeyCode = keyCode
         UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.aiSwitchKeyCode)
         shortcutMonitor.setAiSwitchKeyCode(keyCode)
+    }
+
+    private func setAutoSwitchKeyCode(_ keyCode: Int64) {
+        autoSwitchKeyCode = keyCode
+        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.autoSwitchKeyCode)
+        shortcutMonitor.setAutoSwitchKeyCode(keyCode)
     }
 
     private func startLiveTranscriptionLoop(configuration: ParakeetConfiguration) {

@@ -49,6 +49,7 @@ final class GlobalFnShortcutMonitor {
     var onVoiceNoteSwitchKeyPressed: (() -> Void)?
     var onTodoSwitchKeyPressed: (() -> Void)?
     var onAiSwitchKeyPressed: (() -> Void)?
+    var onAutoSwitchKeyPressed: (() -> Void)?
 
     enum SpaceCycleDirection {
         case left, right
@@ -57,7 +58,6 @@ final class GlobalFnShortcutMonitor {
     var onSpaceCycleKeyPressed: ((SpaceCycleDirection) -> Void)?
     var isRecordingForSpaceCycle = false
 
-    var onScreenRecordingKeyPressed: (() -> Void)?
 
     // Escape interception
     var onEscapePressed: (() -> Void)?
@@ -87,9 +87,19 @@ final class GlobalFnShortcutMonitor {
     private var aiSwitchArmed = false
     private var consumeAiSwitchKeyUp = false
 
-    // Multi-key screen recording shortcut
-    private var screenRecordingShortcut: InvocationShortcut?
-    private var isScreenRecordingShortcutActive = false
+    // Auto switch (single-key, mirrors todo switch)
+    private var autoSwitchKeyCode: Int64?
+    private var autoSwitchArmed = false
+    private var consumeAutoSwitchKeyUp = false
+
+    // Post-dictation action pill (A/S/D reroute after paste)
+    var onPostActionKeyPressed: ((Int) -> Void)?
+    var onPostActionDismissRequested: (() -> Void)?
+    /// Key codes for the three split-pill actions, indexed by
+    /// PostDictationAction.rawValue (AI, note, todo).
+    private var postActionKeyCodes: [Int64] = [0, 1, 2]
+    private var postActionArmed = false
+    private var consumePostActionKeyUpCode: Int64?
 
     // Multi-key todo sheet shortcut
     var onTodoSheetKeyPressed: (() -> Void)?
@@ -109,11 +119,6 @@ final class GlobalFnShortcutMonitor {
     func setVoiceNoteSwitchKeyCode(_ keyCode: Int64?) {
         voiceNoteSwitchKeyCode = keyCode
         consumeVoiceNoteSwitchKeyUp = false
-    }
-
-    func setScreenRecordingShortcut(_ shortcut: InvocationShortcut?) {
-        screenRecordingShortcut = shortcut
-        isScreenRecordingShortcutActive = false
     }
 
     func setTodoSheetShortcut(_ shortcut: InvocationShortcut?) {
@@ -157,12 +162,33 @@ final class GlobalFnShortcutMonitor {
         }
     }
 
+    func setAutoSwitchKeyCode(_ keyCode: Int64?) {
+        autoSwitchKeyCode = keyCode
+        consumeAutoSwitchKeyUp = false
+    }
+
+    func setAutoSwitchArmed(_ armed: Bool) {
+        autoSwitchArmed = armed
+        if !armed {
+            consumeAutoSwitchKeyUp = false
+        }
+    }
+
+    func setPostActionKeyCodes(_ codes: [Int64]) {
+        postActionKeyCodes = codes
+    }
+
+    func setPostActionArmed(_ armed: Bool) {
+        postActionArmed = armed
+    }
+
     func setRecordingControlsActive(_ active: Bool) {
         isRecordingForSpaceCycle = active
         isCurrentlyRecording = active
         setVoiceNoteSwitchArmed(active)
         setTodoSwitchArmed(active)
         setAiSwitchArmed(active)
+        setAutoSwitchArmed(active)
     }
 
     func isInvocationKeyCurrentlyPressed() -> Bool {
@@ -257,6 +283,8 @@ final class GlobalFnShortcutMonitor {
         runLoopSource = nil
         eventTap = nil
         isInvocationShortcutActive = false
+        postActionArmed = false
+        consumePostActionKeyUpCode = nil
         setRecordingControlsActive(false)
     }
 
@@ -270,22 +298,6 @@ final class GlobalFnShortcutMonitor {
         currentModifierFlags = Self.nsModifierFlags(from: rawFlags)
 
         holdDebugLog("flagsChanged: keyCode=\(keyCode) flags=\(rawFlags.rawValue) modifiers=\(currentModifierFlags.rawValue) isActive=\(isInvocationShortcutActive)")
-
-        // Screen recording shortcut: modifier-based matching
-        if let srShortcut = screenRecordingShortcut {
-            if srShortcut != invocationShortcut {
-                let srResult = evaluateModifierShortcut(srShortcut, keyCode: keyCode, isActive: isScreenRecordingShortcutActive)
-                if let srResult {
-                    if srResult, !isScreenRecordingShortcutActive {
-                        isScreenRecordingShortcutActive = true
-                        onScreenRecordingKeyPressed?()
-                    } else if !srResult {
-                        isScreenRecordingShortcutActive = false
-                    }
-                    return true
-                }
-            }
-        }
 
         // Todo sheet shortcut: modifier-based matching
         if let tsShortcut = todoSheetShortcut {
@@ -403,6 +415,39 @@ final class GlobalFnShortcutMonitor {
             invocationShortcut: invocationShortcut
         )
 
+        // Post-action pill: swallow the trailing keyUp of a consumed action key
+        // even if the pill was already dismissed between down and up.
+        if let pendingUpCode = consumePostActionKeyUpCode, !isKeyDown, keyCode == pendingUpCode {
+            consumePostActionKeyUpCode = nil
+            return true
+        }
+
+        // Post-action pill: while armed, the action keys route the last
+        // transcript; Escape dismisses; any other typing dismisses untouched.
+        if postActionArmed, !invocationHasPriority {
+            if isKeyDown, keyCode == 53 {
+                if !isRepeat {
+                    onPostActionDismissRequested?()
+                }
+                return true
+            }
+
+            let plainModifiers = eventModifierFlags
+                .intersection([.command, .control, .option])
+                .isEmpty
+            if plainModifiers, let index = postActionKeyCodes.firstIndex(of: keyCode) {
+                if isKeyDown {
+                    if !isRepeat {
+                        consumePostActionKeyUpCode = keyCode
+                        onPostActionKeyPressed?(index)
+                    }
+                    return true
+                }
+            } else if isKeyDown, !isRepeat {
+                onPostActionDismissRequested?()
+            }
+        }
+
         // Escape interception: if enabled and recording, consume escape key
         if !invocationHasPriority, escapeToCancelEnabled, isCurrentlyRecording, keyCode == 53, isKeyDown {
             if !isRepeat {
@@ -421,19 +466,6 @@ final class GlobalFnShortcutMonitor {
                     onSpaceCycleKeyPressed?(.right)
                     return true
                 }
-            }
-        }
-
-        // Screen recording shortcut (non-modifier key variant)
-        if let srShortcut = screenRecordingShortcut, srShortcut != invocationShortcut {
-            if matchesKeyEvent(srShortcut, keyCode: keyCode, isKeyDown: isKeyDown) {
-                if isKeyDown {
-                    let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                    if !isRepeat {
-                        onScreenRecordingKeyPressed?()
-                    }
-                }
-                return true
             }
         }
 
@@ -522,6 +554,27 @@ final class GlobalFnShortcutMonitor {
                 }
             } else if consumeAiSwitchKeyUp {
                 consumeAiSwitchKeyUp = false
+                return true
+            }
+        }
+
+        // Auto switch key
+        if !invocationHasPriority,
+           let autoSwitchKeyCode,
+           keyCode == autoSwitchKeyCode
+        {
+            if isKeyDown {
+                if isRepeat {
+                    return autoSwitchArmed
+                }
+
+                if autoSwitchArmed {
+                    consumeAutoSwitchKeyUp = true
+                    onAutoSwitchKeyPressed?()
+                    return true
+                }
+            } else if consumeAutoSwitchKeyUp {
+                consumeAutoSwitchKeyUp = false
                 return true
             }
         }

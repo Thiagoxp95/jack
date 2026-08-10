@@ -32,6 +32,8 @@ struct RecordingPresentationState: Equatable {
             message = "Listening... (Todo Mode)"
         case .aiChat:
             message = "Listening... (AI Mode)"
+        case .auto:
+            message = "Listening... (Auto Mode)"
         }
 
         return RecordingPresentationState(
@@ -39,7 +41,8 @@ struct RecordingPresentationState: Equatable {
             isRecording: true,
             isTranscribing: false,
             usesActiveAppearance: true,
-            isNoteMode: outputMode == .voiceNote,
+            // Auto mode shares the note-mode look: same crosshair, same accent.
+            isNoteMode: outputMode == .voiceNote || outputMode == .auto,
             isTodoMode: outputMode == .todo,
             isAiMode: outputMode == .aiChat
         )

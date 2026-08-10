@@ -196,6 +196,8 @@ enum RecordingOutputMode: String, CaseIterable, Identifiable {
     case voiceNote
     case todo
     case aiChat
+    /// Capture now, let the classifier decide note-vs-todo once the transcript lands.
+    case auto
 
     var id: String { rawValue }
 
@@ -209,6 +211,8 @@ enum RecordingOutputMode: String, CaseIterable, Identifiable {
             return "Todo"
         case .aiChat:
             return "AI Chat"
+        case .auto:
+            return "Auto"
         }
     }
 }
