@@ -14,11 +14,10 @@ struct JackApp: App {
 
 // MARK: - Root
 
-/// Creates the ``DictationController`` and ``RecordingSessionController``,
-/// initializes them, and presents ``ContentView`` (or the onboarding wizard).
+/// Creates the ``DictationController``, initializes it, and presents
+/// ``ContentView`` (or the onboarding wizard).
 private struct RootView: View {
     @StateObject private var controller = DictationController()
-    @State private var recordingController = RecordingSessionController()
     @State private var spaceController = SpaceController()
 
     var body: some View {
@@ -29,7 +28,6 @@ private struct RootView: View {
             } else {
                 ContentView(
                     controller: controller,
-                    recordingController: recordingController,
                     spaceController: spaceController,
                     todoListController: TodoListController.shared
                 )
@@ -38,7 +36,6 @@ private struct RootView: View {
         }
             .task {
                 // Wire up controllers immediately (synchronous, no network)
-                recordingController.spaceController = spaceController
                 controller.spaceController = spaceController
                 TodoSideSheetController.shared.todoListController = TodoListController.shared
                 TodoSideSheetController.shared.spaceController = spaceController
@@ -47,20 +44,13 @@ private struct RootView: View {
 
                 // Check local permissions (fast, no network)
                 await controller.initialize()
-                await recordingController.initialize()
                 PermissionCenter.shared.startMonitoring()
             }
             .onReceive(NotificationCenter.default.publisher(for: .jackPermissionsChanged)) { _ in
                 Task {
-                    // Keep the controllers' cached flags in lockstep with the
+                    // Keep the controller's cached flags in lockstep with the
                     // live TCC state so features unlock the moment macOS grants.
                     await controller.refreshPermissions(prompt: false)
-                    await recordingController.refreshPermissions()
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleScreenRecording)) { _ in
-                Task {
-                    await toggleScreenRecordingFromShortcut()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .todoSheetCommitInput)) { _ in
@@ -69,25 +59,6 @@ private struct RootView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 controller.applicationWillTerminate()
             }
-    }
-
-    private func toggleScreenRecordingFromShortcut() async {
-        switch recordingController.state {
-        case .recording, .paused:
-            await recordingController.stopRecording()
-        case .idle:
-            do {
-                // Refresh sources so the display list is current, then
-                // auto-select the display under the mouse cursor.
-                await recordingController.refreshAvailableSources()
-                recordingController.selectDisplayUnderCursor()
-                try await recordingController.startRecording()
-            } catch {
-                NSLog("[Jack] Quick screen recording failed: %@", "\(error)")
-            }
-        default:
-            break
-        }
     }
 }
 

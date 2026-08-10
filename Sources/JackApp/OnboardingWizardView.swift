@@ -33,7 +33,7 @@ private enum WizardColors {
 private enum WizardStep: Int, CaseIterable {
     case welcome = 0
     case permissions
-    case screenRecordingPermissions
+    case screenCapturePermission
     case shortcut
     case modelDownload
     case done
@@ -42,7 +42,7 @@ private enum WizardStep: Int, CaseIterable {
         switch self {
         case .welcome: return "Get Started"
         case .permissions: return "Continue"
-        case .screenRecordingPermissions: return "Continue"
+        case .screenCapturePermission: return "Continue"
         case .shortcut: return "Continue"
         case .modelDownload: return "Continue"
         case .done: return "Start Dictating"
@@ -110,8 +110,8 @@ struct OnboardingWizardView: View {
             WelcomeStep()
         case .permissions:
             PermissionsStep(controller: controller, isRequestingPermissions: $isRequestingPermissions)
-        case .screenRecordingPermissions:
-            ScreenRecordingPermissionsStep(onSkip: { navigateForward() })
+        case .screenCapturePermission:
+            ScreenCapturePermissionStep(onSkip: { navigateForward() })
         case .shortcut:
             ShortcutStep(controller: controller)
         case .modelDownload:
@@ -433,12 +433,11 @@ private struct PermissionsStep: View {
     }
 }
 
-// MARK: - Step 3: Screen Recording Permissions
+// MARK: - Step 3: Screen Capture Permission
 
-private struct ScreenRecordingPermissionsStep: View {
+private struct ScreenCapturePermissionStep: View {
     var onSkip: () -> Void
     @State private var screenPermission = false
-    @State private var cameraPermission = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -446,15 +445,15 @@ private struct ScreenRecordingPermissionsStep: View {
             VStack(alignment: .leading, spacing: 12) {
                 Spacer()
 
-                Image(systemName: "record.circle.fill")
+                Image(systemName: "camera.viewfinder")
                     .font(.system(size: 44, weight: .medium))
                     .foregroundStyle(WizardColors.accentGradient)
 
-                Text("Screen Recording")
+                Text("Screen Capture")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(WizardColors.primaryText)
 
-                Text("Optional permissions for capturing your screen and camera overlay.")
+                Text("Optional permission for attaching screenshots to your notes.")
                     .font(.system(size: 13))
                     .foregroundStyle(WizardColors.secondary)
                     .lineSpacing(2)
@@ -469,19 +468,11 @@ private struct ScreenRecordingPermissionsStep: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 12) {
                     permissionCard(
-                        icon: "rectangle.dashed.badge.record",
+                        icon: "rectangle.dashed",
                         title: "Screen Recording",
-                        description: "Capture your screen for recordings and demos",
+                        description: "Attach screen region screenshots to notes",
                         granted: screenPermission,
                         openAction: { PermissionCenter.shared.beginGrant(.screenRecording) }
-                    )
-
-                    permissionCard(
-                        icon: "camera.fill",
-                        title: "Camera",
-                        description: "Show a webcam overlay in your recordings",
-                        granted: cameraPermission,
-                        openAction: { openCameraSettings() }
                     )
 
                     Button(action: onSkip) {
@@ -566,20 +557,7 @@ private struct ScreenRecordingPermissionsStep: View {
     }
 
     private func refreshPermissions() async {
-        screenPermission = await ScreenRecordingService.hasPermission()
-        cameraPermission = await WebcamCaptureService.checkPermission()
-    }
-
-    private func openScreenRecordingSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func openCameraSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
-            NSWorkspace.shared.open(url)
-        }
+        screenPermission = CGPreflightScreenCaptureAccess()
     }
 }
 

@@ -4,13 +4,14 @@ Jack is a macOS voice-to-text dictation app. Press a global shortcut, speak, and
 
 On top of dictation, Jack includes:
 
-- **LLM transcript cleanup** — optionally post-process raw transcripts through Groq or Cerebras for punctuation, filler-word removal, and formatting.
+- **LLM transcript cleanup** — optionally post-process raw transcripts through any OpenRouter model for punctuation, filler-word removal, and formatting.
 - **Notes** — voice notes saved to daily markdown files (`~/Documents/Jack Notes/YYYY-MM-DD.md`), with optional cloud sync into spaces.
 - **Todos** — a todo mode with kanban board, confirmation cards, and sync.
+- **Auto mode** — press the auto switch key while recording and an OpenRouter model decides whether the capture is a note or a todo, using the transcript, OCR text from any screenshots you grabbed, and the frontmost app/window.
 - **Chat** — an AI chat side sheet backed by a Convex + OpenRouter backend.
-- **Screen recording** — recording with cinematic cursor zoom, timeline editing, subtitles, and shareable links.
+- **Knowledge base** — a local vector store over your dictations, searchable from an MCP server.
 
-Core dictation works entirely offline with no account. Cloud features (chat, spaces/todos sync, cloud transcription, sharing) are optional and require a self-hosted backend — see [Bring your own keys](#bring-your-own-keys).
+Core dictation works entirely offline with no account. Cloud features (chat, spaces/todos sync, cloud transcription) are optional and require a self-hosted backend — see [Bring your own keys](#bring-your-own-keys).
 
 ## Building
 
@@ -51,11 +52,11 @@ Then wait for the one-time model download to complete.
 
 Jack is open source, but the backend it ships pointing at is the maintainer's deployment. To use the optional features, supply your own keys:
 
-### Transcript cleanup (Groq / Cerebras)
+### Transcript cleanup and auto mode (OpenRouter)
 
-Entered directly in the app: **Overview → Transcription Cleanup**. No backend needed — the app calls the provider API directly with your key.
+Paste an [OpenRouter](https://openrouter.ai/keys) key into **Overview → OpenRouter**. It's stored on your Mac and used for direct calls to `openrouter.ai` — no backend involved. Pick models separately for **Transcription Cleanup** and **Smart Routing (Auto Mode)**; the picker lists OpenRouter's live catalog.
 
-### Cloud features (chat, cloud transcription, spaces/todos sync, sharing)
+### Cloud features (chat, cloud transcription, spaces/todos sync)
 
 The app has no login — it runs local-first out of the box. Cloud features require self-hosting the Convex backend in `convex/`:
 
@@ -68,7 +69,7 @@ The app has no login — it runs local-first out of the box. Cloud features requ
 | `JACK_CONVEX_URL` | `JackConvexURL` | Convex cloud URL (`https://….convex.cloud`) |
 | `JACK_CONVEX_SITE_URL` | `JackConvexSiteURL` | Convex site URL (`https://….convex.site`) |
 
-Note: the bundled `convex/` functions were written against an authenticated schema; most still require an identity and will reject anonymous calls. Until the backend is reworked for anonymous/local use, cloud features degrade gracefully (they simply stay silent) and everything local — dictation, cleanup with your own Groq/Cerebras keys, notes, screen recording — works fully offline. See `Sources/JackApp/Auth/AppConfig.swift` and `convex/README.md`.
+Note: the bundled `convex/` functions were written against an authenticated schema; most still require an identity and will reject anonymous calls. Until the backend is reworked for anonymous/local use, cloud features degrade gracefully (they simply stay silent) and everything local — dictation, cleanup and auto mode with your own OpenRouter key, notes, the knowledge base — works without it. See `Sources/JackApp/Auth/AppConfig.swift` and `convex/README.md`.
 
 ## Auto-updates
 
@@ -117,7 +118,7 @@ Required variables for notarization: `APP_STORE_CONNECT_API_KEY_P8`, `APP_STORE_
 ## Project layout
 
 - `Sources/JackApp/` — the SwiftPM macOS app (entry point `JackApp.swift`, orchestration in `DictationController.swift`).
-- `convex/` — the optional Convex backend (chat, sync, cloud transcription, sharing). See `convex/README.md`.
+- `convex/` — the optional Convex backend (chat, sync, cloud transcription). See `convex/README.md`.
 - `Scripts/` — build, packaging, signing, and release tooling.
 - `docs/plans/` — design and implementation plans for past features.
 

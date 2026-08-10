@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    /// Navigate the main window to a named sidebar section.
+    static let showSection = Notification.Name("showSection")
+    /// The "show in status bar" preference toggled.
+    static let statusBarVisibilityChanged = Notification.Name("statusBarVisibilityChanged")
+}
+
 /// Manages the persistent menu bar status item with quick actions.
 @MainActor
 final class StatusBarController: NSObject {
@@ -78,12 +85,6 @@ final class StatusBarController: NSObject {
         todoSheetItem.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: nil)
         menu.addItem(todoSheetItem)
 
-        let recordItem = NSMenuItem(title: "Start Screen Recording", action: #selector(startRecording), keyEquivalent: "r")
-        recordItem.keyEquivalentModifierMask = [.command, .shift]
-        recordItem.target = self
-        recordItem.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: nil)
-        menu.addItem(recordItem)
-
         menu.addItem(.separator())
 
         // Navigation
@@ -102,11 +103,6 @@ final class StatusBarController: NSObject {
         todosItem.target = self
         todosItem.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: nil)
         menu.addItem(todosItem)
-
-        let recordingsItem = NSMenuItem(title: "Screen Recording", action: #selector(showScreenRecording), keyEquivalent: "")
-        recordingsItem.target = self
-        recordingsItem.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: nil)
-        menu.addItem(recordingsItem)
 
         menu.addItem(.separator())
 
@@ -133,15 +129,6 @@ final class StatusBarController: NSObject {
         TodoSideSheetController.shared.toggle()
     }
 
-    @objc private func startRecording() {
-        activateMainWindow()
-        NotificationCenter.default.post(
-            name: .showSection,
-            object: nil,
-            userInfo: ["section": "screenRecording"]
-        )
-    }
-
     @objc private func showOverview() {
         navigateToSection("overview")
     }
@@ -152,10 +139,6 @@ final class StatusBarController: NSObject {
 
     @objc private func showTodos() {
         navigateToSection("todos")
-    }
-
-    @objc private func showScreenRecording() {
-        navigateToSection("screenRecording")
     }
 
     @objc private func quitApp() {

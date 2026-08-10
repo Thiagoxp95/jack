@@ -11,9 +11,7 @@
 import type * as chats from "../chats.js";
 import type * as http from "../http.js";
 import type * as notes from "../notes.js";
-import type * as recordings from "../recordings.js";
 import type * as spaces from "../spaces.js";
-import type * as storage from "../storage.js";
 import type * as todoLists from "../todoLists.js";
 import type * as todos from "../todos.js";
 import type * as transcription from "../transcription.js";
@@ -29,9 +27,7 @@ declare const fullApi: ApiFromModules<{
   chats: typeof chats;
   http: typeof http;
   notes: typeof notes;
-  recordings: typeof recordings;
   spaces: typeof spaces;
-  storage: typeof storage;
   todoLists: typeof todoLists;
   todos: typeof todos;
   transcription: typeof transcription;

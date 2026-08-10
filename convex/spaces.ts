@@ -129,21 +129,6 @@ export const remove = mutation({
     if (!membership || membership.role !== "owner")
       throw new Error("Only the owner can delete this space");
 
-    // Delete all recordings and their storage
-    const recordings = await ctx.db
-      .query("recordings")
-      .withIndex("by_space", (q) => q.eq("spaceId", args.spaceId))
-      .collect();
-    for (const recording of recordings) {
-      if (recording.storageId) {
-        await ctx.storage.delete(recording.storageId);
-      }
-      if (recording.thumbnailStorageId) {
-        await ctx.storage.delete(recording.thumbnailStorageId);
-      }
-      await ctx.db.delete(recording._id);
-    }
-
     // Delete all notes
     const notes = await ctx.db
       .query("notes")

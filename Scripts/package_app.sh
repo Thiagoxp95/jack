@@ -226,8 +226,19 @@ if [[ "$SIGNING_MODE" == "adhoc" || -z "$APP_IDENTITY" ]]; then
   CODESIGN_ARGS=(--force --sign "-")
   echo "Signing mode: ad-hoc"
 else
-  CODESIGN_ARGS=(--force --timestamp --options runtime --sign "$APP_IDENTITY")
-  echo "Signing mode: identity ($APP_IDENTITY)"
+  # Hardened runtime enforces library validation, which requires every nested
+  # binary to share the main executable's Team ID. A local self-signed dev cert
+  # has no Team ID, so Sparkle.framework fails to load and the app dies at
+  # launch. Only Developer ID builds (the ones that get notarized) need it.
+  IDENTITY_NAME=$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -v id="$APP_IDENTITY" '$0 ~ id { sub(/^[^"]*"/, ""); sub(/"$/, ""); print; exit }')
+  if [[ "$IDENTITY_NAME" == *"Developer ID"* || "$APP_IDENTITY" == *"Developer ID"* ]]; then
+    CODESIGN_ARGS=(--force --timestamp --options runtime --sign "$APP_IDENTITY")
+    echo "Signing mode: identity ($APP_IDENTITY) + hardened runtime"
+  else
+    CODESIGN_ARGS=(--force --sign "$APP_IDENTITY")
+    echo "Signing mode: identity ($APP_IDENTITY), local dev (no hardened runtime)"
+  fi
 fi
 
 # Sign embedded frameworks and their nested binaries before the app bundle.

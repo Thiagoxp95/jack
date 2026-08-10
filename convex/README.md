@@ -1,6 +1,6 @@
 # Jack Convex backend
 
-The optional [Convex](https://convex.dev) backend powering Jack's cloud features: chat, cloud transcription, spaces, notes/todos sync, and shareable recording links. Core dictation in the app works without it.
+The optional [Convex](https://convex.dev) backend powering Jack's cloud features: chat, cloud transcription, spaces, and notes/todos sync. Core dictation in the app works without it.
 
 ## Tables
 
@@ -9,7 +9,6 @@ Defined in `schema.ts`:
 - `users` — Clerk-linked user records
 - `spaces`, `space_members`, `space_invitations` — shared workspaces and membership
 - `notes` — synced voice notes
-- `recordings` — screen recordings and share tokens
 - `todoLists`, `todos` — todo sync
 - `chatThreads`, `chatMessages` — AI chat history
 

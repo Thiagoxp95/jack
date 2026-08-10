@@ -6,11 +6,8 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var controller: DictationController
     @ObservedObject private var permissionCenter = PermissionCenter.shared
-    @Bindable var recordingController: RecordingSessionController
     var spaceController: SpaceController
     @State private var selectedSection: SettingsSection = .overview
-    @State private var isLoadingSetup = false
-    @State private var setupWindow = SetupWindowController()
     @State private var showCreateSpace = false
     @State private var noteListController = NoteListController()
     var todoListController: TodoListController
@@ -22,9 +19,11 @@ struct ContentView: View {
     @State private var isBackfilling = false
     @State private var didCopyMCPCommand = false
     @State private var showShortcutCapture = false
-    @State private var showScreenRecordingCapture = false
     @State private var showTodoSheetCapture = false
     @State private var showChatSheetCapture = false
+    @State private var knowledgeTab: KnowledgeTab = .notes
+    @State private var cleanupModelSearch = ""
+    @State private var routingModelSearch = ""
 
     var body: some View {
         NavigationSplitView {
@@ -77,7 +76,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Section list — only Overview, Notes, Screen Recording
+                // Section list — Overview, Knowledge Center
                 List(SettingsSection.allCases, selection: $selectedSection) { section in
                     Label(section.title, systemImage: section.systemImage)
                         .tag(section)
@@ -86,6 +85,8 @@ struct ContentView: View {
                 .tint(spaceController.activeSpaceColor.color)
             }
             .navigationTitle("")
+            // "Knowledge Center" truncates at the default sidebar width.
+            .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 320)
             .safeAreaInset(edge: .bottom) {
                 UpdateCardView(updater: AppUpdater.shared, accent: spaceController.activeSpaceColor.color)
             }
@@ -125,18 +126,6 @@ struct ContentView: View {
                 }
             )
         }
-        .sheet(isPresented: $showScreenRecordingCapture) {
-            ShortcutCaptureView(
-                title: "Record Screen Recording Shortcut",
-                onSave: { shortcut in
-                    controller.applyScreenRecordingShortcut(shortcut)
-                    showScreenRecordingCapture = false
-                },
-                onCancel: {
-                    showScreenRecordingCapture = false
-                }
-            )
-        }
         .sheet(isPresented: $showTodoSheetCapture) {
             ShortcutCaptureView(
                 title: "Record Todo Sheet Shortcut",
@@ -161,15 +150,15 @@ struct ContentView: View {
                 }
             )
         }
-        .onReceive(NotificationCenter.default.publisher(for: .showRecordingsTab)) { _ in
-            selectedSection = .screenRecording
-            NSApp.activate()
-            NSApp.keyWindow?.makeKeyAndOrderFront(nil)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .showSection)) { notification in
-            if let name = notification.userInfo?["section"] as? String,
-               let section = SettingsSection(rawValue: name) {
-                selectedSection = section
+            if let name = notification.userInfo?["section"] as? String {
+                if let section = SettingsSection(rawValue: name) {
+                    selectedSection = section
+                } else if let tab = KnowledgeTab(rawValue: name) {
+                    // Notes and Todos now live inside the Knowledge Center.
+                    selectedSection = .knowledge
+                    knowledgeTab = tab
+                }
             }
             NSApp.activate()
             NSApp.keyWindow?.makeKeyAndOrderFront(nil)
@@ -181,12 +170,6 @@ struct ContentView: View {
         switch section {
         case .overview:
             overviewSection
-        case .notes:
-            notesSection
-        case .todos:
-            todosSection
-        case .screenRecording:
-            screenRecordingSection
         case .knowledge:
             knowledgeSection
         }
@@ -378,26 +361,44 @@ struct ContentView: View {
                 Text("While recording, press this key to switch output to AI Chat mode.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Divider()
+
+                // Auto Switch
+                HStack {
+                    Image(systemName: "wand.and.stars")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    Text("Auto Switch Key")
+                        .font(.body.weight(.medium))
+
+                    Spacer()
+
+                    Button {
+                        if controller.isCapturingAutoSwitchKey {
+                            controller.cancelAutoSwitchKeyCapture()
+                        } else {
+                            controller.startAutoSwitchKeyCapture()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(controller.isCapturingAutoSwitchKey ? "Press a key…" : controller.autoSwitchKeyDisplayName)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(controller.isCapturingInvocationKey)
+                }
+
+                Text("While recording, press this key to let the model decide whether this becomes a note or a todo. Screenshots work here too.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // 2b. Shortcuts
             settingsCard(title: "Shortcuts", subtitle: "Global keyboard shortcuts for quick actions.") {
-                // Quick Screen Recording
-                shortcutRow(
-                    icon: "record.circle",
-                    title: "Quick Screen Recording",
-                    displayName: controller.screenRecordingKeyDisplayName,
-                    hasShortcut: controller.screenRecordingShortcut != nil,
-                    onCapture: { showScreenRecordingCapture = true },
-                    onClear: { controller.clearScreenRecordingKey() }
-                )
-
-                Text("Instantly start/stop recording your screen with default settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
                 // Todo Side Sheet
                 shortcutRow(
                     icon: "sidebar.right",
@@ -507,33 +508,66 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // 5a. OpenRouter — the one place a key is entered.
+            settingsCard(
+                title: "OpenRouter",
+                subtitle: "Your key, stored on this Mac. Jack calls openrouter.ai directly — no Jack server in between."
+            ) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("API Key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    SecureField("sk-or-v1-...", text: $controller.openRouterApiKey)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(controller.openRouterApiKey.isEmpty ? Color.orange : Color.green)
+                        .frame(width: 8, height: 8)
+                    Text(controller.openRouterApiKey.isEmpty
+                         ? "No key — cleanup and auto mode are disabled"
+                         : "Key set · \(controller.openRouterModels.count) models available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button(controller.isLoadingOpenRouterModels ? "Loading…" : "Refresh Models") {
+                        Task { await controller.refreshOpenRouterModels() }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                    .disabled(controller.isLoadingOpenRouterModels)
+                }
+
+                if let error = controller.openRouterModelsError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("Get a key at openrouter.ai/keys. It never leaves this Mac except in requests to OpenRouter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .task {
+                if controller.openRouterModels.isEmpty {
+                    await controller.refreshOpenRouterModels()
+                }
+            }
+
             // 5b. Transcription Cleanup
             settingsCard(title: "Transcription Cleanup", subtitle: "Clean up transcribed text with an LLM before output.") {
                 Toggle("Enable cleanup", isOn: $controller.cleanupEnabled)
 
                 if controller.cleanupEnabled {
-                    Picker("Model", selection: $controller.cleanupModel) {
-                        ForEach(CleanupModelChoice.allCases) { model in
-                            Text(model.title).tag(model)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Groq API Key")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        SecureField("sk-...", text: $controller.groqApiKey)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Cerebras API Key")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        SecureField("csk-...", text: $controller.cerebrasApiKey)
-                            .textFieldStyle(.roundedBorder)
-                    }
+                    modelPickerRow(
+                        icon: "wand.and.rays",
+                        title: "Cleanup Model",
+                        selection: $controller.cleanupModelId,
+                        searchText: $cleanupModelSearch
+                    )
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Cleanup Prompt")
@@ -555,6 +589,10 @@ struct ContentView: View {
                     }
                 }
             }
+
+            // 5b. Auto-mode routing + knowledge base plumbing
+            smartRoutingCard
+            knowledgeSettingsCards
 
             // 6. Permissions (at bottom)
             settingsCard(title: "Permissions", subtitle: "Live status — drag & drop Jack into System Settings to grant.") {
@@ -729,112 +767,70 @@ struct ContentView: View {
             }
     }
 
-    // MARK: - Screen Recording
-
-    private var screenRecordingSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if !recordingController.hasScreenPermission {
-                settingsCard(title: "Screen Permission", subtitle: "Screen Recording access is required.") {
-                    Text("Grant Screen Recording permission in System Settings to capture your screen.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-
-                    Button("Open Screen Recording Settings") {
-                        controller.openAccessibilitySettings()
-                    }
-                    .buttonStyle(.bordered)
-                    .font(.caption)
-
-                    Button("Re-check") {
-                        Task { await recordingController.refreshPermissions() }
-                    }
-                    .buttonStyle(.bordered)
-                    .font(.caption)
-                }
-            }
-
-            switch recordingController.state {
-            case .recording, .paused:
-                settingsCard(title: "Recording In Progress", subtitle: "Use the floating bubble to pause or stop.") {
-                    HStack(spacing: 12) {
-                        Circle()
-                            .fill(recordingController.state == .paused ? Color.yellow : Color.red)
-                            .frame(width: 10, height: 10)
-                        Text(recordingController.formattedElapsedTime)
-                            .font(.system(size: 18, weight: .medium, design: .monospaced))
-                        Text(recordingController.state == .paused ? "Paused" : "Recording")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button("Stop Recording") {
-                        Task { await recordingController.stopRecording() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                }
-
-            case .editing:
-                settingsCard(title: "Editing Recording", subtitle: "Duration: \(recordingController.formattedElapsedTime)") {
-                    Text("The video editor is open in a separate window.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Button("Discard Recording") {
-                        recordingController.discardEditing()
-                    }
-                    .buttonStyle(.bordered)
-                    .foregroundStyle(.red)
-                }
-
-            case .countdown:
-                settingsCard(title: "Starting...", subtitle: "Recording begins after countdown.") {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-            default:
-                EmptyView()
-            }
-
-            RecordingsLibraryView(
-                spaceController: spaceController,
-                onStartRecording: {
-                    isLoadingSetup = true
-                    Task {
-                        await recordingController.openSetup()
-                        setupWindow.show(controller: recordingController)
-                        isLoadingSetup = false
-                    }
-                },
-                isLoadingSetup: isLoadingSetup,
-                showStartButton: recordingController.state == .idle || recordingController.state == .setup
-            )
-        }
-    }
-
     // MARK: - Knowledge Base
 
     private var knowledgeSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            settingsCard(title: "Long-Term Memory", subtitle: "Everything you dictate is stored and embedded locally.") {
-                if let stats = knowledgeStats {
-                    HStack(spacing: 24) {
-                        knowledgeStat(value: stats.entryCount, label: "entries")
-                        knowledgeStat(value: stats.embeddedCount, label: "embedded")
-                        knowledgeStat(value: stats.backlogCount, label: "pending")
-                    }
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+            knowledgeStatsHeader
 
-                Text("Stored at \(KnowledgeStore.defaultDirectoryURL().path)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            // Segmented style drops icons, so label the tabs with text only.
+            Picker("", selection: $knowledgeTab) {
+                ForEach(KnowledgeTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 260, alignment: .leading)
+
+            switch knowledgeTab {
+            case .notes:
+                notesSection
+            case .todos:
+                todosSection
+            }
+        }
+        .task {
+            await refreshKnowledgeStatus()
+        }
+    }
+
+    /// Compact stats strip above the Notes | Todos tabs.
+    private var knowledgeStatsHeader: some View {
+        HStack(spacing: 24) {
+            if let stats = knowledgeStats {
+                knowledgeStat(value: stats.entryCount, label: "entries")
+                knowledgeStat(value: stats.embeddedCount, label: "embedded")
+                knowledgeStat(value: stats.backlogCount, label: "pending")
+            } else {
+                ProgressView()
+                    .controlSize(.small)
             }
 
+            Spacer()
+
+            Text(KnowledgeStore.defaultDirectoryURL().path)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .textSelection(.enabled)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Knowledge settings (shown in Overview)
+
+    private var knowledgeSettingsCards: some View {
+        Group {
             settingsCard(title: "On-Device Embeddings", subtitle: "Semantic search runs fully offline via Apple's NaturalLanguage model.") {
                 HStack(spacing: 8) {
                     Circle()
@@ -911,8 +907,105 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task {
-            await refreshKnowledgeStatus()
+    }
+
+    /// Auto-mode routing: which model decides note-vs-todo.
+    private var smartRoutingCard: some View {
+        settingsCard(
+            title: "Smart Routing (Auto Mode)",
+            subtitle: "Press \(controller.autoSwitchKeyDisplayName) while recording and a model decides: note or todo."
+        ) {
+            modelPickerRow(
+                icon: "arrow.triangle.branch",
+                title: "Routing Model",
+                selection: $controller.routingModelId,
+                searchText: $routingModelSearch
+            )
+
+            if let verdict = controller.lastIntentVerdictSummary {
+                Text("Last decision: \(verdict)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Text("The transcript, OCR text from any screenshots you grabbed, and the frontmost app/window are sent to the model. Screenshots go as recognized text, not as images. Undecidable captures become notes.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Model id chooser backed by OpenRouter's catalog. The catalog runs to
+    /// hundreds of entries, so the menu is filtered by a search field.
+    @ViewBuilder
+    private func modelPickerRow(
+        icon: String,
+        title: String,
+        selection: Binding<String>,
+        searchText: Binding<String>
+    ) -> some View {
+        let query = searchText.wrappedValue.trimmingCharacters(in: .whitespaces)
+        let matches = controller.openRouterModels.filter { model in
+            query.isEmpty
+                || model.name.localizedCaseInsensitiveContains(query)
+                || model.id.localizedCaseInsensitiveContains(query)
+        }
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(title)
+                    .font(.body.weight(.medium))
+
+                Spacer()
+
+                Menu {
+                    if controller.openRouterModels.isEmpty {
+                        Text("No models loaded — hit Refresh Models above")
+                    } else {
+                        // Cap the menu: macOS chokes rendering 300+ items.
+                        ForEach(matches.prefix(60)) { model in
+                            Button {
+                                selection.wrappedValue = model.id
+                            } label: {
+                                Text(model.isFree ? "\(model.displayName) · free" : model.displayName)
+                            }
+                        }
+                        if matches.count > 60 {
+                            Divider()
+                            Text("\(matches.count - 60) more — narrow the search")
+                        }
+                    }
+                } label: {
+                    Text(controller.displayName(forModelId: selection.wrappedValue))
+                        .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+
+            HStack(spacing: 8) {
+                TextField("Search models…", text: searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+
+                Text(selection.wrappedValue)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .textSelection(.enabled)
+            }
+
+            // A model id that isn't in the catalog 404s at request time, which
+            // would otherwise only show up as a silent cleanup failure.
+            if !controller.openRouterModels.isEmpty,
+               !controller.openRouterModels.contains(where: { $0.id == selection.wrappedValue }) {
+                Label("Not in OpenRouter's catalog — requests will fail. Pick another.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
@@ -1074,9 +1167,6 @@ struct ContentView: View {
 private extension ContentView {
     enum SettingsSection: String, CaseIterable, Identifiable {
         case overview
-        case notes
-        case todos
-        case screenRecording
         case knowledge
 
         var id: String { rawValue }
@@ -1085,14 +1175,8 @@ private extension ContentView {
             switch self {
             case .overview:
                 return "Overview"
-            case .notes:
-                return "Notes"
-            case .todos:
-                return "Todos"
-            case .screenRecording:
-                return "Screen Recording"
             case .knowledge:
-                return "Knowledge Base"
+                return "Knowledge Center"
             }
         }
 
@@ -1100,14 +1184,34 @@ private extension ContentView {
             switch self {
             case .overview:
                 return "rectangle.grid.1x2"
+            case .knowledge:
+                return "brain"
+            }
+        }
+    }
+
+    /// The two tabs inside the Knowledge Center.
+    enum KnowledgeTab: String, CaseIterable, Identifiable {
+        case notes
+        case todos
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .notes:
+                return "Notes"
+            case .todos:
+                return "Todos"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
             case .notes:
                 return "note.text"
             case .todos:
                 return "checklist"
-            case .screenRecording:
-                return "record.circle"
-            case .knowledge:
-                return "brain"
             }
         }
     }

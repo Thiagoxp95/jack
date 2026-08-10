@@ -55,29 +55,6 @@ export default defineSchema({
     .index("by_space", ["spaceId"])
     .index("by_space_user", ["spaceId", "userId"]),
 
-  recordings: defineTable({
-    spaceId: v.optional(v.id("spaces")),
-    userId: v.optional(v.id("users")),
-    title: v.optional(v.string()),
-    duration: v.number(),
-    storageId: v.optional(v.id("_storage")),
-    thumbnailStorageId: v.optional(v.id("_storage")),
-    ogImageStorageId: v.optional(v.id("_storage")),
-    shareToken: v.optional(v.string()),
-    shareEnabled: v.optional(v.boolean()),
-    // Legacy fields from pre-auth recordings
-    fileSize: v.optional(v.number()),
-    filename: v.optional(v.string()),
-    mimeType: v.optional(v.string()),
-    recordedAt: v.optional(v.number()),
-    transcription: v.optional(v.string()),
-    transcriptionStatus: v.optional(v.string()),
-    chunkStorageIds: v.optional(v.array(v.string())),
-  })
-    .index("by_space", ["spaceId"])
-    .index("by_space_user", ["spaceId", "userId"])
-    .index("by_share_token", ["shareToken"]),
-
   todoLists: defineTable({
     spaceId: v.optional(v.id("spaces")),
     userId: v.id("users"),

@@ -46,7 +46,9 @@ enum JackPermission: String, CaseIterable, Identifiable {
         case .screenRecording:
             return "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         case .notifications:
-            return "x-apple.systempreferences:com.apple.preference.security?Privacy_Notifications"
+            // Notifications is its own top-level pane, not a Privacy & Security
+            // section — the Privacy_Notifications anchor just lands on Privacy.
+            return "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
         }
     }
 
@@ -161,6 +163,11 @@ final class PermissionCenter: ObservableObject {
             openSettings(for: permission)
             if !isGranted(permission) {
                 PermissionDropPanelController.shared.show(for: permission)
+                // System Settings launches asynchronously; re-assert the panel
+                // once it has taken the screen so it lands on top.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    PermissionDropPanelController.shared.bringToFront()
+                }
             }
         }
     }
@@ -193,18 +200,34 @@ final class PermissionDropPanelController {
 
         let panel = NSPanel(
             contentRect: .zero,
-            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            // No .nonactivatingPanel: macOS refuses to start a dragging session
+            // from an app that is not active, so the panel must be able to take
+            // activation when clicked. It stays visible over System Settings via
+            // .floating level + hidesOnDeactivate = false.
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
-        panel.isMovableByWindowBackground = true
+        // Must stay false: window-background dragging steals the icon's
+        // .onDrag gesture, so the panel moves instead of the app dragging out.
+        panel.isMovableByWindowBackground = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+        // NSPanel hides itself when the app deactivates. The whole point of this
+        // panel is to stay visible while System Settings is frontmost.
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = false
+        panel.worksWhenModal = true
         panel.contentViewController = hosting
-        panel.setContentSize(hosting.view.fittingSize)
+
+        // fittingSize is zero until the hosting view has laid out at least once.
+        hosting.view.layoutSubtreeIfNeeded()
+        var size = hosting.view.fittingSize
+        if size.width < 100 || size.height < 100 { size = NSSize(width: 320, height: 300) }
+        panel.setContentSize(size)
 
         // Bottom-center of the main screen, out of the way of the
         // System Settings window the user is about to drop onto.
@@ -219,9 +242,60 @@ final class PermissionDropPanelController {
         self.panel = panel
     }
 
+    func bringToFront() {
+        panel?.orderFrontRegardless()
+    }
+
     func close() {
         panel?.close()
         panel = nil
+    }
+}
+
+// MARK: - Draggable App Icon
+
+/// AppKit-backed drag source for the app bundle. SwiftUI's `.onDrag` never arms
+/// inside a non-activating panel (the window never becomes key), so the drag is
+/// driven manually with `beginDraggingSession`, which works regardless.
+private struct AppBundleDragIcon: NSViewRepresentable {
+    let size: CGFloat
+
+    func makeNSView(context: Context) -> DragSourceView {
+        let view = DragSourceView()
+        view.image = NSApp.applicationIconImage
+            ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        view.imageScaling = .scaleProportionallyUpOrDown
+        return view
+    }
+
+    func updateNSView(_ nsView: DragSourceView, context: Context) {}
+
+    final class DragSourceView: NSImageView, NSDraggingSource {
+        private var mouseDownPoint: NSPoint = .zero
+
+        override func mouseDown(with event: NSEvent) {
+            mouseDownPoint = event.locationInWindow
+            // A dragging session can only originate from the active app.
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            let now = event.locationInWindow
+            let moved = hypot(now.x - mouseDownPoint.x, now.y - mouseDownPoint.y)
+            guard moved > 3 else { return }
+
+            let url = Bundle.main.bundleURL as NSURL
+            let item = NSDraggingItem(pasteboardWriter: url)
+            item.setDraggingFrame(bounds, contents: image)
+            beginDraggingSession(with: [item], event: event, source: self)
+        }
+
+        func draggingSession(
+            _ session: NSDraggingSession,
+            sourceOperationMaskFor context: NSDraggingContext
+        ) -> NSDragOperation {
+            [.copy, .generic]
+        }
     }
 }
 
@@ -236,12 +310,8 @@ private struct PermissionDropView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(nsImage: NSApp.applicationIconImage ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath))
-                .resizable()
+            AppBundleDragIcon(size: 88)
                 .frame(width: 88, height: 88)
-                .onDrag {
-                    NSItemProvider(contentsOf: Bundle.main.bundleURL) ?? NSItemProvider()
-                }
                 .overlay(alignment: .bottomTrailing) {
                     if isGranted {
                         Image(systemName: "checkmark.circle.fill")
