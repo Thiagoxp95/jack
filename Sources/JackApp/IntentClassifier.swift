@@ -17,6 +17,10 @@ struct IntentVerdict: Sendable {
     let reason: String
     /// Model id that decided, or "default" when nothing answered.
     let backend: String
+    /// Set when OpenRouter refused the key. Every routed capture will fail
+    /// identically until the user fixes it, so this is the one failure the
+    /// caller must surface rather than absorb into the dictation fallback.
+    var authFailure: String?
 }
 
 // MARK: - Context
@@ -134,7 +138,13 @@ struct IntentClassifier: Sendable {
         apiKey: String
     ) async -> IntentVerdict {
         guard !apiKey.isEmpty else {
-            return IntentVerdict(intent: .dictation, confidence: 0, reason: "no OpenRouter key", backend: "default")
+            return IntentVerdict(
+                intent: .dictation,
+                confidence: 0,
+                reason: "no OpenRouter key",
+                backend: "default",
+                authFailure: OpenRouterClient.Failure.missingKey.userFacingSummary
+            )
         }
 
         do {
@@ -155,7 +165,14 @@ struct IntentClassifier: Sendable {
             return IntentVerdict(intent: .dictation, confidence: 0, reason: "unparseable reply", backend: model)
         } catch {
             NSLog("[Jack] Intent classifier failed: %@", String(describing: error))
-            return IntentVerdict(intent: .dictation, confidence: 0, reason: "classifier unavailable", backend: "default")
+            let failure = error as? OpenRouterClient.Failure
+            return IntentVerdict(
+                intent: .dictation,
+                confidence: 0,
+                reason: failure?.userFacingSummary ?? "classifier unavailable",
+                backend: "default",
+                authFailure: (failure?.isAuthFailure ?? false) ? failure?.userFacingSummary : nil
+            )
         }
     }
 

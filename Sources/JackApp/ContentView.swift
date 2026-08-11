@@ -23,6 +23,24 @@ struct ContentView: View {
     @State private var showChatSheetCapture = false
     @State private var knowledgeTab: KnowledgeTab = .entries
 
+    /// Red beats orange here: a rejected key looks identical to a working one
+    /// from the field's point of view (it is set, it is non-empty), so the dot
+    /// is the only thing that can tell the user the router is dead.
+    private var openRouterStatusColor: Color {
+        if controller.openRouterAuthFailure != nil { return .red }
+        return controller.openRouterApiKey.isEmpty ? .orange : .green
+    }
+
+    private var openRouterStatusText: String {
+        if let failure = controller.openRouterAuthFailure {
+            return "\(failure) — routing and cleanup are falling back to plain paste"
+        }
+        if controller.openRouterApiKey.isEmpty {
+            return "No key — cleanup and auto mode are disabled"
+        }
+        return "Key set · \(controller.openRouterModels.count) models available"
+    }
+
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
@@ -490,13 +508,11 @@ struct ContentView: View {
 
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(controller.openRouterApiKey.isEmpty ? Color.orange : Color.green)
+                        .fill(openRouterStatusColor)
                         .frame(width: 8, height: 8)
-                    Text(controller.openRouterApiKey.isEmpty
-                         ? "No key — cleanup and auto mode are disabled"
-                         : "Key set · \(controller.openRouterModels.count) models available")
+                    Text(openRouterStatusText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(controller.openRouterAuthFailure == nil ? .secondary : Color.red)
 
                     Spacer()
 
