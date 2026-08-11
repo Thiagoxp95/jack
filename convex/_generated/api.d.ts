@@ -9,6 +9,7 @@
  */
 
 import type * as chats from "../chats.js";
+import type * as cleanupRecordings from "../cleanupRecordings.js";
 import type * as http from "../http.js";
 import type * as notes from "../notes.js";
 import type * as spaces from "../spaces.js";
@@ -25,6 +26,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   chats: typeof chats;
+  cleanupRecordings: typeof cleanupRecordings;
   http: typeof http;
   notes: typeof notes;
   spaces: typeof spaces;
