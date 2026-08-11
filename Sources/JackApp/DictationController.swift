@@ -347,11 +347,28 @@ final class DictationController: ObservableObject {
     }
     /// Everything LLM-shaped in Jack runs through OpenRouter with the user's
     /// own key — no Jack-operated backend sits in the path.
+    ///
+    /// Stored in the login keychain, not `UserDefaults`: the plist is readable
+    /// by any process running as the user, and a key that lives in a defaults
+    /// key is a key a stray paste can overwrite. See `KeychainStore`.
     @Published var openRouterApiKey: String {
         didSet {
-            UserDefaults.standard.set(openRouterApiKey, forKey: DefaultsKey.openRouterApiKey)
+            guard openRouterApiKey != oldValue else { return }
+            KeychainStore.write(openRouterApiKey, account: KeychainStore.openRouterAPIKeyAccount)
+            // A new key deserves a fresh verdict — leaving a stale 401 on screen
+            // after the user has just fixed it is how a banner loses its meaning.
+            // Guarded: this `didSet` runs on every keystroke in the Settings
+            // field, i.e. from inside a SwiftUI view update, and publishing a
+            // no-op change from there is what produces "Publishing changes from
+            // within view updates" at runtime.
+            if openRouterAuthFailure != nil { openRouterAuthFailure = nil }
         }
     }
+    /// Set when OpenRouter rejects the key outright (401/403). This exists
+    /// because the router's failure mode is *silence*: `IntentClassifier` falls
+    /// back to plain dictation on any error, so a dead key downgrades Jack to
+    /// "everything pastes" with nothing on screen to say why.
+    @Published private(set) var openRouterAuthFailure: String?
     @Published var cleanupModelId: String {
         didSet {
             UserDefaults.standard.set(cleanupModelId, forKey: DefaultsKey.cleanupModelId)
@@ -682,7 +699,29 @@ final class DictationController: ObservableObject {
         selectedTranscriptionModel = TranscriptionModelChoice(rawValue: storedModelRaw) ?? .parakeetV2
 
         cleanupEnabled = defaults.object(forKey: DefaultsKey.cleanupEnabled) as? Bool ?? true
-        openRouterApiKey = defaults.string(forKey: DefaultsKey.openRouterApiKey) ?? ""
+
+        // The key moved from UserDefaults to the keychain. Migrate a legacy
+        // value once, but only if it still looks like a key: an earlier build
+        // let a dictation land in the focused Settings field and overwrite the
+        // key with the transcript, so the legacy slot may hold a sentence.
+        // Migrating that would carry the corruption forward. Either way the
+        // plaintext copy is removed — that is the point of the move.
+        let legacyKey = defaults.string(forKey: DefaultsKey.openRouterApiKey)
+        let keychainKey = KeychainStore.read(account: KeychainStore.openRouterAPIKeyAccount)
+        switch OpenRouterKeyMigration.plan(keychainValue: keychainKey, legacyValue: legacyKey) {
+        case .keychainWins:
+            openRouterApiKey = keychainKey ?? ""
+        case let .migrate(value):
+            KeychainStore.write(value, account: KeychainStore.openRouterAPIKeyAccount)
+            openRouterApiKey = value
+            NSLog("[Jack] Moved OpenRouter key from UserDefaults to the keychain.")
+        case .discard:
+            openRouterApiKey = ""
+            if legacyKey?.isEmpty == false {
+                NSLog("[Jack] Discarded a corrupted OpenRouter key from UserDefaults; re-enter it in Settings.")
+            }
+        }
+        defaults.removeObject(forKey: DefaultsKey.openRouterApiKey)
 
         // One-time move to the hardened cleanup prompt + Gemini 3.1 Flash Lite.
         // Only untouched settings are migrated: a stored prompt that still
@@ -2225,6 +2264,14 @@ final class DictationController: ObservableObject {
                 verdict.reason.isEmpty ? "no reason given" : verdict.reason
             )
             NSLog("[Jack] Router → %@ (%@)", verdict.intent.rawValue, lastIntentVerdictSummary ?? "")
+            // A rejected key means the router is dead for every capture from
+            // here on, not just this one. Say so once rather than degrading to
+            // paste in silence — the silent version of this bug ran for hours
+            // before anyone noticed the todos had stopped arriving.
+            openRouterAuthFailure = verdict.authFailure
+            if let authFailure = verdict.authFailure {
+                showBubble(message: "\(authFailure) — pasted instead", isRecording: false)
+            }
             // Diverting away from paste is the disruptive outcome; only do it
             // when the model is sure. Anything shaky stays plain dictation.
             if verdict.confidence >= 0.6 {
@@ -2259,7 +2306,23 @@ final class DictationController: ObservableObject {
         case .paste:
             let pasteStartedAt = Date()
             let didPaste: Bool
-            if autoCopyToClipboard {
+            // Sampled once: pasting takes long enough for the user to switch
+            // apps, and re-reading this below would let the status line claim a
+            // missing Accessibility grant for a paste we deliberately withheld.
+            let jackWasFrontmost = Self.isJackFrontmost()
+            if jackWasFrontmost {
+                // Jack's own windows are never a paste target. Settings is full
+                // of fields that write straight through on every keystroke, and
+                // one of them holds the OpenRouter key — a dictation that landed
+                // there replaced the key with the transcript and silently killed
+                // the router until someone read the plist. The text is still on
+                // the clipboard and still in the knowledge base; only the
+                // keystroke injection is suppressed.
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(finalText, forType: .string)
+                didPaste = false
+                NSLog("[Jack] Suppressed paste into Jack's own window; copied instead.")
+            } else if autoCopyToClipboard {
                 didPaste = pasteService.copyAndPaste(finalText)
             } else {
                 didPaste = pasteService.pasteWithoutCopying(finalText)
@@ -2276,6 +2339,8 @@ final class DictationController: ObservableObject {
 
             if didPaste {
                 statusText = "Transcribed and pasted."
+            } else if jackWasFrontmost {
+                statusText = "Copied — Jack doesn't paste into its own window."
             } else {
                 statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
             }
@@ -2372,6 +2437,22 @@ final class DictationController: ObservableObject {
             statusText = "Creating todo..."
             Task { await createLocalTodo(text: text) }
         }
+    }
+
+    /// Is Jack itself the app that would receive a synthesized ⌘V?
+    ///
+    /// Pasting into our own UI is never what the user meant — the dictation
+    /// shortcut is global, so Settings, the chat sheet and the todo sheet are
+    /// all reachable while recording, and every text field in them is bound to
+    /// a `@Published` that persists on each keystroke.
+    static func isJackFrontmost() -> Bool {
+        guard let frontmost = NSWorkspace.shared.frontmostApplication else { return false }
+        if let bundleID = Bundle.main.bundleIdentifier, let frontID = frontmost.bundleIdentifier {
+            return bundleID == frontID
+        }
+        // A build with no bundle id (running from the command line) still knows
+        // its own pid, which is the identity that actually matters here.
+        return frontmost.processIdentifier == ProcessInfo.processInfo.processIdentifier
     }
 
     /// Ask the routing model where this capture should land: todo, question, or

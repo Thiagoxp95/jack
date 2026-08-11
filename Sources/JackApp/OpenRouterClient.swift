@@ -74,6 +74,33 @@ enum OpenRouterClient {
                 return "Unexpected response shape from OpenRouter."
             }
         }
+
+        /// A rejected key is a user-fixable configuration problem, not a blip.
+        /// Callers that otherwise swallow errors (the router, cleanup) use this
+        /// to decide what deserves saying out loud — a 401 means every
+        /// subsequent capture will fail the same way until the key is replaced,
+        /// whereas a 429 or a 502 will likely be gone by the next one.
+        var isAuthFailure: Bool {
+            switch self {
+            case .missingKey: return true
+            case let .http(status, _): return status == 401 || status == 403
+            case .malformedResponse: return false
+            }
+        }
+
+        /// Short enough for a status line; the full body goes to the log.
+        var userFacingSummary: String {
+            switch self {
+            case .missingKey:
+                return "No OpenRouter key set"
+            case let .http(status, _) where status == 401 || status == 403:
+                return "OpenRouter rejected your API key (\(status))"
+            case let .http(status, _):
+                return "OpenRouter error \(status)"
+            case .malformedResponse:
+                return "Unexpected reply from OpenRouter"
+            }
+        }
     }
 
     // MARK: - Completions
