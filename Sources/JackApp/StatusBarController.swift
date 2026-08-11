@@ -94,10 +94,10 @@ final class StatusBarController: NSObject {
         overviewItem.image = NSImage(systemSymbolName: "rectangle.grid.1x2", accessibilityDescription: nil)
         menu.addItem(overviewItem)
 
-        let notesItem = NSMenuItem(title: "Notes", action: #selector(showNotes), keyEquivalent: "")
-        notesItem.target = self
-        notesItem.image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil)
-        menu.addItem(notesItem)
+        let entriesItem = NSMenuItem(title: "Knowledge", action: #selector(showEntries), keyEquivalent: "")
+        entriesItem.target = self
+        entriesItem.image = NSImage(systemSymbolName: "tray.full", accessibilityDescription: nil)
+        menu.addItem(entriesItem)
 
         let todosItem = NSMenuItem(title: "Todos", action: #selector(showTodos), keyEquivalent: "")
         todosItem.target = self
@@ -133,8 +133,8 @@ final class StatusBarController: NSObject {
         navigateToSection("overview")
     }
 
-    @objc private func showNotes() {
-        navigateToSection("notes")
+    @objc private func showEntries() {
+        navigateToSection("entries")
     }
 
     @objc private func showTodos() {

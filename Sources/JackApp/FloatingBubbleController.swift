@@ -33,6 +33,12 @@ private final class PillIndicatorView: NSView {
     private var savedSpaceIcon: SpaceIcon?
     private var spaceColor: NSColor = .systemBlue
 
+    // Blocked state: the speech model is still downloading, so the bars are
+    // replaced by the percentage and the icon becomes a blocker.
+    private static let blockedEmoji = "🚫"
+    private let progressLabel = NSTextField(labelWithString: "")
+    private var blockedPercent: Int?
+
     // Animation timer
     private var displayTimer: Timer?
 
@@ -70,6 +76,16 @@ private final class PillIndicatorView: NSView {
         iconEmojiLabel.alignment = .center
         iconEmojiLabel.isHidden = true
         addSubview(iconEmojiLabel)
+
+        // Download percentage, shown where the voice bars normally sit
+        progressLabel.textColor = .white
+        progressLabel.backgroundColor = .clear
+        progressLabel.isBezeled = false
+        progressLabel.isEditable = false
+        progressLabel.isSelectable = false
+        progressLabel.alignment = .right
+        progressLabel.isHidden = true
+        addSubview(progressLabel)
 
         // Voice bars — thin vertical rounded rectangles
         for _ in 0..<barCount {
@@ -109,8 +125,18 @@ private final class PillIndicatorView: NSView {
         iconImageView.symbolConfiguration = NSImage.SymbolConfiguration(
             pointSize: round(iconSize * 0.85), weight: .semibold
         )
-        iconEmojiLabel.frame = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
-        iconEmojiLabel.font = NSFont.systemFont(ofSize: round(iconSize * 0.9))
+        // Emoji glyphs run wider and taller than their point size, so the label
+        // gets its own box around the icon's centre rather than the icon frame.
+        let emojiFontSize = round(iconSize * 0.9)
+        let emojiWidth = round(emojiFontSize * 1.5)
+        let emojiHeight = round(emojiFontSize * 1.35)
+        iconEmojiLabel.frame = NSRect(
+            x: round(iconX + (iconSize - emojiWidth) / 2),
+            y: round(iconY + (iconSize - emojiHeight) / 2),
+            width: emojiWidth,
+            height: emojiHeight
+        )
+        iconEmojiLabel.font = NSFont.systemFont(ofSize: emojiFontSize)
 
         // Voice bars on the right
         let barWidth = round(h * 0.07)
@@ -127,6 +153,19 @@ private final class PillIndicatorView: NSView {
             bar.frame = NSRect(x: x, y: barCenterY - minBarH / 2, width: barWidth, height: minBarH)
             bar.cornerRadius = barCorner
         }
+
+        // Percentage occupies the whole strip between the icon and the bars'
+        // right edge, so it stays put as the digits change.
+        let labelFontSize = round(h * 0.26)
+        let labelHeight = round(labelFontSize * 1.4)
+        let labelX = iconX + iconSize + round(h * 0.18)
+        progressLabel.font = NSFont.monospacedDigitSystemFont(ofSize: labelFontSize, weight: .semibold)
+        progressLabel.frame = NSRect(
+            x: labelX,
+            y: round((h - labelHeight) / 2),
+            width: max(0, barsEndX - labelX),
+            height: labelHeight
+        )
 
         CATransaction.commit()
     }
@@ -150,6 +189,8 @@ private final class PillIndicatorView: NSView {
     }
 
     private func tick() {
+        guard blockedPercent == nil else { return }
+
         animationTime += 1.0 / 60.0
         if animationTime > 1000 { animationTime -= 1000 }
 
@@ -206,8 +247,45 @@ private final class PillIndicatorView: NSView {
 
     // MARK: - Public API
 
+    /// Blocked mode: the local speech model is still downloading. The icon
+    /// becomes a blocker and the voice meter is replaced by the percentage.
+    /// Pass `nil` to return the pill to its normal appearance.
+    func setBlockedDownload(percent: Int?) {
+        blockedPercent = percent
+
+        guard let percent else {
+            progressLabel.isHidden = true
+            for bar in barLayers {
+                bar.isHidden = false
+            }
+            // Force the icon back on the next update() pass.
+            currentMode = -1
+            return
+        }
+
+        progressLabel.stringValue = "\(max(0, min(100, percent)))%"
+        progressLabel.isHidden = false
+        for bar in barLayers {
+            bar.isHidden = true
+        }
+
+        iconEmojiLabel.stringValue = Self.blockedEmoji
+        iconEmojiLabel.isHidden = false
+        iconImageView.isHidden = true
+    }
+
     func update(isRecording: Bool, isTranscribing: Bool, usesActiveAppearance: Bool, isNoteMode: Bool, isTodoMode: Bool, isAiMode: Bool, level: Double, shouldPulse: Bool) {
         let normalizedLevel = max(0, min(1, CGFloat(level)))
+
+        // While blocked, nothing else may touch the icon or the meter.
+        guard blockedPercent == nil else {
+            self.usesActiveAppearance = usesActiveAppearance
+            isListening = false
+            isActive = false
+            targetVolume = 0
+            return
+        }
+
         isListening = isRecording
         self.usesActiveAppearance = usesActiveAppearance
         isActive = isRecording || isTranscribing || usesActiveAppearance
@@ -259,13 +337,47 @@ private final class PillIndicatorView: NSView {
     func updateSpaceAppearance(color: NSColor, icon: SpaceIcon) {
         spaceColor = color
         savedSpaceIcon = icon
-        guard currentMode == 0 else { return }
+        guard blockedPercent == nil, currentMode == 0 else { return }
         applyIcon(icon)
     }
 
     func prepareForDisplay() {
         needsLayout = true
         layoutSubtreeIfNeeded()
+    }
+
+    /// Fades the icon and voice bars out while the black capsule stays put, so
+    /// the split panel can take over an identical silhouette without a seam.
+    func fadeContentForSplit(duration: TimeInterval) {
+        stopAnimating()
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            iconImageView.animator().alphaValue = 0
+            iconEmojiLabel.animator().alphaValue = 0
+            progressLabel.animator().alphaValue = 0
+        }
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        for bar in barLayers {
+            bar.opacity = 0
+        }
+        CATransaction.commit()
+    }
+
+    /// Undoes `fadeContentForSplit` before the pill is shown again.
+    func resetContentOpacity() {
+        iconImageView.alphaValue = 1
+        iconEmojiLabel.alphaValue = 1
+        progressLabel.alphaValue = 1
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for bar in barLayers {
+            bar.opacity = 1
+        }
+        CATransaction.commit()
     }
 
     // MARK: - Private
@@ -309,8 +421,33 @@ final class FloatingBubbleController {
     private var pendingSpaceColor: NSColor?
     private var pendingSpaceIcon: SpaceIcon?
     private var sizePercent: Double = 100
+    private var blockedDownloadPercent: Int?
 
     // MARK: - Public API
+
+    /// Where the pill sits on screen right now — or where it would sit if shown.
+    /// The post-action split starts from exactly this rect.
+    var pillScreenFrame: NSRect {
+        if let panel, panel.isVisible {
+            return panel.frame
+        }
+        let size = computePanelSize()
+        guard let screen = activeScreen() else {
+            return NSRect(origin: .zero, size: size)
+        }
+        let visibleFrame = screen.visibleFrame
+        return NSRect(
+            x: round(visibleFrame.midX - size.width / 2),
+            y: round(visibleFrame.origin.y + bottomOffset),
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// Fades the pill's glyphs so another panel can take over its silhouette.
+    func fadeContentForSplit(duration: TimeInterval) {
+        pillView?.fadeContentForSplit(duration: duration)
+    }
 
     func setPresentation(position _: FloatingIndicatorPosition, sizePercent: Double) {
         self.sizePercent = sizePercent
@@ -331,6 +468,34 @@ final class FloatingBubbleController {
         pillView?.prepareForDisplay()
     }
 
+    /// Shows the pill in its blocked state: dictation can't start because the
+    /// local speech model is still downloading.
+    func showDownloadBlocked(percent: Int) {
+        blockedDownloadPercent = percent
+
+        let panelSize = computePanelSize()
+        let panel = ensurePanel(size: panelSize)
+        panel.alphaValue = 1
+
+        resize(panel, size: panelSize)
+        positionPanel(panel, size: panelSize)
+
+        pillView?.stopAnimating()
+        pillView?.setBlockedDownload(percent: percent)
+        panel.orderFrontRegardless()
+    }
+
+    /// Live-updates the percentage while the blocked pill stays on screen.
+    func updateDownloadBlocked(percent: Int) {
+        guard blockedDownloadPercent != nil else { return }
+        blockedDownloadPercent = percent
+        pillView?.setBlockedDownload(percent: percent)
+    }
+
+    var isShowingDownloadBlocked: Bool {
+        blockedDownloadPercent != nil && panel?.isVisible == true
+    }
+
     func show(
         message _: String,
         isRecording: Bool,
@@ -343,6 +508,8 @@ final class FloatingBubbleController {
         htmlIndicatorMarkup _: String?,
         useBuiltInWaveIndicator _: Bool
     ) {
+        clearBlockedDownloadIfNeeded()
+
         currentIsRecording = isRecording
         currentIsTranscribing = isTranscribing
         currentUsesActiveAppearance = usesActiveAppearance
@@ -354,6 +521,7 @@ final class FloatingBubbleController {
         let panel = ensurePanel(size: panelSize)
 
         panel.alphaValue = 1
+        pillView?.resetContentOpacity()
 
         if let color = pendingSpaceColor, let icon = pendingSpaceIcon {
             pillView?.updateSpaceAppearance(color: color, icon: icon)
@@ -378,11 +546,13 @@ final class FloatingBubbleController {
     }
 
     func hide() {
+        clearBlockedDownloadIfNeeded()
         guard let panel, panel.isVisible else { return }
         pillView?.stopAnimating()
         panel.alphaValue = 0
         panel.orderOut(nil)
         panel.alphaValue = 1
+        pillView?.resetContentOpacity()
     }
 
     func updateRiveReactiveInputs(listening: Bool, level: Double, shouldPulse: Bool) {
@@ -398,6 +568,12 @@ final class FloatingBubbleController {
     }
 
     // MARK: - Private
+
+    private func clearBlockedDownloadIfNeeded() {
+        guard blockedDownloadPercent != nil else { return }
+        blockedDownloadPercent = nil
+        pillView?.setBlockedDownload(percent: nil)
+    }
 
     private func applyReactiveUpdate(listening: Bool, transcribing: Bool, level: Double, shouldPulse: Bool) {
         currentLevel = max(0, min(1, level))

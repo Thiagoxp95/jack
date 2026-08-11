@@ -26,14 +26,10 @@ struct RecordingPresentationState: Equatable {
         switch outputMode {
         case .paste:
             message = "Listening..."
-        case .voiceNote:
-            message = "Listening... (Note Mode)"
         case .todo:
             message = "Listening... (Todo Mode)"
         case .aiChat:
             message = "Listening... (AI Mode)"
-        case .auto:
-            message = "Listening... (Auto Mode)"
         }
 
         return RecordingPresentationState(
@@ -41,8 +37,7 @@ struct RecordingPresentationState: Equatable {
             isRecording: true,
             isTranscribing: false,
             usesActiveAppearance: true,
-            // Auto mode shares the note-mode look: same crosshair, same accent.
-            isNoteMode: outputMode == .voiceNote || outputMode == .auto,
+            isNoteMode: false,
             isTodoMode: outputMode == .todo,
             isAiMode: outputMode == .aiChat
         )
@@ -57,6 +52,21 @@ struct RecordingPresentationState: Equatable {
             isNoteMode: false,
             isTodoMode: false,
             isAiMode: false
+        )
+    }
+
+    /// Transcribing while holding on to the mode icon the pill was already
+    /// showing, so releasing the shortcut doesn't flicker it back to the space
+    /// icon on the way to the post-dictation split.
+    static func transcribing(outputMode: RecordingOutputMode) -> RecordingPresentationState {
+        RecordingPresentationState(
+            message: "Transcribing...",
+            isRecording: false,
+            isTranscribing: true,
+            usesActiveAppearance: true,
+            isNoteMode: false,
+            isTodoMode: outputMode == .todo,
+            isAiMode: outputMode == .aiChat
         )
     }
 }

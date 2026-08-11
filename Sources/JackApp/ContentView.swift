@@ -1,5 +1,4 @@
 import JackKnowledgeKit
-import MarkdownUI
 import SwiftUI
 
 
@@ -9,7 +8,8 @@ struct ContentView: View {
     var spaceController: SpaceController
     @State private var selectedSection: SettingsSection = .overview
     @State private var showCreateSpace = false
-    @State private var noteListController = NoteListController()
+    @State private var knowledgeEntries: [KnowledgeEntry] = []
+    @State private var isLoadingEntries = false
     var todoListController: TodoListController
     @State private var showSpaceSettings = false
     @State private var showWordReplacements = false
@@ -21,7 +21,7 @@ struct ContentView: View {
     @State private var showShortcutCapture = false
     @State private var showTodoSheetCapture = false
     @State private var showChatSheetCapture = false
-    @State private var knowledgeTab: KnowledgeTab = .notes
+    @State private var knowledgeTab: KnowledgeTab = .entries
 
     var body: some View {
         NavigationSplitView {
@@ -153,7 +153,7 @@ struct ContentView: View {
                 if let section = SettingsSection(rawValue: name) {
                     selectedSection = section
                 } else if let tab = KnowledgeTab(rawValue: name) {
-                    // Notes and Todos now live inside the Knowledge Center.
+                    // Entries and Todos live inside the Knowledge Center.
                     selectedSection = .knowledge
                     knowledgeTab = tab
                 }
@@ -230,7 +230,7 @@ struct ContentView: View {
                             }
                         }
                         .buttonStyle(.bordered)
-                        .disabled(controller.isCapturingVoiceNoteSwitchKey)
+                        .disabled(controller.isCapturingScreenshotKey)
                     } else {
                         // Combination: open capture sheet
                         Button {
@@ -244,7 +244,7 @@ struct ContentView: View {
                             }
                         }
                         .buttonStyle(.bordered)
-                        .disabled(controller.isCapturingVoiceNoteSwitchKey)
+                        .disabled(controller.isCapturingScreenshotKey)
                     }
                 }
 
@@ -260,25 +260,25 @@ struct ContentView: View {
 
                 Divider()
 
-                // Voice Note Switch
+                // Screenshot overlay key
                 HStack {
-                    Image(systemName: "note.text")
+                    Image(systemName: "camera.viewfinder")
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
-                    Text("Voice Note Switch Key")
+                    Text("Screenshot Key")
                         .font(.body.weight(.medium))
 
                     Spacer()
 
                     Button {
-                        if controller.isCapturingVoiceNoteSwitchKey {
-                            controller.cancelVoiceNoteSwitchKeyCapture()
+                        if controller.isCapturingScreenshotKey {
+                            controller.cancelScreenshotKeyCapture()
                         } else {
-                            controller.startVoiceNoteSwitchKeyCapture()
+                            controller.startScreenshotKeyCapture()
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            Text(controller.isCapturingVoiceNoteSwitchKey ? "Press a key…" : controller.voiceNoteSwitchKeyDisplayName)
+                            Text(controller.isCapturingScreenshotKey ? "Press a key…" : controller.screenshotKeyDisplayName)
                             Image(systemName: "chevron.up.chevron.down")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
@@ -288,7 +288,7 @@ struct ContentView: View {
                     .disabled(controller.isCapturingInvocationKey)
                 }
 
-                Text("While recording, press this key to switch output to Voice Note mode.")
+                Text("While recording, press this key to grab screenshots. They're OCR'd into the knowledge base and give the router context.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -360,39 +360,6 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Divider()
-
-                // Auto Switch
-                HStack {
-                    Image(systemName: "wand.and.stars")
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20)
-                    Text("Auto Switch Key")
-                        .font(.body.weight(.medium))
-
-                    Spacer()
-
-                    Button {
-                        if controller.isCapturingAutoSwitchKey {
-                            controller.cancelAutoSwitchKeyCapture()
-                        } else {
-                            controller.startAutoSwitchKeyCapture()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(controller.isCapturingAutoSwitchKey ? "Press a key…" : controller.autoSwitchKeyDisplayName)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(controller.isCapturingInvocationKey)
-                }
-
-                Text("While recording, press this key to let the model decide whether this becomes a note or a todo. Screenshots work here too.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             // 2b. Shortcuts
@@ -504,6 +471,8 @@ struct ContentView: View {
                 Text(controller.selectedTranscriptionModel.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                modelDownloadStatus
             }
 
             // 5a. OpenRouter — the one place a key is entered.
@@ -607,103 +576,84 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Notes
+    // MARK: - Knowledge Entries
 
-    private var notesSection: some View {
+    private var entriesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if noteListController.isLoading {
-                settingsCard(title: "Loading Notes...", subtitle: "Reading local notes.") {
+            if isLoadingEntries, knowledgeEntries.isEmpty {
+                settingsCard(title: "Loading Entries...", subtitle: "Reading the local knowledge base.") {
                     ProgressView()
                         .controlSize(.small)
                 }
-            } else if let error = noteListController.error {
-                settingsCard(title: "Error", subtitle: "Could not load notes.") {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                    Button("Retry") {
-                        noteListController.refresh()
-                    }
-                    .buttonStyle(.bordered)
-                    .font(.caption)
-                }
-            } else if noteListController.notes.isEmpty {
-                settingsCard(title: "No Notes Yet", subtitle: "Voice notes will appear here.") {
-                    Text("Press the voice note switch key during recording to save a note.")
+            } else if knowledgeEntries.isEmpty {
+                settingsCard(title: "No Entries Yet", subtitle: "Everything you dictate lands here.") {
+                    Text("Dictations, todos, questions, and screenshot OCR are all captured into the knowledge base automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             } else {
-                // Group notes by day
-                let grouped = Dictionary(grouping: noteListController.notes) { $0.dayStamp }
+                let grouped = Dictionary(grouping: knowledgeEntries) { entryDayStamp($0) }
                 let sortedDays = grouped.keys.sorted(by: >)
 
                 ForEach(sortedDays, id: \.self) { day in
-                    let dayNotes = grouped[day] ?? []
-                    let displayDate = formatDayHeader(day)
-
+                    let dayEntries = grouped[day] ?? []
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(displayDate)
+                        Text(formatDayHeader(day))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        ForEach(dayNotes) { note in
-                            noteCard(note)
+                        ForEach(dayEntries) { entry in
+                            entryCard(entry)
                         }
                     }
                 }
             }
         }
         .task {
-            noteListController.refresh()
+            await refreshKnowledgeEntries()
         }
-        .onChange(of: controller.lastNoteSavedAt) { _, _ in
-            noteListController.refresh()
-        }
-    }
-
-    /// Note text; when the note carries screenshot markdown links, render as
-    /// markdown with relative image paths resolved against the local notes dir.
-    @ViewBuilder
-    private func noteBodyView(_ text: String) -> some View {
-        if text.contains("![") {
-            Markdown(rewriteRelativeImagePaths(in: text))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-        } else {
-            Text(text)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+        .onChange(of: controller.lastTranscript) { _, _ in
+            Task { await refreshKnowledgeEntries() }
         }
     }
 
-    /// Rewrite `![...](attachments/...)` links to absolute file:// URLs so
-    /// MarkdownUI can load the local screenshots.
-    private func rewriteRelativeImagePaths(in text: String) -> String {
-        // absoluteString is percent-encoded (the notes dir contains a space).
-        var base = NoteService.defaultNotesDirectoryURL().absoluteString
-        if !base.hasSuffix("/") { base += "/" }
-        return text.replacingOccurrences(
-            of: #"\]\((attachments/[^)]+)\)"#,
-            with: "](\(base)$1)",
-            options: .regularExpression
-        )
+    private func refreshKnowledgeEntries() async {
+        isLoadingEntries = true
+        knowledgeEntries = await controller.knowledgeService.recent(limit: 100)
+        isLoadingEntries = false
     }
 
-    private func noteCard(_ note: VoiceNote) -> some View {
+    private func entryDayStamp(_ entry: KnowledgeEntry) -> String {
+        if let dayStamp = entry.dayStamp { return dayStamp }
+        guard let date = entry.date else { return "unknown" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func entryCard(_ entry: KnowledgeEntry) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "mic.fill")
+                Image(systemName: entrySymbol(entry.source))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(note.timestamp)
-                    .font(.caption.monospacedDigit())
+                Text(entry.source.rawValue)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                if let date = entry.date {
+                    Text(date.formatted(date: .omitted, time: .shortened))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
             }
 
-            noteBodyView(note.text)
+            Text(entry.text)
+                .font(.body)
+                .lineLimit(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         }
         .padding(14)
         .background(
@@ -717,18 +667,20 @@ struct ContentView: View {
         .contextMenu {
             Button {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(note.text, forType: .string)
+                NSPasteboard.general.setString(entry.text, forType: .string)
             } label: {
                 Label("Copy Text", systemImage: "doc.on.doc")
             }
+        }
+    }
 
-            Divider()
-
-            Button(role: .destructive) {
-                noteListController.deleteNote(note)
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
+    private func entrySymbol(_ source: KnowledgeSource) -> String {
+        switch source {
+        case .paste: return "mic.fill"
+        case .note: return "note.text"
+        case .todo: return "checklist"
+        case .chat: return "sparkles"
+        case .screenshotOCR: return "camera.viewfinder"
         }
     }
 
@@ -782,8 +734,8 @@ struct ContentView: View {
             .frame(maxWidth: 260, alignment: .leading)
 
             switch knowledgeTab {
-            case .notes:
-                notesSection
+            case .entries:
+                entriesSection
             case .todos:
                 todosSection
             }
@@ -907,11 +859,11 @@ struct ContentView: View {
         }
     }
 
-    /// Auto-mode routing: which model decides note-vs-todo.
+    /// Post-dictation routing: which model decides todo / question / dictation.
     private var smartRoutingCard: some View {
         settingsCard(
-            title: "Smart Routing (Auto Mode)",
-            subtitle: "Press \(controller.autoSwitchKeyDisplayName) while recording and a model decides: note or todo."
+            title: "Smart Routing",
+            subtitle: "After each dictation, a model decides: todo, question for the AI, or plain dictation."
         ) {
             ModelPickerField(
                 icon: "arrow.triangle.branch",
@@ -927,7 +879,7 @@ struct ContentView: View {
                     .textSelection(.enabled)
             }
 
-            Text("The transcript, OCR text from any screenshots you grabbed, and the frontmost app/window are sent to the model. Screenshots go as recognized text, not as images. Undecidable captures become notes.")
+            Text("The transcript, OCR text from any screenshots you grabbed, and the frontmost app/window are sent to the model. Screenshots go as recognized text, not as images. Undecidable captures stay plain dictation and paste where your cursor is.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -952,6 +904,66 @@ struct ContentView: View {
     private func refreshKnowledgeStatus() async {
         knowledgeStats = await controller.knowledgeService.stats()
         embeddingAssetsAvailable = await controller.knowledgeService.embeddings.assetState() == .available
+    }
+
+    /// Switching to a model whose weights aren't cached kicks off a ~450 MB
+    /// download; without this the picker just looks stuck.
+    @ViewBuilder
+    private var modelDownloadStatus: some View {
+        if controller.isDownloadingModel {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Downloading \(controller.downloadingModelTitle ?? "speech model")")
+                        .font(.caption.weight(.medium))
+                    Spacer()
+                    Text("\(Int(controller.modelDownloadProgress * 100))%")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+
+                ProgressView(value: controller.modelDownloadProgress)
+
+                if let summary = controller.modelDownloadByteSummary {
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Dictation stays blocked until this finishes.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let error = controller.modelDownloadError {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                Spacer()
+                Button("Retry") {
+                    controller.downloadModelForOnboarding()
+                }
+                .buttonStyle(.link)
+            }
+        } else if controller.selectedTranscriptionModel.isLocal,
+                  !controller.modelsAlreadyDownloaded(for: controller.selectedTranscriptionModel)
+        {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundStyle(.secondary)
+                Text("Weights not downloaded yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Download now") {
+                    controller.downloadModelForOnboarding()
+                }
+                .buttonStyle(.link)
+            }
+        }
     }
 
     // MARK: - Reusable Components
@@ -1116,15 +1128,15 @@ private extension ContentView {
 
     /// The two tabs inside the Knowledge Center.
     enum KnowledgeTab: String, CaseIterable, Identifiable {
-        case notes
+        case entries
         case todos
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .notes:
-                return "Notes"
+            case .entries:
+                return "Entries"
             case .todos:
                 return "Todos"
             }
@@ -1132,8 +1144,8 @@ private extension ContentView {
 
         var systemImage: String {
             switch self {
-            case .notes:
-                return "note.text"
+            case .entries:
+                return "tray.full"
             case .todos:
                 return "checklist"
             }

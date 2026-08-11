@@ -192,27 +192,22 @@ enum ShortcutMode: String, CaseIterable, Identifiable {
 }
 
 enum RecordingOutputMode: String, CaseIterable, Identifiable {
+    /// Default: the router model decides todo / question / dictation once the
+    /// transcript lands; plain dictation pastes where the cursor is.
     case paste
-    case voiceNote
     case todo
     case aiChat
-    /// Capture now, let the classifier decide note-vs-todo once the transcript lands.
-    case auto
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .paste:
-            return "Paste"
-        case .voiceNote:
-            return "Voice Note"
+            return "Dictate"
         case .todo:
             return "Todo"
         case .aiChat:
             return "AI Chat"
-        case .auto:
-            return "Auto"
         }
     }
 }

@@ -46,10 +46,9 @@ final class GlobalFnShortcutMonitor {
         CGEventMask(1 << CGEventType.keyUp.rawValue)
 
     var onEvent: ((ShortcutEvent) -> Void)?
-    var onVoiceNoteSwitchKeyPressed: (() -> Void)?
+    var onScreenshotKeyPressed: (() -> Void)?
     var onTodoSwitchKeyPressed: (() -> Void)?
     var onAiSwitchKeyPressed: (() -> Void)?
-    var onAutoSwitchKeyPressed: (() -> Void)?
 
     enum SpaceCycleDirection {
         case left, right
@@ -72,10 +71,10 @@ final class GlobalFnShortcutMonitor {
     private var isInvocationShortcutActive = false
     private var currentModifierFlags: NSEvent.ModifierFlags = []
 
-    // Voice note switch (still single-key)
-    private var voiceNoteSwitchKeyCode: Int64?
-    private var voiceNoteSwitchArmed = false
-    private var consumeVoiceNoteSwitchKeyUp = false
+    // Screenshot overlay toggle (single-key)
+    private var screenshotKeyCode: Int64?
+    private var screenshotKeyArmed = false
+    private var consumeScreenshotKeyUp = false
 
     // Todo switch (single-key, mirrors voice note switch)
     private var todoSwitchKeyCode: Int64?
@@ -86,11 +85,6 @@ final class GlobalFnShortcutMonitor {
     private var aiSwitchKeyCode: Int64?
     private var aiSwitchArmed = false
     private var consumeAiSwitchKeyUp = false
-
-    // Auto switch (single-key, mirrors todo switch)
-    private var autoSwitchKeyCode: Int64?
-    private var autoSwitchArmed = false
-    private var consumeAutoSwitchKeyUp = false
 
     // Post-dictation action pill (A/S/D reroute after paste)
     var onPostActionKeyPressed: ((Int) -> Void)?
@@ -116,9 +110,9 @@ final class GlobalFnShortcutMonitor {
         isInvocationShortcutActive = false
     }
 
-    func setVoiceNoteSwitchKeyCode(_ keyCode: Int64?) {
-        voiceNoteSwitchKeyCode = keyCode
-        consumeVoiceNoteSwitchKeyUp = false
+    func setScreenshotKeyCode(_ keyCode: Int64?) {
+        screenshotKeyCode = keyCode
+        consumeScreenshotKeyUp = false
     }
 
     func setTodoSheetShortcut(_ shortcut: InvocationShortcut?) {
@@ -131,10 +125,10 @@ final class GlobalFnShortcutMonitor {
         isChatSheetShortcutActive = false
     }
 
-    func setVoiceNoteSwitchArmed(_ armed: Bool) {
-        voiceNoteSwitchArmed = armed
+    func setScreenshotKeyArmed(_ armed: Bool) {
+        screenshotKeyArmed = armed
         if !armed {
-            consumeVoiceNoteSwitchKeyUp = false
+            consumeScreenshotKeyUp = false
         }
     }
 
@@ -162,18 +156,6 @@ final class GlobalFnShortcutMonitor {
         }
     }
 
-    func setAutoSwitchKeyCode(_ keyCode: Int64?) {
-        autoSwitchKeyCode = keyCode
-        consumeAutoSwitchKeyUp = false
-    }
-
-    func setAutoSwitchArmed(_ armed: Bool) {
-        autoSwitchArmed = armed
-        if !armed {
-            consumeAutoSwitchKeyUp = false
-        }
-    }
-
     func setPostActionKeyCodes(_ codes: [Int64]) {
         postActionKeyCodes = codes
     }
@@ -185,10 +167,9 @@ final class GlobalFnShortcutMonitor {
     func setRecordingControlsActive(_ active: Bool) {
         isRecordingForSpaceCycle = active
         isCurrentlyRecording = active
-        setVoiceNoteSwitchArmed(active)
+        setScreenshotKeyArmed(active)
         setTodoSwitchArmed(active)
         setAiSwitchArmed(active)
-        setAutoSwitchArmed(active)
     }
 
     func isInvocationKeyCurrentlyPressed() -> Bool {
@@ -495,23 +476,23 @@ final class GlobalFnShortcutMonitor {
             }
         }
 
-        // Voice note switch key
+        // Screenshot overlay key
         if !invocationHasPriority,
-           let voiceNoteSwitchKeyCode,
-           keyCode == voiceNoteSwitchKeyCode
+           let screenshotKeyCode,
+           keyCode == screenshotKeyCode
         {
             if isKeyDown {
                 if isRepeat {
-                    return voiceNoteSwitchArmed
+                    return screenshotKeyArmed
                 }
 
-                if voiceNoteSwitchArmed {
-                    consumeVoiceNoteSwitchKeyUp = true
-                    onVoiceNoteSwitchKeyPressed?()
+                if screenshotKeyArmed {
+                    consumeScreenshotKeyUp = true
+                    onScreenshotKeyPressed?()
                     return true
                 }
-            } else if consumeVoiceNoteSwitchKeyUp {
-                consumeVoiceNoteSwitchKeyUp = false
+            } else if consumeScreenshotKeyUp {
+                consumeScreenshotKeyUp = false
                 return true
             }
         }
@@ -554,27 +535,6 @@ final class GlobalFnShortcutMonitor {
                 }
             } else if consumeAiSwitchKeyUp {
                 consumeAiSwitchKeyUp = false
-                return true
-            }
-        }
-
-        // Auto switch key
-        if !invocationHasPriority,
-           let autoSwitchKeyCode,
-           keyCode == autoSwitchKeyCode
-        {
-            if isKeyDown {
-                if isRepeat {
-                    return autoSwitchArmed
-                }
-
-                if autoSwitchArmed {
-                    consumeAutoSwitchKeyUp = true
-                    onAutoSwitchKeyPressed?()
-                    return true
-                }
-            } else if consumeAutoSwitchKeyUp {
-                consumeAutoSwitchKeyUp = false
                 return true
             }
         }

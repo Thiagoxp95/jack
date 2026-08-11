@@ -194,7 +194,7 @@ struct TodoListView: View {
         }
     }
 
-    private func groupedTodos() -> [String?: [ConvexTodo]] {
+    private func groupedTodos() -> [String?: [TodoItem]] {
         Dictionary(grouping: controller.todos) { $0.listId }
     }
 
@@ -222,7 +222,7 @@ struct TodoListView: View {
 // MARK: - TodoRowView
 
 struct TodoRowView: View {
-    let todo: ConvexTodo
+    let todo: TodoItem
     let isExpanded: Bool
     var controller: TodoListController
     var spaceController: SpaceController
@@ -394,7 +394,7 @@ struct TodoRowView: View {
 // MARK: - TodoDetailView
 
 struct TodoDetailView: View {
-    let todo: ConvexTodo
+    let todo: TodoItem
     var controller: TodoListController
     var spaceController: SpaceController
 

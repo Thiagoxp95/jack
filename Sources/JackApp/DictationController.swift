@@ -132,19 +132,17 @@ final class DictationController: ObservableObject {
         }
     }
     @Published private(set) var invocationShortcut: InvocationShortcut
-    @Published private(set) var voiceNoteSwitchKeyCode: Int64
+    @Published private(set) var screenshotKeyCode: Int64
     @Published private(set) var todoSheetShortcut: InvocationShortcut?
     @Published private(set) var chatSheetShortcut: InvocationShortcut?
     @Published private(set) var todoSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
-    @Published var isCapturingVoiceNoteSwitchKey = false
+    @Published var isCapturingScreenshotKey = false
     @Published var isCapturingTodoSwitchKey = false
     @Published var isCapturingTodoSheetKey = false
     @Published var isCapturingChatSheetKey = false
     @Published private(set) var aiSwitchKeyCode: Int64
     @Published var isCapturingAiSwitchKey = false
-    @Published private(set) var autoSwitchKeyCode: Int64
-    @Published var isCapturingAutoSwitchKey = false
     @Published var postActionPillEnabled: Bool {
         didSet {
             UserDefaults.standard.set(postActionPillEnabled, forKey: DefaultsKey.postActionPillEnabled)
@@ -154,9 +152,8 @@ final class DictationController: ObservableObject {
         }
     }
     @Published private(set) var postActionAiKeyCode: Int64
-    @Published private(set) var postActionNoteKeyCode: Int64
     @Published private(set) var postActionTodoKeyCode: Int64
-    /// Last auto-mode routing decision, surfaced in settings.
+    /// Last routing decision, surfaced in settings.
     @Published private(set) var lastIntentVerdictSummary: String?
     @Published var statusText: String
     @Published var lastTranscript: String
@@ -167,6 +164,10 @@ final class DictationController: ObservableObject {
     @Published var isDownloadingModel = false
     @Published var modelDownloadProgress: Double = 0.0
     @Published var modelDownloadError: String?
+    /// Title of the model currently downloading, so settings can name it.
+    @Published private(set) var downloadingModelTitle: String?
+    /// "212 MB of 483 MB" for the current download, nil when idle.
+    @Published private(set) var modelDownloadByteSummary: String?
     @Published var accessibilityGranted = AXIsProcessTrusted()
     @Published var keyboardMonitoringGranted = CGPreflightListenEventAccess()
     @Published var microphoneGranted = false
@@ -315,7 +316,6 @@ final class DictationController: ObservableObject {
     @Published var lastTranscriptionLatency: TimeInterval?
     @Published var lastTranscriptionBackend: String?
     @Published private(set) var recordingOutputMode: RecordingOutputMode = .paste
-    @Published private(set) var lastNoteSavedAt: Date?
     @Published private(set) var lastTodoSavedAt: Date?
     @Published var selectedTranscriptionModel: TranscriptionModelChoice {
         didSet {
@@ -323,6 +323,8 @@ final class DictationController: ObservableObject {
             if oldValue != selectedTranscriptionModel {
                 parakeetPreparationTask?.cancel()
                 parakeetPreparationTask = nil
+                modelDownloadError = nil
+                modelDownloadProgress = modelsAlreadyDownloaded(for: selectedTranscriptionModel) ? 1.0 : 0.0
                 if selectedTranscriptionModel.isLocal {
                     parakeetConfiguration = nil
                     _ = startParakeetPreparationIfNeeded(showReadyStatus: true)
@@ -392,8 +394,9 @@ final class DictationController: ObservableObject {
     /// what was on screen (the routing model gets text, never image parts).
     private var pendingNoteScreenshotOCR: [String] = []
     private let intentClassifier = IntentClassifier()
+    private let todoTextParser = TodoTextParser()
     /// Frontmost app + window title captured when auto mode was engaged.
-    private var autoModeAppMetadata: (app: String?, window: String?)?
+    private var routingAppMetadata: (app: String?, window: String?)?
     private let duckingService = SystemAudioDuckingService()
     private let slackMuteService = SlackMuteService()
     private let bubble = FloatingBubbleController()
@@ -406,6 +409,9 @@ final class DictationController: ObservableObject {
         didSet { syncSpaceAppearance() }
     }
     private let bootstrapper = LocalParakeetBootstrapper()
+    private let modelDownloader = ParakeetModelDownloader()
+    /// Keeps the blocked pill's percentage live while it is on screen.
+    private var blockedPillHideTask: Task<Void, Never>?
     private var parakeetConfiguration: ParakeetConfiguration?
     private var parakeetPreparationTask: Task<Bool, Never>?
     private var parakeetModel: String {
@@ -480,10 +486,9 @@ final class DictationController: ObservableObject {
         static let shortcutType = "shortcut_type"
         static let invocationKeyCode = "shortcut_invocation_key_code" // Legacy
         static let invocationShortcutJSON = "invocation_shortcut_json"
-        static let voiceNoteSwitchKeyCode = "voice_note_switch_key_code"
+        static let screenshotKeyCode = "voice_note_switch_key_code"
         static let todoSwitchKeyCode = "todo_switch_key_code"
         static let aiSwitchKeyCode = "ai_switch_key_code"
-        static let autoSwitchKeyCode = "auto_switch_key_code"
         static let todoSheetShortcutJSON = "todo_sheet_shortcut_json"
         static let chatSheetShortcutJSON = "chat_sheet_shortcut_json"
         static let onboardingCompleted = "onboarding_completed"
@@ -518,18 +523,16 @@ final class DictationController: ObservableObject {
         static let mouseDictationEnabled = "mouse_dictation_enabled"
         static let postActionPillEnabled = "post_action_pill_enabled"
         static let postActionAiKeyCode = "post_action_ai_key_code"
-        static let postActionNoteKeyCode = "post_action_note_key_code"
         static let postActionTodoKeyCode = "post_action_todo_key_code"
     }
 
     private enum KeyCaptureTarget {
         case invocation
-        case voiceNoteSwitch
+        case screenshotKey
         case todoSwitch
         case todoSheet
         case chatSheet
         case aiSwitch
-        case autoSwitch
     }
 
     nonisolated static func inferOnboardingCompletion(
@@ -544,7 +547,7 @@ final class DictationController: ObservableObject {
 
         let hasLegacyConfig = defaults.object(forKey: DefaultsKey.mode) != nil
             || defaults.object(forKey: DefaultsKey.invocationKeyCode) != nil
-            || defaults.object(forKey: DefaultsKey.voiceNoteSwitchKeyCode) != nil
+            || defaults.object(forKey: DefaultsKey.screenshotKeyCode) != nil
         let hasAllRequiredPermissions = accessibilityGranted && keyboardMonitoringGranted && microphoneGranted
         return hasLegacyConfig || hasAllRequiredPermissions
     }
@@ -571,11 +574,11 @@ final class DictationController: ObservableObject {
             initialInvocationShortcut = .default
         }
 
-        let initialVoiceNoteSwitchKeyCode: Int64
-        if let stored = defaults.object(forKey: DefaultsKey.voiceNoteSwitchKeyCode) as? Int {
-            initialVoiceNoteSwitchKeyCode = Int64(stored)
+        let initialScreenshotKeyCode: Int64
+        if let stored = defaults.object(forKey: DefaultsKey.screenshotKeyCode) as? Int {
+            initialScreenshotKeyCode = Int64(stored)
         } else {
-            initialVoiceNoteSwitchKeyCode = 45 // N
+            initialScreenshotKeyCode = 45 // N
         }
 
         let initialTodoSwitchKeyCode: Int64
@@ -590,13 +593,6 @@ final class DictationController: ObservableObject {
             initialAiSwitchKeyCode = Int64(stored)
         } else {
             initialAiSwitchKeyCode = 0 // A key default
-        }
-
-        let initialAutoSwitchKeyCode: Int64
-        if let stored = defaults.object(forKey: DefaultsKey.autoSwitchKeyCode) as? Int {
-            initialAutoSwitchKeyCode = Int64(stored)
-        } else {
-            initialAutoSwitchKeyCode = 38 // J key default
         }
 
         let initialTodoSheetShortcut: InvocationShortcut?
@@ -627,10 +623,9 @@ final class DictationController: ObservableObject {
             shortcutType = initialInvocationShortcut.isSingleKey || initialInvocationShortcut.isModifierOnly ? .singleKey : .combination
         }
         invocationShortcut = initialInvocationShortcut
-        voiceNoteSwitchKeyCode = initialVoiceNoteSwitchKeyCode
+        screenshotKeyCode = initialScreenshotKeyCode
         todoSwitchKeyCode = initialTodoSwitchKeyCode
         aiSwitchKeyCode = initialAiSwitchKeyCode
-        autoSwitchKeyCode = initialAutoSwitchKeyCode
         todoSheetShortcut = initialTodoSheetShortcut
         chatSheetShortcut = initialChatSheetShortcut
 
@@ -733,7 +728,6 @@ final class DictationController: ObservableObject {
         mouseDictationEnabled = defaults.object(forKey: DefaultsKey.mouseDictationEnabled) as? Bool ?? false
         postActionPillEnabled = defaults.object(forKey: DefaultsKey.postActionPillEnabled) as? Bool ?? true
         postActionAiKeyCode = defaults.object(forKey: DefaultsKey.postActionAiKeyCode) as? Int64 ?? 0 // A
-        postActionNoteKeyCode = defaults.object(forKey: DefaultsKey.postActionNoteKeyCode) as? Int64 ?? 1 // S
         postActionTodoKeyCode = defaults.object(forKey: DefaultsKey.postActionTodoKeyCode) as? Int64 ?? 2 // D
 
         accessibilityGranted = initialAccessibilityGranted
@@ -744,11 +738,10 @@ final class DictationController: ObservableObject {
             notificationsGranted = settings.authorizationStatus == .authorized
         }
         shortcutMonitor.setInvocationShortcut(initialInvocationShortcut)
-        shortcutMonitor.setVoiceNoteSwitchKeyCode(initialVoiceNoteSwitchKeyCode)
+        shortcutMonitor.setScreenshotKeyCode(initialScreenshotKeyCode)
         shortcutMonitor.setTodoSwitchKeyCode(initialTodoSwitchKeyCode)
         shortcutMonitor.setAiSwitchKeyCode(initialAiSwitchKeyCode)
-        shortcutMonitor.setAutoSwitchKeyCode(initialAutoSwitchKeyCode)
-        shortcutMonitor.setPostActionKeyCodes([postActionAiKeyCode, postActionNoteKeyCode, postActionTodoKeyCode])
+        shortcutMonitor.setPostActionKeyCodes([postActionAiKeyCode, postActionTodoKeyCode])
         shortcutMonitor.escapeToCancelEnabled = escapeToCancelEnabled
 
         if defaults.object(forKey: DefaultsKey.onboardingCompleted) == nil, inferredOnboardingCompleted {
@@ -767,10 +760,10 @@ final class DictationController: ObservableObject {
                 self.handleMouseDictationEvent(event)
             }
         }
-        shortcutMonitor.onVoiceNoteSwitchKeyPressed = { [weak self] in
+        shortcutMonitor.onScreenshotKeyPressed = { [weak self] in
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
-                self.toggleRecordingOutputMode()
+                self.toggleScreenshotOverlay()
             }
         }
         shortcutMonitor.onTodoSwitchKeyPressed = { [weak self] in
@@ -783,12 +776,6 @@ final class DictationController: ObservableObject {
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
                 self.setAiChatMode()
-            }
-        }
-        shortcutMonitor.onAutoSwitchKeyPressed = { [weak self] in
-            guard let self else { return }
-            runOnMainActorImmediatelyIfPossible {
-                self.setAutoMode()
             }
         }
         shortcutMonitor.onSpaceCycleKeyPressed = { [weak self] direction in
@@ -954,8 +941,8 @@ final class DictationController: ObservableObject {
         accessibilityGranted && keyboardMonitoringGranted && microphoneGranted
     }
 
-    var voiceNoteSwitchKeyDisplayName: String {
-        InvocationKey.displayName(for: voiceNoteSwitchKeyCode)
+    var screenshotKeyDisplayName: String {
+        InvocationKey.displayName(for: screenshotKeyCode)
     }
 
     var todoSwitchKeyDisplayName: String {
@@ -964,10 +951,6 @@ final class DictationController: ObservableObject {
 
     var aiSwitchKeyDisplayName: String {
         InvocationKey.displayName(for: aiSwitchKeyCode)
-    }
-
-    var autoSwitchKeyDisplayName: String {
-        InvocationKey.displayName(for: autoSwitchKeyCode)
     }
 
     var todoSheetKeyDisplayName: String {
@@ -992,14 +975,6 @@ final class DictationController: ObservableObject {
         hasCompletedOnboarding = true
         shouldShowOnboardingWizard = false
         UserDefaults.standard.set(true, forKey: DefaultsKey.onboardingCompleted)
-    }
-
-    var notesDirectoryPathText: String {
-        noteService.notesDirectoryPath()
-    }
-
-    func loadAllNotes() -> [VoiceNote] {
-        noteService.loadAllNotes()
     }
 
     var recordingOutputModeText: String {
@@ -1068,13 +1043,13 @@ final class DictationController: ObservableObject {
     }
 
     func startInvocationKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
         keyCaptureTarget = .invocation
         isCapturingInvocationKey = true
-        isCapturingVoiceNoteSwitchKey = false
+        isCapturingScreenshotKey = false
         statusText = "Press the key to use globally (left/right modifiers supported)."
         installInvocationKeyCaptureMonitors()
     }
@@ -1090,31 +1065,31 @@ final class DictationController: ObservableObject {
         statusText = "Invocation key capture canceled."
     }
 
-    func startVoiceNoteSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+    func startScreenshotKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
-        keyCaptureTarget = .voiceNoteSwitch
+        keyCaptureTarget = .screenshotKey
         isCapturingInvocationKey = false
-        isCapturingVoiceNoteSwitchKey = true
-        statusText = "Press the key to switch to Voice Note mode while recording."
+        isCapturingScreenshotKey = true
+        statusText = "Press the key to toggle the screenshot overlay while recording."
         installInvocationKeyCaptureMonitors()
     }
 
-    func cancelVoiceNoteSwitchKeyCapture() {
-        guard isCapturingVoiceNoteSwitchKey else {
+    func cancelScreenshotKeyCapture() {
+        guard isCapturingScreenshotKey else {
             return
         }
 
-        isCapturingVoiceNoteSwitchKey = false
+        isCapturingScreenshotKey = false
         keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
-        statusText = "Voice Note key capture canceled."
+        statusText = "Screenshot key capture canceled."
     }
 
     func startTodoSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -1136,7 +1111,7 @@ final class DictationController: ObservableObject {
     }
 
     func startAiSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -1157,30 +1132,8 @@ final class DictationController: ObservableObject {
         statusText = "AI key capture canceled."
     }
 
-    func startAutoSwitchKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
-            return
-        }
-
-        keyCaptureTarget = .autoSwitch
-        isCapturingAutoSwitchKey = true
-        statusText = "Press the key to switch to Auto mode while recording."
-        installInvocationKeyCaptureMonitors()
-    }
-
-    func cancelAutoSwitchKeyCapture() {
-        guard isCapturingAutoSwitchKey else {
-            return
-        }
-
-        isCapturingAutoSwitchKey = false
-        keyCaptureTarget = nil
-        removeInvocationKeyCaptureMonitors()
-        statusText = "Auto key capture canceled."
-    }
-
     func startTodoSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -1208,7 +1161,7 @@ final class DictationController: ObservableObject {
     }
 
     func startChatSheetKeyCapture() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -1373,7 +1326,7 @@ final class DictationController: ObservableObject {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             holdDebugLog("handleShortcutEvent: BLOCKED by capture mode")
             return
         }
@@ -1431,7 +1384,7 @@ final class DictationController: ObservableObject {
             if isRecording {
                 stopRecordingAndTranscribe()
             } else {
-                bubble.hide()
+                hideBubbleUnlessDownloadBlocked()
             }
             // If beginRecording() is still in its async setup, the wantRecording
             // flag being false will cause it to stop immediately after starting.
@@ -1441,7 +1394,7 @@ final class DictationController: ObservableObject {
     /// Mouse dictation always uses hold semantics: both buttons down → start,
     /// either button released → stop.
     private func handleMouseDictationEvent(_ event: ShortcutEvent) {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
 
@@ -1459,20 +1412,20 @@ final class DictationController: ObservableObject {
             if isRecording {
                 stopRecordingAndTranscribe()
             } else {
-                bubble.hide()
+                hideBubbleUnlessDownloadBlocked()
             }
         }
     }
 
     private func handleTodoSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
         TodoSideSheetController.shared.toggle()
     }
 
     private func handleChatSheetShortcut() {
-        guard !isCapturingInvocationKey, !isCapturingVoiceNoteSwitchKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey, !isCapturingAutoSwitchKey else {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingAiSwitchKey else {
             return
         }
         ChatSideSheetController.shared.toggle()
@@ -1513,17 +1466,6 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private func toggleRecordingOutputMode() {
-        guard isRecording, !isTranscribing else {
-            return
-        }
-
-        recordingOutputMode = recordingOutputMode == .voiceNote ? .paste : .voiceNote
-        statusText = listeningStatusText(isLive: false)
-        showBubble(message: listeningBubbleMessage(), isRecording: true)
-        updateNoteScreenshotOverlay()
-    }
-
     private func setTodoMode() {
         guard isRecording, !isTranscribing else {
             return
@@ -1531,7 +1473,6 @@ final class DictationController: ObservableObject {
         recordingOutputMode = recordingOutputMode == .todo ? .paste : .todo
         statusText = listeningStatusText(isLive: false)
         showBubble(message: listeningBubbleMessage(), isRecording: true)
-        updateNoteScreenshotOverlay()
     }
 
     private func setAiChatMode() {
@@ -1541,33 +1482,18 @@ final class DictationController: ObservableObject {
         recordingOutputMode = recordingOutputMode == .aiChat ? .paste : .aiChat
         statusText = listeningStatusText(isLive: false)
         showBubble(message: listeningBubbleMessage(), isRecording: true)
-        updateNoteScreenshotOverlay()
     }
 
-    private func setAutoMode() {
+    /// The screenshot crosshair covers the screen while toggled on during a
+    /// recording; captures land in the knowledge base and feed the router.
+    private func toggleScreenshotOverlay() {
         guard isRecording, !isTranscribing else {
             return
         }
-        recordingOutputMode = recordingOutputMode == .auto ? .paste : .auto
-        if recordingOutputMode == .auto {
-            // Snapshot where the user was *while speaking* — by the time the
-            // transcript lands they may have switched apps.
-            autoModeAppMetadata = IntentContext.currentAppMetadata()
-        } else {
-            autoModeAppMetadata = nil
-        }
-        statusText = listeningStatusText(isLive: false)
-        showBubble(message: listeningBubbleMessage(), isRecording: true)
-        updateNoteScreenshotOverlay()
-    }
-
-    /// The screenshot crosshair covers the screen whenever note-mode dictation
-    /// is live; leaving note mode (or stopping) tears it down.
-    private func updateNoteScreenshotOverlay() {
-        if isRecording, !isTranscribing, recordingOutputMode == .voiceNote || recordingOutputMode == .auto {
-            noteScreenshot.show()
-        } else {
+        if noteScreenshot.isVisible {
             noteScreenshot.hide()
+        } else {
+            noteScreenshot.show()
         }
     }
 
@@ -1602,14 +1528,10 @@ final class DictationController: ObservableObject {
         switch recordingOutputMode {
         case .paste:
             return "Listening..."
-        case .voiceNote:
-            return "Listening (Note Mode)..."
         case .todo:
             return "Listening (Todo Mode)..."
         case .aiChat:
             return "Listening (AI Mode)..."
-        case .auto:
-            return "Listening (Auto Mode)..."
         }
     }
 
@@ -1619,10 +1541,6 @@ final class DictationController: ObservableObject {
             return "Listening..."
         case (.paste, true):
             return "Listening... (live)"
-        case (.voiceNote, false):
-            return "Listening... (note mode)"
-        case (.voiceNote, true):
-            return "Listening... (live, note mode)"
         case (.todo, false):
             return "Listening... (todo mode)"
         case (.todo, true):
@@ -1631,10 +1549,6 @@ final class DictationController: ObservableObject {
             return "Listening... (AI mode)"
         case (.aiChat, true):
             return "Listening... (AI mode, live)"
-        case (.auto, false):
-            return "Listening... (auto mode)"
-        case (.auto, true):
-            return "Listening... (auto mode, live)"
         }
     }
 
@@ -1646,6 +1560,13 @@ final class DictationController: ObservableObject {
 
         guard !isStartingRecording, !isRecording, !isTranscribing else {
             holdDebugLog("beginRecording: BAIL isStartingRecording=\(isStartingRecording) isRecording=\(isRecording) isTranscribing=\(isTranscribing)")
+            return
+        }
+
+        // Local model still downloading: refuse the dictation and show the
+        // blocked pill with the live percentage instead of a dead recording.
+        if selectedTranscriptionModel.isLocal, !modelsAlreadyDownloaded(for: selectedTranscriptionModel) {
+            presentModelDownloadBlockedPill()
             return
         }
 
@@ -1668,6 +1589,37 @@ final class DictationController: ObservableObject {
         Task(priority: .userInitiated) { @MainActor [weak self] in
             await self?.continueBeginRecording(useLocalModel: useLocalModel, parakeetTask: parakeetTask)
         }
+    }
+
+    /// Blocked pill: 🚫 where the space icon sits, download percentage where
+    /// the voice meter sits. Stays up briefly, tracking the live percentage.
+    private func presentModelDownloadBlockedPill() {
+        let choice = selectedTranscriptionModel
+        wantRecording = false
+        shortcutMonitor.setRecordingControlsActive(false)
+
+        // Make sure something is actually pulling bytes, so the number moves.
+        _ = startParakeetPreparationIfNeeded(showReadyStatus: true)
+
+        let percent = Int((modelDownloadProgress * 100).rounded(.down))
+        statusText = "\(choice.title) is still downloading — \(percent)%."
+
+        bubbleHideTask?.cancel()
+        blockedPillHideTask?.cancel()
+        bubble.showDownloadBlocked(percent: percent)
+
+        blockedPillHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled, let self, self.bubble.isShowingDownloadBlocked else { return }
+            self.bubble.hide()
+        }
+    }
+
+    /// The blocked pill outlives a key release — hiding it there would flash it
+    /// away before the percentage could be read.
+    private func hideBubbleUnlessDownloadBlocked() {
+        guard !bubble.isShowingDownloadBlocked else { return }
+        bubble.hide()
     }
 
     private func continueBeginRecording(useLocalModel: Bool, parakeetTask: Task<Bool, Never>?) async {
@@ -1702,6 +1654,9 @@ final class DictationController: ObservableObject {
             isStartingRecording = false
             isRecording = true
             recordingOutputMode = .paste
+            // Snapshot where the user is *while speaking* — by the time the
+            // transcript lands they may have switched apps. The router uses it.
+            routingAppMetadata = IntentContext.currentAppMetadata()
 
             // Show the pill as early as possible — before sounds, haptics,
             // and other non-critical setup that can run after the visual appears.
@@ -1770,7 +1725,7 @@ final class DictationController: ObservableObject {
         isStartingRecording = false
         isRecording = false
         shortcutMonitor.setRecordingControlsActive(false)
-        noteScreenshot.hide() // keep pendingNoteScreenshots for the note attach
+        noteScreenshot.hide() // pendingNoteScreenshots stay: their OCR feeds the router
         playSoundEffect()
         performHaptic()
         duckingService.restoreIfNeeded()
@@ -1791,7 +1746,9 @@ final class DictationController: ObservableObject {
             stopHoldReleaseWatchdog()
             stopRiveReactiveLoop(resetInputs: true)
             statusText = "Transcribing..."
-            bubble.hide()
+            // The pill stays on screen through transcription so it can break
+            // apart into the A/S/D droplets the moment the transcript lands.
+            showBubble(.transcribing(outputMode: recordingOutputMode))
 
             if useLocalModel {
                 Task(priority: .userInitiated) { @MainActor [weak self] in
@@ -1848,7 +1805,7 @@ final class DictationController: ObservableObject {
         noteScreenshot.hide()
         clearPendingNoteScreenshots()
         recordingOutputMode = .paste
-        autoModeAppMetadata = nil
+        routingAppMetadata = nil
         statusText = "Recording cancelled."
         showTransientBubble(message: "Cancelled", duration: 0.8)
         playSoundEffect()
@@ -1871,12 +1828,27 @@ final class DictationController: ObservableObject {
 
         let shouldUpdateStatus = !isRecording && !isTranscribing && !isStartingRecording
         isPreparingModel = true
-        if shouldUpdateStatus {
-            statusText = "Preparing local CoreML speech model (first run may take a minute)..."
-        }
 
         defer {
             isPreparingModel = false
+        }
+
+        // Fetch the weights ourselves first so the switch reports real bytes;
+        // FluidAudio then finds them cached and goes straight to compiling.
+        let choice = selectedTranscriptionModel
+        if choice.isLocal, !modelsAlreadyDownloaded(for: choice) {
+            do {
+                try await downloadModel(for: choice, updatesStatus: shouldUpdateStatus)
+            } catch is CancellationError {
+                return false
+            } catch {
+                handleError("Could not download \(choice.title). \(error.localizedDescription)")
+                return false
+            }
+        }
+
+        if shouldUpdateStatus {
+            statusText = "Preparing local CoreML speech model (first run may take a minute)..."
         }
 
         do {
@@ -1918,36 +1890,87 @@ final class DictationController: ObservableObject {
 
     func modelsAlreadyDownloaded(for choice: TranscriptionModelChoice) -> Bool {
         guard choice.isLocal else { return true }
-        let version: AsrModelVersion = choice == .parakeetV3 ? .v3 : .v2
+        let version = Self.asrVersion(for: choice)
         let cacheDir = AsrModels.defaultCacheDirectory(for: version)
         return AsrModels.modelsExist(at: cacheDir, version: version)
     }
 
-    func downloadModelForOnboarding() {
-        let choice = selectedTranscriptionModel
-        guard choice.isLocal else {
-            modelDownloadProgress = 1.0
-            return
-        }
+    private static func asrVersion(for choice: TranscriptionModelChoice) -> AsrModelVersion {
+        choice == .parakeetV3 ? .v3 : .v2
+    }
 
-        if modelsAlreadyDownloaded(for: choice) {
-            modelDownloadProgress = 1.0
-            return
-        }
+    /// Pulls the weights for `choice`, publishing byte-accurate progress.
+    private func downloadModel(for choice: TranscriptionModelChoice, updatesStatus: Bool) async throws {
+        let version = Self.asrVersion(for: choice)
 
         isDownloadingModel = true
-        modelDownloadProgress = 0.0
         modelDownloadError = nil
+        modelDownloadProgress = 0
+        modelDownloadByteSummary = nil
+        downloadingModelTitle = choice.title
 
-        let version: AsrModelVersion = choice == .parakeetV3 ? .v3 : .v2
-        Task {
+        defer {
+            isDownloadingModel = false
+            downloadingModelTitle = nil
+            modelDownloadByteSummary = nil
+        }
+
+        if updatesStatus {
+            statusText = "Downloading \(choice.title)... 0%"
+        }
+
+        do {
+            try await modelDownloader.download(version: version) { [weak self] progress in
+                Task { @MainActor in
+                    self?.applyModelDownloadProgress(progress, choice: choice, updatesStatus: updatesStatus)
+                }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            modelDownloadError = error.localizedDescription
+            throw error
+        }
+
+        modelDownloadProgress = 1.0
+        if updatesStatus {
+            statusText = "Downloaded \(choice.title). Preparing..."
+        }
+    }
+
+    private func applyModelDownloadProgress(
+        _ progress: ParakeetDownloadProgress,
+        choice: TranscriptionModelChoice,
+        updatesStatus: Bool
+    ) {
+        guard isDownloadingModel else { return }
+
+        modelDownloadProgress = progress.fraction
+        modelDownloadByteSummary = progress.byteSummary
+
+        if updatesStatus, !isRecording, !isTranscribing {
+            statusText = "Downloading \(choice.title)... \(progress.percent)% (\(progress.byteSummary))"
+        }
+
+        bubble.updateDownloadBlocked(percent: progress.percent)
+    }
+
+    func downloadModelForOnboarding() {
+        let choice = selectedTranscriptionModel
+        guard choice.isLocal, !modelsAlreadyDownloaded(for: choice) else {
+            modelDownloadProgress = 1.0
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                try await AsrModels.download(version: version)
-                self.modelDownloadProgress = 1.0
-                self.isDownloadingModel = false
+                try await self.downloadModel(for: choice, updatesStatus: false)
+                // Compiling happens on first use; onboarding warms it here so
+                // the first dictation isn't the one that pays for it.
+                _ = await self.prepareParakeetIfNeeded(showReadyStatus: false)
             } catch {
-                self.modelDownloadError = error.localizedDescription
-                self.isDownloadingModel = false
+                // downloadModel already published the message.
             }
         }
     }
@@ -2138,32 +2161,15 @@ final class DictationController: ObservableObject {
         }
     }
 
-    /// Note text plus markdown image links for any screenshots captured during
-    /// this note-mode recording (paths relative to the notes directory).
-    private func noteBodyWithScreenshots(_ text: String) -> String {
-        guard !pendingNoteScreenshots.isEmpty else { return text }
-        let links = pendingNoteScreenshots
-            .map { "![Screenshot](\(noteService.relativeAttachmentPath(for: $0)))" }
-            .joined(separator: "\n")
-        return text.isEmpty ? links : "\(text)\n\n\(links)"
-    }
-
     private func handleTranscriptionResult(_ text: String) async {
         isTranscribing = false
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            // No speech, but screenshots were captured in note mode — keep them
-            // as an image-only note rather than dropping them.
-            // Screenshots with no speech are always a note — there is nothing
-            // for the classifier to judge.
-            if recordingOutputMode == .voiceNote || recordingOutputMode == .auto, !pendingNoteScreenshots.isEmpty {
-                let noteBody = noteBodyWithScreenshots("")
-                if let fileURL = try? noteService.appendVoiceNote(noteBody) {
-                    statusText = "Saved screenshots to Voice Note (\(fileURL.lastPathComponent))."
-                } else {
-                    statusText = "No speech detected."
-                }
+            // Screenshots without speech already landed in the knowledge base
+            // (they're ingested at capture time), so there's nothing left to do.
+            if !pendingNoteScreenshots.isEmpty {
+                statusText = "Screenshots saved to knowledge base."
                 clearPendingNoteScreenshots()
             } else {
                 statusText = "No speech detected."
@@ -2200,14 +2206,17 @@ final class DictationController: ObservableObject {
         }
         lastTranscript = finalText
 
-        // Auto mode resolves to a real destination before anything is stored,
-        // so the knowledge entry carries the source the user actually got.
+        // Default dictations run through the router: the model decides whether
+        // this was a todo, a question for the AI, or plain dictation. Manual
+        // modes (T/A during recording) skip the router entirely. The routed
+        // destination is resolved before anything is stored, so the knowledge
+        // entry carries the source the user actually got.
         var effectiveMode = recordingOutputMode
-        if recordingOutputMode == .auto {
-            statusText = "Deciding note or todo..."
+        var routedByClassifier = false
+        if recordingOutputMode == .paste, !openRouterApiKey.isEmpty {
+            statusText = "Routing..."
             showBubble(message: "Deciding...", isRecording: false, isTranscribing: true)
-            let verdict = await classifyAutoModeIntent(transcript: finalText)
-            effectiveMode = verdict.intent == .todo ? .todo : .voiceNote
+            let verdict = await classifyIntent(transcript: finalText)
             lastIntentVerdictSummary = String(
                 format: "%@ · %.0f%% · %@ · %@",
                 verdict.intent.rawValue,
@@ -2215,26 +2224,36 @@ final class DictationController: ObservableObject {
                 verdict.backend,
                 verdict.reason.isEmpty ? "no reason given" : verdict.reason
             )
-            NSLog("[Jack] Auto mode → %@ (%@)", verdict.intent.rawValue, lastIntentVerdictSummary ?? "")
+            NSLog("[Jack] Router → %@ (%@)", verdict.intent.rawValue, lastIntentVerdictSummary ?? "")
+            // Diverting away from paste is the disruptive outcome; only do it
+            // when the model is sure. Anything shaky stays plain dictation.
+            if verdict.confidence >= 0.6 {
+                switch verdict.intent {
+                case .todo:
+                    effectiveMode = .todo
+                    routedByClassifier = true
+                case .question:
+                    effectiveMode = .aiChat
+                    routedByClassifier = true
+                case .dictation:
+                    break
+                }
+            }
         }
 
         // Everything the user says goes into the local knowledge base,
-        // regardless of output mode. Fire-and-forget: never on the paste hot path.
+        // regardless of destination. Fire-and-forget: never on the paste hot path.
         let knowledgeSource: KnowledgeSource
         switch effectiveMode {
         case .paste: knowledgeSource = .paste
-        case .voiceNote: knowledgeSource = .note
         case .todo: knowledgeSource = .todo
         case .aiChat: knowledgeSource = .chat
-        case .auto: knowledgeSource = .note
         }
         let knowledge = knowledgeService
         let transcriptForKnowledge = finalText
         Task.detached(priority: .utility) {
             _ = await knowledge.ingest(text: transcriptForKnowledge, source: knowledgeSource)
         }
-
-        let routedByClassifier = recordingOutputMode == .auto
 
         switch effectiveMode {
         case .paste:
@@ -2260,46 +2279,34 @@ final class DictationController: ObservableObject {
             } else {
                 statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
             }
-            // The indicator was already hidden when recording stopped;
-            // don't re-show it with a transient bubble.
-            bubble.hide()
+            clearPendingNoteScreenshots()
+            // The pill has been sitting there since the recording stopped: it
+            // either splits into the reroute droplets or just goes away. Never
+            // re-show it as a transient bubble.
             if postActionPillEnabled {
                 presentPostActionPill(
                     text: finalText,
                     pastedCharacterCount: didPaste ? finalText.count : nil
                 )
+            } else {
+                bubble.hide()
             }
-        case .voiceNote:
-            do {
-                let noteBody = noteBodyWithScreenshots(finalText)
-                let fileURL = try noteService.appendVoiceNote(noteBody)
-                statusText = routedByClassifier
-                    ? "Auto → Note (\(fileURL.lastPathComponent))."
-                    : "Saved to Voice Note (\(fileURL.lastPathComponent))."
-                Task { await syncNoteToConvex(text: noteBody) }
-            } catch {
-                handleError("Could not save voice note. \(error.localizedDescription)")
-            }
-            clearPendingNoteScreenshots()
-            bubble.hide()
         case .todo:
-            statusText = routedByClassifier ? "Auto → Todo. Creating..." : "Creating todo..."
-            // Screenshots don't ride along to Convex, but they're already on
-            // disk and indexed in the knowledge base with their OCR text.
+            statusText = routedByClassifier ? "Routed → Todo. Creating..." : "Creating todo..."
+            // Screenshots are already on disk and indexed in the knowledge
+            // base with their OCR text.
             clearPendingNoteScreenshots()
-            Task { await syncTodoToConvex(text: finalText) }
+            Task { await createLocalTodo(text: finalText) }
             bubble.hide()
         case .aiChat:
-            statusText = "Sending to AI..."
+            statusText = routedByClassifier ? "Routed → AI. Sending..." : "Sending to AI..."
             ChatSideSheetController.shared.openWithMessage(finalText)
-            bubble.hide()
-        case .auto:
-            // Unreachable: auto is resolved above.
+            clearPendingNoteScreenshots()
             bubble.hide()
         }
 
         recordingOutputMode = .paste
-        autoModeAppMetadata = nil
+        routingAppMetadata = nil
     }
 
     // MARK: - Post-dictation action pill
@@ -2308,14 +2315,23 @@ final class DictationController: ObservableObject {
     /// boxes so the capture can be rerouted with one keypress (default A/S/D).
     private func presentPostActionPill(text: String, pastedCharacterCount: Int?) {
         pendingPostAction = (text, pastedCharacterCount)
-        shortcutMonitor.setPostActionKeyCodes([postActionAiKeyCode, postActionNoteKeyCode, postActionTodoKeyCode])
+        shortcutMonitor.setPostActionKeyCodes([postActionAiKeyCode, postActionTodoKeyCode])
         shortcutMonitor.setPostActionArmed(true)
+
+        // Hand the pill's silhouette over to the split panel: fade its glyphs,
+        // let the split take over the same rect, then drop the pill itself.
+        let originFrame = bubble.pillScreenFrame
+        bubble.fadeContentForSplit(duration: PostActionPillController.handoffFadeDuration)
+
         postActionPill.show(
+            originPillFrame: originFrame,
             keyLabels: [
                 .aiChat: InvocationKey.displayName(for: postActionAiKeyCode),
-                .note: InvocationKey.displayName(for: postActionNoteKeyCode),
                 .todo: InvocationKey.displayName(for: postActionTodoKeyCode),
             ],
+            onSplitStarted: { [weak self] in
+                self?.bubble.hide()
+            },
             onAction: { [weak self] action in
                 self?.handlePostAction(action)
             },
@@ -2352,23 +2368,16 @@ final class DictationController: ObservableObject {
         case .aiChat:
             statusText = "Sending to AI..."
             ChatSideSheetController.shared.openWithMessage(text)
-        case .note:
-            do {
-                let fileURL = try noteService.appendVoiceNote(text)
-                statusText = "Saved to Voice Note (\(fileURL.lastPathComponent))."
-                Task { await syncNoteToConvex(text: text) }
-            } catch {
-                handleError("Could not save voice note. \(error.localizedDescription)")
-            }
         case .todo:
             statusText = "Creating todo..."
-            Task { await syncTodoToConvex(text: text) }
+            Task { await createLocalTodo(text: text) }
         }
     }
 
-    /// Ask the routing model whether this capture is a note or a todo.
-    private func classifyAutoModeIntent(transcript: String) async -> IntentVerdict {
-        let metadata = autoModeAppMetadata ?? IntentContext.currentAppMetadata()
+    /// Ask the routing model where this capture should land: todo, question, or
+    /// plain dictation.
+    private func classifyIntent(transcript: String) async -> IntentVerdict {
+        let metadata = routingAppMetadata ?? IntentContext.currentAppMetadata()
         let context = IntentContext(
             transcript: transcript,
             screenshotOCR: pendingNoteScreenshotOCR,
@@ -2546,74 +2555,59 @@ final class DictationController: ObservableObject {
         showTransientBubble(message: "Error", duration: 1.6)
     }
 
-    private func syncNoteToConvex(text: String) async {
-        let now = Date()
-        let dayFormatter = DateFormatter()
-        dayFormatter.dateFormat = "yyyy-MM-dd"
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "HH:mm:ss"
+    /// Structure a dictated todo and write it to the local store.
+    private func createLocalTodo(text: String) async {
+        let spaceId = spaceController?.currentSpaceId
 
-        do {
-            let token = try await ConvexHTTPClient.getToken()
-            var args: [String: Any] = [
-                "text": text,
-                "dayStamp": dayFormatter.string(from: now),
-                "timestamp": timeFormatter.string(from: now),
-            ]
-            if let spaceId = spaceController?.currentSpaceId {
-                args["spaceId"] = spaceId
-            }
-            _ = try await ConvexHTTPClient.mutation(
-                function: "notes:create",
-                args: args,
-                token: token
-            )
-            lastNoteSavedAt = now
-        } catch {
-            NSLog("[DictationController] Failed to sync note to Convex: %@", String(describing: error))
+        let parsed = await todoTextParser.parse(
+            rawText: text,
+            model: routingModelId,
+            apiKey: openRouterApiKey
+        )
+
+        var listId: String?
+        if let listName = parsed.listName {
+            listId = await LocalTodoStore.shared.resolveListID(named: listName, spaceId: spaceId)
         }
-    }
 
-    private func syncTodoToConvex(text: String) async {
-        do {
-            let token = try await ConvexHTTPClient.getToken()
-            var args: [String: Any] = [
-                "rawText": text,
-                "timezone": TimeZone.current.identifier,
-            ]
-            if let spaceId = spaceController?.currentSpaceId {
-                args["spaceId"] = spaceId
-            }
-            let result = try await ConvexHTTPClient.action(
-                function: "todos:processAndCreate",
-                args: args,
-                token: token
-            )
-            lastTodoSavedAt = Date()
+        let todo = TodoItem(
+            id: LocalTodoStore.newID(),
+            title: parsed.title,
+            description: parsed.description,
+            status: "todo",
+            priority: parsed.priority,
+            listId: listId,
+            tags: parsed.tags,
+            dueDate: parsed.dueDate,
+            dueTime: parsed.dueTime,
+            completedAt: nil,
+            rawTranscription: text,
+            createdAt: Date().timeIntervalSince1970 * 1000,
+            spaceId: spaceId,
+            reminders: parsed.reminderTimes.isEmpty
+                ? nil
+                : parsed.reminderTimes.map { TodoReminder(at: $0, delivered: false) }
+        )
 
-            // Parse the returned JSON and show confirmation card
-            if let jsonString = result as? String,
-               let data = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        await LocalTodoStore.shared.insert(todo)
+        lastTodoSavedAt = Date()
 
-                let info = CreatedTodoInfo(
-                    id: json["id"] as? String ?? "",
-                    title: json["title"] as? String ?? text,
-                    description: json["description"] as? String,
-                    dueDate: json["dueDate"] as? String,
-                    dueTime: json["dueTime"] as? String,
-                    priority: json["priority"] as? String ?? "none",
-                    tags: json["tags"] as? [String],
-                    reminderCount: (json["reminders"] as? [[String: Any]])?.count ?? 0,
-                    listName: json["listName"] as? String
-                )
-                showTodoConfirmation(info)
-            }
+        showTodoConfirmation(CreatedTodoInfo(
+            id: todo.id,
+            title: todo.title,
+            description: todo.description,
+            dueDate: todo.dueDate,
+            dueTime: todo.dueTime,
+            priority: todo.priority,
+            tags: todo.tags,
+            reminderCount: todo.reminders?.count ?? 0,
+            listName: parsed.listName
+        ))
 
-            statusText = "Todo created."
-        } catch {
-            handleError("Could not create todo. \(error.localizedDescription)")
-        }
+        // Any todo surface already on screen is showing a stale list now.
+        await TodoListController.shared.fetchTodos(spaceId: spaceId)
+
+        statusText = "Todo created."
     }
 
     private func showTodoConfirmation(_ todo: CreatedTodoInfo) {
@@ -2624,25 +2618,17 @@ final class DictationController: ObservableObject {
     }
 
     private nonisolated func saveTodoEdit(todoId: String, updates: TodoEditUpdates) async {
-        do {
-            let token = try await ConvexHTTPClient.getToken()
-            var args: [String: Any] = [
-                "todoId": todoId,
-                "title": updates.title,
-                "priority": updates.priority,
-            ]
-            if let dueDate = updates.dueDate { args["dueDate"] = dueDate }
-            if let dueTime = updates.dueTime { args["dueTime"] = dueTime }
-            if let tags = updates.tags { args["tags"] = tags }
-            _ = try await ConvexHTTPClient.mutation(
-                function: "todos:update",
-                args: args,
-                token: token
-            )
-            await MainActor.run { lastTodoSavedAt = Date() }
-        } catch {
-            NSLog("[DictationController] Failed to update todo: %@", String(describing: error))
-        }
+        var fields: [String: Any] = [
+            "title": updates.title,
+            "priority": updates.priority,
+        ]
+        if let dueDate = updates.dueDate { fields["dueDate"] = dueDate }
+        if let dueTime = updates.dueTime { fields["dueTime"] = dueTime }
+        if let tags = updates.tags { fields["tags"] = tags }
+
+        nonisolated(unsafe) let sendableFields = fields
+        await LocalTodoStore.shared.update(id: todoId, fields: sendableFields)
+        await MainActor.run { lastTodoSavedAt = Date() }
     }
 
     private func markOnboardingCompleteIfReady() {
@@ -3057,7 +3043,7 @@ final class DictationController: ObservableObject {
             isRecording: isRecording,
             isTranscribing: isTranscribing,
             usesActiveAppearance: isRecording || isTranscribing,
-            isNoteMode: isRecording && recordingOutputMode == .voiceNote,
+            isNoteMode: false,
             isTodoMode: isRecording && recordingOutputMode == .todo,
             isAiMode: isRecording && recordingOutputMode == .aiChat
         )
@@ -3173,10 +3159,9 @@ final class DictationController: ObservableObject {
         // Single-key mode: accept any key immediately, no modifier accumulation.
         // Used for invocation (when singleKey mode) and all switch key targets.
         let isSingleKeyCapture = (keyCaptureTarget == .invocation && shortcutType == .singleKey)
-            || keyCaptureTarget == .voiceNoteSwitch
+            || keyCaptureTarget == .screenshotKey
             || keyCaptureTarget == .todoSwitch
             || keyCaptureTarget == .aiSwitch
-            || keyCaptureTarget == .autoSwitch
         if isSingleKeyCapture {
             if event.type == .flagsChanged {
                 // Modifier key pressed — use it as the single key
@@ -3238,7 +3223,7 @@ final class DictationController: ObservableObject {
     private func finalizeCapturedShortcut(_ shortcut: InvocationShortcut, for target: KeyCaptureTarget) {
         // Switch keys accept any single key (no modifier required), so skip
         // the isValid check which requires modifiers for regular keys.
-        let isSwitchKeyTarget = target == .voiceNoteSwitch || target == .todoSwitch || target == .aiSwitch || target == .autoSwitch
+        let isSwitchKeyTarget = target == .screenshotKey || target == .todoSwitch || target == .aiSwitch
         if !isSwitchKeyTarget {
             guard shortcut.isValid else {
                 statusText = "Invalid shortcut. Try again."
@@ -3254,12 +3239,12 @@ final class DictationController: ObservableObject {
         case .invocation:
             setInvocationShortcut(shortcut)
             statusText = "Invocation key set to \(invocationKeyDisplayName)."
-        case .voiceNoteSwitch:
+        case .screenshotKey:
             if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
-                setVoiceNoteSwitchKeyCode(primaryKey)
-                statusText = "Voice Note key set to \(voiceNoteSwitchKeyDisplayName)."
+                setScreenshotKeyCode(primaryKey)
+                statusText = "Screenshot key set to \(screenshotKeyDisplayName)."
             } else {
-                statusText = "Voice Note key must be a single key."
+                statusText = "Screenshot key must be a single key."
                 return
             }
         case .todoSwitch:
@@ -3278,14 +3263,6 @@ final class DictationController: ObservableObject {
                 statusText = "AI key must be a single key."
                 return
             }
-        case .autoSwitch:
-            if let primaryKey = shortcut.primaryKeyCode, shortcut.modifiers == 0 {
-                setAutoSwitchKeyCode(primaryKey)
-                statusText = "Auto key set to \(autoSwitchKeyDisplayName)."
-            } else {
-                statusText = "Auto key must be a single key."
-                return
-            }
         case .todoSheet:
             isCapturingTodoSheetKey = false
             keyCaptureTarget = nil
@@ -3301,12 +3278,11 @@ final class DictationController: ObservableObject {
         }
 
         isCapturingInvocationKey = false
-        isCapturingVoiceNoteSwitchKey = false
+        isCapturingScreenshotKey = false
         isCapturingTodoSwitchKey = false
         isCapturingTodoSheetKey = false
         isCapturingChatSheetKey = false
         isCapturingAiSwitchKey = false
-        isCapturingAutoSwitchKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
     }
@@ -3319,10 +3295,10 @@ final class DictationController: ObservableObject {
         shortcutMonitor.setInvocationShortcut(shortcut)
     }
 
-    private func setVoiceNoteSwitchKeyCode(_ keyCode: Int64) {
-        voiceNoteSwitchKeyCode = keyCode
-        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.voiceNoteSwitchKeyCode)
-        shortcutMonitor.setVoiceNoteSwitchKeyCode(keyCode)
+    private func setScreenshotKeyCode(_ keyCode: Int64) {
+        screenshotKeyCode = keyCode
+        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.screenshotKeyCode)
+        shortcutMonitor.setScreenshotKeyCode(keyCode)
     }
 
     private func setTodoSheetShortcut(_ shortcut: InvocationShortcut) {
@@ -3354,12 +3330,6 @@ final class DictationController: ObservableObject {
         aiSwitchKeyCode = keyCode
         UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.aiSwitchKeyCode)
         shortcutMonitor.setAiSwitchKeyCode(keyCode)
-    }
-
-    private func setAutoSwitchKeyCode(_ keyCode: Int64) {
-        autoSwitchKeyCode = keyCode
-        UserDefaults.standard.set(Int(keyCode), forKey: DefaultsKey.autoSwitchKeyCode)
-        shortcutMonitor.setAutoSwitchKeyCode(keyCode)
     }
 
     private func startLiveTranscriptionLoop(configuration: ParakeetConfiguration) {

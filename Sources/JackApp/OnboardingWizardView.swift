@@ -80,7 +80,7 @@ struct OnboardingWizardView: View {
         .background(WizardColors.background)
         .onDisappear {
             controller.cancelInvocationKeyCapture()
-            controller.cancelVoiceNoteSwitchKeyCapture()
+            controller.cancelScreenshotKeyCapture()
         }
     }
 
@@ -612,8 +612,8 @@ private struct ShortcutStep: View {
                         }
                     }
 
-                    // Voice note key row
-                    voiceNoteKeyRow
+                    // Screenshot key row
+                    screenshotKeyRow
                 }
                 .padding(.vertical, 20)
                 .padding(.trailing, 28)
@@ -663,7 +663,7 @@ private struct ShortcutStep: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .disabled(controller.isCapturingVoiceNoteSwitchKey)
+                    .disabled(controller.isCapturingScreenshotKey)
                 }
             }
 
@@ -747,36 +747,36 @@ private struct ShortcutStep: View {
         .buttonStyle(.plain)
     }
 
-    private var voiceNoteKeyRow: some View {
+    private var screenshotKeyRow: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("VOICE NOTE KEY")
+                Text("SCREENSHOT KEY")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(WizardColors.secondary)
                     .tracking(0.5)
 
-                Text(controller.voiceNoteSwitchKeyDisplayName)
+                Text(controller.screenshotKeyDisplayName)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(WizardColors.primaryText.opacity(0.85))
             }
 
             Spacer()
 
-            if controller.isCapturingVoiceNoteSwitchKey {
+            if controller.isCapturingScreenshotKey {
                 HStack(spacing: 8) {
                     Text("Press a key...")
                         .font(.system(size: 11))
                         .foregroundStyle(WizardColors.warning)
 
                     Button("Cancel") {
-                        controller.cancelVoiceNoteSwitchKeyCapture()
+                        controller.cancelScreenshotKeyCapture()
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(WizardColors.warning)
                 }
             } else {
-                Button(action: { controller.startVoiceNoteSwitchKeyCapture() }) {
+                Button(action: { controller.startScreenshotKeyCapture() }) {
                     Text("Change")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(WizardColors.primaryText.opacity(0.75))

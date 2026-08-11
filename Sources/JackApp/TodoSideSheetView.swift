@@ -160,7 +160,7 @@ struct TodoSideSheetView: View {
 
     // MARK: - Todo Row
 
-    private func todoRow(todo: ConvexTodo, index: Int) -> some View {
+    private func todoRow(todo: TodoItem, index: Int) -> some View {
         let isSelected = index == sheetState.selectedIndex
         let isDone = todo.status == "done"
 

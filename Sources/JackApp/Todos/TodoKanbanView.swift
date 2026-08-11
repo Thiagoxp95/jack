@@ -39,7 +39,7 @@ struct TodoKanbanView: View {
     }
 
     /// Filter and sort todos by status, then by priority (high first) and due date.
-    private func todosForStatus(_ status: String) -> [ConvexTodo] {
+    private func todosForStatus(_ status: String) -> [TodoItem] {
         controller.todos
             .filter { $0.status == status }
             .sorted { a, b in
@@ -74,7 +74,7 @@ struct TodoKanbanView: View {
 struct KanbanColumn: View {
     let title: String
     let status: String
-    let todos: [ConvexTodo]
+    let todos: [TodoItem]
     var controller: TodoListController
     var spaceController: SpaceController
 
@@ -153,7 +153,7 @@ struct KanbanColumn: View {
 // MARK: - KanbanCard
 
 struct KanbanCard: View {
-    let todo: ConvexTodo
+    let todo: TodoItem
     var controller: TodoListController
     var spaceController: SpaceController
 
