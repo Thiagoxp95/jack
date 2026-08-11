@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "allowJs": true,
-    "strict": true
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]
