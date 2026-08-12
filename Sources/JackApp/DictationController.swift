@@ -153,6 +153,21 @@ final class DictationController: ObservableObject {
     }
     @Published private(set) var postActionAiKeyCode: Int64
     @Published private(set) var postActionTodoKeyCode: Int64
+    /// Should a default dictation be handed to the router at all?
+    ///
+    /// Off is not a degraded mode — it is the pre-router behaviour: the
+    /// transcript pastes where the cursor is and the post-action pill offers
+    /// the same Todo and AI droplets to press deliberately. The difference is
+    /// only who decides, the model or you. Turning it off also skips the
+    /// routing round trip, so the paste lands as soon as the transcript does.
+    @Published var smartRoutingEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(smartRoutingEnabled, forKey: DefaultsKey.smartRoutingEnabled)
+            // A stale verdict under a disabled toggle reads as though the
+            // router just ran.
+            if !smartRoutingEnabled { lastIntentVerdictSummary = nil }
+        }
+    }
     /// Last routing decision, surfaced in settings.
     @Published private(set) var lastIntentVerdictSummary: String?
     @Published var statusText: String
@@ -539,6 +554,7 @@ final class DictationController: ObservableObject {
         static let routingModelId = "openrouter_routing_model_id"
         static let mouseDictationEnabled = "mouse_dictation_enabled"
         static let postActionPillEnabled = "post_action_pill_enabled"
+        static let smartRoutingEnabled = "smart_routing_enabled"
         static let postActionAiKeyCode = "post_action_ai_key_code"
         static let postActionTodoKeyCode = "post_action_todo_key_code"
     }
@@ -766,6 +782,7 @@ final class DictationController: ObservableObject {
             : storedRoutingModel!
         mouseDictationEnabled = defaults.object(forKey: DefaultsKey.mouseDictationEnabled) as? Bool ?? false
         postActionPillEnabled = defaults.object(forKey: DefaultsKey.postActionPillEnabled) as? Bool ?? true
+        smartRoutingEnabled = defaults.object(forKey: DefaultsKey.smartRoutingEnabled) as? Bool ?? true
         postActionAiKeyCode = defaults.object(forKey: DefaultsKey.postActionAiKeyCode) as? Int64 ?? 0 // A
         postActionTodoKeyCode = defaults.object(forKey: DefaultsKey.postActionTodoKeyCode) as? Int64 ?? 2 // D
 
@@ -2252,7 +2269,7 @@ final class DictationController: ObservableObject {
         // entry carries the source the user actually got.
         var effectiveMode = recordingOutputMode
         var routedByClassifier = false
-        if recordingOutputMode == .paste, !openRouterApiKey.isEmpty {
+        if recordingOutputMode == .paste, smartRoutingEnabled, !openRouterApiKey.isEmpty {
             statusText = "Routing..."
             showBubble(message: "Deciding...", isRecording: false, isTranscribing: true)
             let verdict = await classifyIntent(transcript: finalText)

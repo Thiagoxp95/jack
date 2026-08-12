@@ -5,6 +5,17 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.4.3 — 2026-08-11
+
+### Added
+
+- **Smart routing can be turned off.** Settings → Smart Routing → "Enable smart
+  routing". With it off, every dictation pastes where your cursor is and the
+  pill afterwards still offers Todo and AI, so the same two destinations are one
+  keypress away — you decide instead of a model. Nothing is sent to a routing
+  model, and the paste lands as soon as the transcript does, without waiting on
+  a round trip.
+
 ## 1.4.2 — 2026-08-11
 
 ### Fixed

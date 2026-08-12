@@ -881,23 +881,36 @@ struct ContentView: View {
             title: "Smart Routing",
             subtitle: "After each dictation, a model decides: todo, question for the AI, or plain dictation."
         ) {
-            ModelPickerField(
-                icon: "arrow.triangle.branch",
-                title: "Routing Model",
-                models: controller.openRouterModels,
-                selection: $controller.routingModelId
-            )
+            Toggle("Enable smart routing", isOn: $controller.smartRoutingEnabled)
 
-            if let verdict = controller.lastIntentVerdictSummary {
-                Text("Last decision: \(verdict)")
+            if controller.smartRoutingEnabled {
+                ModelPickerField(
+                    icon: "arrow.triangle.branch",
+                    title: "Routing Model",
+                    models: controller.openRouterModels,
+                    selection: $controller.routingModelId
+                )
+
+                if let verdict = controller.lastIntentVerdictSummary {
+                    Text("Last decision: \(verdict)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Text("The transcript, OCR text from any screenshots you grabbed, and the frontmost app/window are sent to the model. Screenshots go as recognized text, not as images. Undecidable captures stay plain dictation and paste where your cursor is.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            } else {
+                // Say what off actually does, rather than leaving an empty card.
+                // Off is the pre-router behaviour, not a broken state: the same
+                // two destinations are still one keypress away on the pill.
+                Text(controller.postActionPillEnabled
+                     ? "Off — every dictation pastes where your cursor is, and the pill afterwards still offers Todo and AI. Nothing is sent to a routing model."
+                     : "Off — every dictation pastes where your cursor is. Nothing is sent to a routing model. The post-action pill is also switched off, so there is no one-key way to send a capture to Todo or AI — turn the pill back on below if you want that.")
+                    .font(.caption)
+                    .foregroundStyle(controller.postActionPillEnabled ? .secondary : Color.orange)
             }
-
-            Text("The transcript, OCR text from any screenshots you grabbed, and the frontmost app/window are sent to the model. Screenshots go as recognized text, not as images. Undecidable captures stay plain dictation and paste where your cursor is.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
