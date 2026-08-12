@@ -5,6 +5,21 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.4.2 — 2026-08-11
+
+### Fixed
+
+- **Jack now checks for updates on its own.** It looks when you launch it and
+  every five minutes after that, so a new version turns up without you opening
+  the menu bar and asking. Sparkle refuses to schedule anything more often than
+  hourly and quietly rounds a shorter interval up, so Jack keeps its own timer.
+- **Reopening Jack checks for an update.** It used to resume a countdown from
+  the last check instead, so quitting and relaunching to pick up a new version
+  told you nothing.
+
+This is the last release you have to fetch by hand. Everything in 1.4.1 below
+is included.
+
 ## 1.4.1 — 2026-08-11
 
 ### Fixed

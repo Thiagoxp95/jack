@@ -122,6 +122,28 @@ final class OpenRouterFailureTests: XCTestCase {
     }
 }
 
+/// The update cadence.
+///
+/// Guards a trap: Sparkle's `minimumUpdateCheckInterval` is one hour in release
+/// builds and `SPUUpdater` silently clamps `updateCheckInterval` up to it. So
+/// "set it to five minutes" cannot be done through Sparkle's own property — it
+/// reads as configured and behaves as hourly. If someone ever deletes
+/// `AppUpdater`'s timer and assigns this to `updater.updateCheckInterval`
+/// instead, the app goes back to checking once an hour with nothing to say so.
+@MainActor
+final class AppUpdaterCadenceTests: XCTestCase {
+
+    func testPollsEveryFiveMinutes() {
+        XCTAssertEqual(AppUpdater.pollInterval, 300, accuracy: 0.5)
+    }
+
+    /// The whole reason the timer exists. If this ever stops being true,
+    /// Sparkle's own scheduling would suffice and the timer could go.
+    func testPollIntervalIsBelowSparklesEnforcedFloor() {
+        XCTAssertLessThan(AppUpdater.pollInterval, 60 * 60)
+    }
+}
+
 /// The classifier's contract with its caller: it never throws, and it flags an
 /// auth failure instead of hiding it inside the plain-dictation fallback.
 final class IntentClassifierAuthTests: XCTestCase {

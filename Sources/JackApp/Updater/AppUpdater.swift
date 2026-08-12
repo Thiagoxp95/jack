@@ -37,6 +37,25 @@ final class AppUpdater: NSObject, ObservableObject {
     private var updater: SPUUpdater?
     private var pendingChoiceReply: ((SPUUserUpdateChoice) -> Void)?
     private var userInitiatedCheck = false
+    private var pollTimer: Timer?
+
+    /// How often to look for a new build.
+    ///
+    /// Sparkle will not honour this on its own: `SPUUpdaterSettings.minimumUpdateCheckInterval`
+    /// returns one hour in release builds and `SPUUpdater` silently clamps
+    /// `updateCheckInterval` up to it, so assigning 5 minutes there would read
+    /// as configured and behave as hourly. The 60-second override Sparkle does
+    /// expose is `#if DEBUG` only. So the schedule is ours, driven by the timer
+    /// below calling `checkForUpdatesInBackground()`.
+    ///
+    /// A check that finds nothing is one conditional GET of a small XML file —
+    /// 288 a day is nothing, and it is the difference between hearing about a
+    /// fix now and hearing about it after lunch.
+    static let pollInterval: TimeInterval = 5 * 60
+
+    /// Delay before the launch check, so it lands after the app has finished
+    /// coming up rather than competing with it.
+    private static let launchCheckDelay: TimeInterval = 5
 
     var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -64,14 +83,55 @@ final class AppUpdater: NSObject, ObservableObject {
         )
         updater.automaticallyChecksForUpdates = true
         updater.automaticallyDownloadsUpdates = true
+        // Left at Sparkle's own floor rather than a smaller number it would
+        // silently raise. Our timer is what actually sets the cadence.
         updater.updateCheckInterval = 60 * 60
         do {
             try updater.start()
             self.updater = updater
             isAvailable = true
+            scheduleBackgroundChecks()
         } catch {
             NSLog("Sparkle failed to start: \(error.localizedDescription)")
         }
+    }
+
+    /// Check on launch, then every `pollInterval`.
+    ///
+    /// The launch check matters on its own: Sparkle schedules from
+    /// `lastUpdateCheckDate`, so quitting and reopening does *not* check — it
+    /// resumes the countdown from the last check, and a relaunch five minutes
+    /// after one is told nothing for another fifty-five. Restarting an app to
+    /// pick up an update and being told nothing is exactly the case this
+    /// covers.
+    private func scheduleBackgroundChecks() {
+        pollTimer?.invalidate()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.launchCheckDelay) { [weak self] in
+            self?.checkInBackground()
+        }
+
+        let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkInBackground() }
+        }
+        // Tolerance lets the OS coalesce this with other wakeups; nothing here
+        // needs to land on the second, and a laptop on battery would rather it
+        // did not.
+        timer.tolerance = 30
+        // .common so the timer keeps firing while a menu is open or a window is
+        // being resized — modes where the default runloop mode is starved.
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
+
+    /// A silent check. Never surfaces "you're up to date", never interrupts a
+    /// download or an install already under way, and stops asking once an
+    /// update is sitting there waiting to be installed.
+    private func checkInBackground() {
+        guard let updater, !isInstalling else { return }
+        if case .readyToInstall = state { return }
+        guard !updater.sessionInProgress else { return }
+        updater.checkForUpdatesInBackground()
     }
 
     /// Menu item action — surfaces feedback even when nothing is available.
