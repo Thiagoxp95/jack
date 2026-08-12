@@ -191,7 +191,7 @@ final class AppUpdater: NSObject, ObservableObject {
     private func showUpToDateAlert() {
         let alert = NSAlert()
         alert.messageText = "You're up to date"
-        alert.informativeText = "Jack \(currentVersion) is the latest version."
+        alert.informativeText = "Silky \(currentVersion) is the latest version."
         alert.runModal()
     }
 }

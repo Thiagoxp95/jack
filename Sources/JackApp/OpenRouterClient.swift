@@ -139,7 +139,7 @@ enum OpenRouterClient {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         // OpenRouter uses these for attribution on its model-usage leaderboards.
         request.setValue("https://github.com/Thiagoxp95/jack", forHTTPHeaderField: "HTTP-Referer")
-        request.setValue("Jack", forHTTPHeaderField: "X-Title")
+        request.setValue("Silky", forHTTPHeaderField: "X-Title")
         request.timeoutInterval = timeout
 
         // Qwen3 reasons by default and burns the whole token budget before answering.
@@ -237,7 +237,7 @@ enum OpenRouterClient {
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                     request.setValue("https://github.com/Thiagoxp95/jack", forHTTPHeaderField: "HTTP-Referer")
-                    request.setValue("Jack", forHTTPHeaderField: "X-Title")
+                    request.setValue("Silky", forHTTPHeaderField: "X-Title")
                     request.timeoutInterval = timeout
 
                     let body: [String: Any] = [

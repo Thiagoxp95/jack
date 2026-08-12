@@ -654,11 +654,11 @@ final class DictationController: ObservableObject {
         if let jsonData = defaults.data(forKey: DefaultsKey.todoSheetShortcutJSON),
            let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
             initialTodoSheetShortcut = decoded
-            NSLog("[Jack] Loaded todo sheet shortcut from defaults: primaryKeyCode=\(String(describing: decoded.primaryKeyCode)) modifiers=\(decoded.modifiers) display=\(decoded.displayName)")
+            NSLog("[Silky] Loaded todo sheet shortcut from defaults: primaryKeyCode=\(String(describing: decoded.primaryKeyCode)) modifiers=\(decoded.modifiers) display=\(decoded.displayName)")
         } else {
             // Default: ⌥T (Option+T)
             initialTodoSheetShortcut = InvocationShortcut(primaryKeyCode: 17, modifiers: NSEvent.ModifierFlags.option.rawValue)
-            NSLog("[Jack] Using default todo sheet shortcut: ⌥T")
+            NSLog("[Silky] Using default todo sheet shortcut: ⌥T")
         }
 
         let initialChatSheetShortcut: InvocationShortcut?
@@ -752,11 +752,11 @@ final class DictationController: ObservableObject {
         case let .migrate(value):
             KeychainStore.write(value, account: KeychainStore.openRouterAPIKeyAccount)
             openRouterApiKey = value
-            NSLog("[Jack] Moved OpenRouter key from UserDefaults to the keychain.")
+            NSLog("[Silky] Moved OpenRouter key from UserDefaults to the keychain.")
         case .discard:
             openRouterApiKey = ""
             if legacyKey?.isEmpty == false {
-                NSLog("[Jack] Discarded a corrupted OpenRouter key from UserDefaults; re-enter it in Settings.")
+                NSLog("[Silky] Discarded a corrupted OpenRouter key from UserDefaults; re-enter it in Settings.")
             }
         }
         defaults.removeObject(forKey: DefaultsKey.openRouterApiKey)
@@ -971,12 +971,12 @@ final class DictationController: ObservableObject {
                 }
                 try? Data().write(to: markerURL)
                 if !existingNotes.isEmpty {
-                    NSLog("[Jack] Knowledge base: migrated %d existing notes", existingNotes.count)
+                    NSLog("[Silky] Knowledge base: migrated %d existing notes", existingNotes.count)
                 }
             }
             let embedded = await knowledge.backfillMissingEmbeddings()
             if embedded > 0 {
-                NSLog("[Jack] Knowledge base: backfilled %d embeddings", embedded)
+                NSLog("[Silky] Knowledge base: backfilled %d embeddings", embedded)
             }
         }
     }
@@ -2262,11 +2262,11 @@ final class DictationController: ObservableObject {
         var finalText = cleaned
         if cleanupEnabled, !cleanupPrompt.isEmpty {
             guard !openRouterApiKey.isEmpty else {
-                NSLog("[Jack] Cleanup skipped: no OpenRouter API key configured")
+                NSLog("[Silky] Cleanup skipped: no OpenRouter API key configured")
                 lastTranscript = finalText
                 return
             }
-            NSLog("[Jack] Cleanup enabled, calling OpenRouter with model=%@", cleanupModelId)
+            NSLog("[Silky] Cleanup enabled, calling OpenRouter with model=%@", cleanupModelId)
             do {
                 let result = try await callCleanupDirect(
                     text: cleaned,
@@ -2274,12 +2274,12 @@ final class DictationController: ObservableObject {
                     model: cleanupModelId,
                     apiKey: openRouterApiKey
                 )
-                NSLog("[Jack] Cleanup returned %d chars: %@", result.count, String(result.prefix(200)))
+                NSLog("[Silky] Cleanup returned %d chars: %@", result.count, String(result.prefix(200)))
                 if !result.isEmpty {
                     finalText = result
                 }
             } catch {
-                NSLog("[Jack] Transcription cleanup failed: %@", String(describing: error))
+                NSLog("[Silky] Transcription cleanup failed: %@", String(describing: error))
             }
         }
         lastTranscript = finalText
@@ -2302,7 +2302,7 @@ final class DictationController: ObservableObject {
                 verdict.backend,
                 verdict.reason.isEmpty ? "no reason given" : verdict.reason
             )
-            NSLog("[Jack] Router → %@ (%@)", verdict.intent.rawValue, lastIntentVerdictSummary ?? "")
+            NSLog("[Silky] Router → %@ (%@)", verdict.intent.rawValue, lastIntentVerdictSummary ?? "")
             // A rejected key means the router is dead for every capture from
             // here on, not just this one. Say so once rather than degrading to
             // paste in silence — the silent version of this bug ran for hours
@@ -2360,7 +2360,7 @@ final class DictationController: ObservableObject {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(finalText, forType: .string)
                 didPaste = false
-                NSLog("[Jack] Suppressed paste into Jack's own window; copied instead.")
+                NSLog("[Silky] Suppressed paste into Silky’s own window; copied instead.")
             } else if autoCopyToClipboard {
                 didPaste = pasteService.copyAndPaste(finalText)
             } else {
@@ -2379,7 +2379,7 @@ final class DictationController: ObservableObject {
             if didPaste {
                 statusText = "Transcribed and pasted."
             } else if jackWasFrontmost {
-                statusText = "Copied — Jack doesn't paste into its own window."
+                statusText = "Copied — Silky doesn’t paste into its own window."
             } else {
                 statusText = "Transcribed and copied. Grant Accessibility for auto-paste."
             }
@@ -2523,7 +2523,7 @@ final class DictationController: ObservableObject {
             openRouterModels = try await OpenRouterClient.fetchModels(apiKey: openRouterApiKey)
         } catch {
             openRouterModelsError = error.localizedDescription
-            NSLog("[Jack] Failed to load OpenRouter models: %@", String(describing: error))
+            NSLog("[Silky] Failed to load OpenRouter models: %@", String(describing: error))
         }
         isLoadingOpenRouterModels = false
     }
@@ -2577,7 +2577,7 @@ final class DictationController: ObservableObject {
         // shares almost nothing with it — drop it and paste the raw transcript
         // rather than something the user never said.
         guard Self.resemblesCleanup(of: text, candidate: stripped) else {
-            NSLog("[Jack] Cleanup output rejected — too little overlap with the transcript: %@", String(stripped.prefix(120)))
+            NSLog("[Silky] Cleanup output rejected — too little overlap with the transcript: %@", String(stripped.prefix(120)))
             return ""
         }
         return stripped
@@ -3444,13 +3444,13 @@ final class DictationController: ObservableObject {
     }
 
     private func setTodoSheetShortcut(_ shortcut: InvocationShortcut) {
-        NSLog("[Jack] setTodoSheetShortcut: primaryKeyCode=\(String(describing: shortcut.primaryKeyCode)) modifiers=\(shortcut.modifiers) display=\(shortcut.displayName)")
+        NSLog("[Silky] setTodoSheetShortcut: primaryKeyCode=\(String(describing: shortcut.primaryKeyCode)) modifiers=\(shortcut.modifiers) display=\(shortcut.displayName)")
         todoSheetShortcut = shortcut
         shortcutMonitor.setTodoSheetShortcut(shortcut)
         if let data = try? JSONEncoder().encode(shortcut) {
             UserDefaults.standard.set(data, forKey: DefaultsKey.todoSheetShortcutJSON)
         } else {
-            NSLog("[Jack] WARNING: Failed to encode todo sheet shortcut")
+            NSLog("[Silky] WARNING: Failed to encode todo sheet shortcut")
         }
     }
 

@@ -203,7 +203,7 @@ final class NoteScreenshotController {
                 self.onCapture?(fileURL, ocrText)
                 NSSound(named: "Pop")?.play()
             } catch {
-                NSLog("[Jack] Note screenshot capture failed: %@", String(describing: error))
+                NSLog("[Silky] Note screenshot capture failed: %@", String(describing: error))
             }
         }
     }

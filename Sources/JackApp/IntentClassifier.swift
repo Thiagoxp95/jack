@@ -161,10 +161,10 @@ struct IntentClassifier: Sendable {
             if let verdict = Self.parse(reply, backend: model) {
                 return verdict
             }
-            NSLog("[Jack] Intent classifier: unparseable reply: %@", String(reply.prefix(200)))
+            NSLog("[Silky] Intent classifier: unparseable reply: %@", String(reply.prefix(200)))
             return IntentVerdict(intent: .dictation, confidence: 0, reason: "unparseable reply", backend: model)
         } catch {
-            NSLog("[Jack] Intent classifier failed: %@", String(describing: error))
+            NSLog("[Silky] Intent classifier failed: %@", String(describing: error))
             let failure = error as? OpenRouterClient.Failure
             return IntentVerdict(
                 intent: .dictation,

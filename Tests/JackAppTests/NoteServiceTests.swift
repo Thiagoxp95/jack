@@ -21,7 +21,7 @@ final class NoteServiceTests: XCTestCase {
         XCTAssertEqual(firstURL.lastPathComponent, "2026-02-20.md")
 
         let contents = try String(contentsOf: firstURL, encoding: .utf8)
-        XCTAssertTrue(contents.contains("# Jack Voice Notes (2026-02-20)"))
+        XCTAssertTrue(contents.contains("# Silky Voice Notes (2026-02-20)"))
         XCTAssertTrue(contents.contains("## 09:15:00"))
         XCTAssertTrue(contents.contains("First note"))
         XCTAssertTrue(contents.contains("## 10:45:12"))

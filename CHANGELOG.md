@@ -5,6 +5,17 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.5.0 — 2026-08-12
+
+### Changed
+
+- **Jack is now Silky.** Same app, new name. The app in your Applications
+  folder is now `Silky.app`, the menu bar and all windows say Silky, and
+  releases ship as `Silky-<version>.zip` / `Silky-<version>.dmg`. Your
+  settings, shortcuts, notes, todos, knowledge base, and system permissions
+  all carry over — nothing to re-grant and nothing to migrate. Existing notes
+  stay in `~/Documents/Jack Notes`.
+
 ## 1.4.4 — 2026-08-12
 
 ### Fixed

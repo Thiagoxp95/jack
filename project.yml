@@ -83,10 +83,10 @@ targets:
         MARKETING_VERSION: "1.1.1"
         CURRENT_PROJECT_VERSION: "4"
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Jackly
+        INFOPLIST_KEY_CFBundleDisplayName: Silky
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.productivity"
         INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Jack needs microphone access to transcribe speech."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Silky needs microphone access to transcribe speech."
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "6.0"
         METAL_LIBRARY_OUTPUT_DIR: "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)"

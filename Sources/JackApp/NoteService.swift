@@ -127,7 +127,7 @@ final class NoteService {
         let fileURL = notesDirectoryURL.appendingPathComponent("\(dayStamp).md")
 
         if !fileManager.fileExists(atPath: fileURL.path) {
-            let header = "# Jack Voice Notes (\(dayStamp))\n"
+            let header = "# Silky Voice Notes (\(dayStamp))\n"
             try header.write(to: fileURL, atomically: true, encoding: .utf8)
         }
 

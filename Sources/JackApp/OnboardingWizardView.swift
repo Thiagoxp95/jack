@@ -222,7 +222,7 @@ private struct WelcomeStep: View {
                     .foregroundStyle(WizardColors.accentGradient)
             }
 
-            Text("Welcome to Jack")
+            Text("Welcome to Silky")
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(WizardColors.primaryText)
 
@@ -278,7 +278,7 @@ private struct PermissionsStep: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(WizardColors.primaryText)
 
-                Text("Jack needs a few system permissions to work globally across all apps.")
+                Text("Silky needs a few system permissions to work globally across all apps.")
                     .font(.system(size: 13))
                     .foregroundStyle(WizardColors.secondary)
                     .lineSpacing(2)

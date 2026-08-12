@@ -1,4 +1,4 @@
-# Releasing Jack
+# Releasing Silky
 
 Releases are cut automatically by `.github/workflows/release.yml`.
 
@@ -14,8 +14,8 @@ The workflow then:
 2. Signs with the Developer ID certificate and notarizes — only if the
    signing secrets are configured; otherwise the build is ad-hoc signed
    (fine for testing, but Gatekeeper will warn first-time downloaders).
-3. Creates a GitHub Release `v<version>` with `Jack-<version>.dmg` (first
-   install) and `JackApp-<version>.zip` (what Sparkle downloads).
+3. Creates a GitHub Release `v<version>` with `Silky-<version>.dmg` (first
+   install) and `Silky-<version>.zip` (what Sparkle downloads).
 4. Signs the zip with the Sparkle EdDSA key and regenerates `appcast.xml`,
    committing it back to `main`.
 
@@ -52,8 +52,8 @@ distribution), put the public key in `Scripts/package_app.sh`
 
 ```bash
 RELEASE_BUILD=1 Scripts/package_app.sh release
-ditto -c -k --sequesterRsrc --keepParent JackApp.app JackApp-<version>.zip
+ditto -c -k --sequesterRsrc --keepParent Silky.app Silky-<version>.zip
 SPARKLE_PRIVATE_KEY_FILE=~/.jack-sparkle/ed25519-private.key \
-  Scripts/make_appcast.sh JackApp-<version>.zip
+  Scripts/make_appcast.sh Silky-<version>.zip
 # upload the zip + dmg to the GitHub release, commit appcast.xml
 ```

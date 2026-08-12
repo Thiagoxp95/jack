@@ -88,7 +88,7 @@ struct UpdateCardView: View {
     private var subtitleText: String {
         switch updater.state {
         case .readyToInstall:
-            return "Jack has downloaded an update. It will apply after a restart."
+            return "Silky has downloaded an update. It will apply after a restart."
         case .error(let message):
             return message
         default:

@@ -59,12 +59,12 @@ struct TodoTextParser: Sendable {
                 timeout: timeout
             )
             guard let json = Self.firstJSONObject(in: reply) else {
-                NSLog("[Jack] Todo parser: unparseable reply: %@", String(reply.prefix(200)))
+                NSLog("[Silky] Todo parser: unparseable reply: %@", String(reply.prefix(200)))
                 return fallback
             }
             return Self.build(from: json, model: model, timeZone: timeZone, now: now, fallback: fallback)
         } catch {
-            NSLog("[Jack] Todo parser failed: %@", String(describing: error))
+            NSLog("[Silky] Todo parser failed: %@", String(describing: error))
             return fallback
         }
     }

@@ -99,7 +99,7 @@ jobs:
           RELEASE_BUILD: "1"
         run: |
           Scripts/package_app.sh release
-          ditto -c -k --sequesterRsrc --keepParent JackApp.app "JackApp-${{ steps.version.outputs.version }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent Silky.app "Silky-${{ steps.version.outputs.version }}.zip"
 
       - name: Notarize
         if: steps.guard.outputs.skip == 'false' && env.HAVE_NOTARY_KEY == 'true'
@@ -109,21 +109,21 @@ jobs:
           API_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           printf '%s' "$API_KEY" > "$RUNNER_TEMP/AuthKey.p8"
-          xcrun notarytool submit "JackApp-${{ steps.version.outputs.version }}.zip" \
+          xcrun notarytool submit "Silky-${{ steps.version.outputs.version }}.zip" \
             --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER" --wait
-          xcrun stapler staple JackApp.app
+          xcrun stapler staple Silky.app
           # Re-zip with the stapled ticket.
-          rm "JackApp-${{ steps.version.outputs.version }}.zip"
-          ditto -c -k --sequesterRsrc --keepParent JackApp.app "JackApp-${{ steps.version.outputs.version }}.zip"
+          rm "Silky-${{ steps.version.outputs.version }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent Silky.app "Silky-${{ steps.version.outputs.version }}.zip"
 
       - name: Make DMG
         if: steps.guard.outputs.skip == 'false'
         run: |
           mkdir -p dmg-root
-          cp -R JackApp.app dmg-root/
+          cp -R Silky.app dmg-root/
           ln -s /Applications dmg-root/Applications
-          hdiutil create -volname "Jack" -srcfolder dmg-root -ov -format UDZO \
-            "Jack-${{ steps.version.outputs.version }}.dmg"
+          hdiutil create -volname "Silky" -srcfolder dmg-root -ov -format UDZO \
+            "Silky-${{ steps.version.outputs.version }}.dmg"
 
       - name: Generate appcast
         if: steps.guard.outputs.skip == 'false'
@@ -141,7 +141,7 @@ jobs:
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_ed25519"
           export PATH="/tmp/sparkle/bin:$PATH"
           SPARKLE_PRIVATE_KEY_FILE="$RUNNER_TEMP/sparkle_ed25519" \
-            Scripts/make_appcast.sh "JackApp-${{ steps.version.outputs.version }}.zip"
+            Scripts/make_appcast.sh "Silky-${{ steps.version.outputs.version }}.zip"
 
       - name: Create GitHub Release
         if: steps.guard.outputs.skip == 'false'
@@ -151,14 +151,14 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "Jack-${{ steps.version.outputs.version }}.dmg" \
-              "JackApp-${{ steps.version.outputs.version }}.zip" --clobber
+              "Silky-${{ steps.version.outputs.version }}.dmg" \
+              "Silky-${{ steps.version.outputs.version }}.zip" --clobber
             gh release edit "$TAG" --draft=false --latest
           else
             gh release create "$TAG" \
-              "Jack-${{ steps.version.outputs.version }}.dmg" \
-              "JackApp-${{ steps.version.outputs.version }}.zip" \
-              --title "Jack ${{ steps.version.outputs.version }}" --generate-notes --latest
+              "Silky-${{ steps.version.outputs.version }}.dmg" \
+              "Silky-${{ steps.version.outputs.version }}.zip" \
+              --title "Silky ${{ steps.version.outputs.version }}" --generate-notes --latest
           fi
 
       - name: Commit appcast.xml

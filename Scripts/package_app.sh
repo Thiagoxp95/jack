@@ -5,8 +5,10 @@ CONF=${1:-release}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
+# APP_NAME is the SwiftPM build product (module) name; APP_DISPLAY_NAME is the
+# user-facing name used for the .app folder, executable, and bundle name.
 APP_NAME=${APP_NAME:-JackApp}
-APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Jack}
+APP_DISPLAY_NAME=${APP_DISPLAY_NAME:-Silky}
 
 # Keep bundle IDs unique per workspace path for DEV builds so macOS
 # TCC/LaunchServices never confuse this app with another clone of the same
@@ -53,7 +55,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
   swift build -c "$CONF" --arch "$ARCH"
 done
 
-APP="$ROOT/${APP_NAME}.app"
+APP="$ROOT/${APP_DISPLAY_NAME}.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
@@ -80,12 +82,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>${APP_DISPLAY_NAME}</string>
     <key>CFBundleDisplayName</key><string>${APP_DISPLAY_NAME}</string>
     <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
-    <key>CFBundleExecutable</key><string>${APP_NAME}</string>
+    <key>CFBundleExecutable</key><string>${APP_DISPLAY_NAME}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${MARKETING_VERSION}</string>
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>${MACOS_MIN_VERSION}</string>
-    <key>NSMicrophoneUsageDescription</key><string>Jack needs microphone access to transcribe speech.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Silky needs microphone access to transcribe speech.</string>
     <key>LSUIElement</key><${LSUI_VALUE}/>
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>BuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>
@@ -149,7 +151,7 @@ install_binary() {
   verify_binary_arches "$dest" "${ARCH_LIST[@]}"
 }
 
-install_binary "$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
+install_binary "$APP_NAME" "$APP/Contents/MacOS/$APP_DISPLAY_NAME"
 
 # Bundle the MCP server CLI next to the app binary (agents exec it directly).
 install_binary "JackMCP" "$APP/Contents/MacOS/JackMCP"
@@ -177,7 +179,7 @@ for dir in "${FRAMEWORK_DIRS[@]}"; do
   if compgen -G "${dir}/*.framework" >/dev/null; then
     cp -R "${dir}/"*.framework "$APP/Contents/Frameworks/"
     chmod -R a+rX "$APP/Contents/Frameworks"
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$APP_NAME"
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$APP_DISPLAY_NAME"
     break
   fi
 done

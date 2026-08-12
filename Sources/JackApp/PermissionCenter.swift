@@ -327,9 +327,9 @@ private struct PermissionDropView: View {
                     .foregroundStyle(.green)
             } else {
                 VStack(spacing: 4) {
-                    Text("Drag Jack into the \(permission.title) list")
+                    Text("Drag Silky into the \(permission.title) list")
                         .font(.headline)
-                    Text("Drop the icon above onto the System Settings window.\nIf an old “JackApp” entry is already there, remove it with − first.")
+                    Text("Drop the icon above onto the System Settings window.\nIf an old “Jack” or “JackApp” entry is already there, remove it with − first.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -343,7 +343,7 @@ private struct PermissionDropView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Button("Reveal Jack in Finder") {
+                Button("Reveal Silky in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
                 }
                 .buttonStyle(.link)

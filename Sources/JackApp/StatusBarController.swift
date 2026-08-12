@@ -21,7 +21,7 @@ final class StatusBarController: NSObject {
             let icon = loadMenuBarIcon()
             icon.isTemplate = false
             button.image = icon
-            button.toolTip = "Jack"
+            button.toolTip = "Silky"
         }
 
         item.menu = buildMenu()
@@ -50,7 +50,7 @@ final class StatusBarController: NSObject {
             let icon = loadMenuBarIcon()
             icon.isTemplate = false
             button.image = icon
-            button.toolTip = "Jack"
+            button.toolTip = "Silky"
         }
         item.menu = buildMenu()
         statusItem = item
@@ -70,7 +70,7 @@ final class StatusBarController: NSObject {
             img.size = NSSize(width: 22, height: 22)
             return img
         }
-        return NSImage(systemSymbolName: "command", accessibilityDescription: "Jack")!
+        return NSImage(systemSymbolName: "command", accessibilityDescription: "Silky")!
     }
 
     // MARK: - Menu
@@ -111,7 +111,7 @@ final class StatusBarController: NSObject {
         updateItem.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)
         menu.addItem(updateItem)
 
-        let quitItem = NSMenuItem(title: "Quit Jack", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Silky", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         quitItem.target = self
         menu.addItem(quitItem)

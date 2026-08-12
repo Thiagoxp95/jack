@@ -45,7 +45,7 @@ enum KeychainStore {
               !value.isEmpty
         else {
             if status != errSecSuccess, status != errSecItemNotFound {
-                NSLog("[Jack] Keychain read failed for %@: OSStatus %d", account, Int(status))
+                NSLog("[Silky] Keychain read failed for %@: OSStatus %d", account, Int(status))
             }
             return nil
         }
@@ -74,12 +74,12 @@ enum KeychainStore {
             insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
             let addStatus = SecItemAdd(insert as CFDictionary, nil)
             if addStatus != errSecSuccess {
-                NSLog("[Jack] Keychain add failed for %@: OSStatus %d", account, Int(addStatus))
+                NSLog("[Silky] Keychain add failed for %@: OSStatus %d", account, Int(addStatus))
             }
             return addStatus == errSecSuccess
         }
 
-        NSLog("[Jack] Keychain update failed for %@: OSStatus %d", account, Int(updateStatus))
+        NSLog("[Silky] Keychain update failed for %@: OSStatus %d", account, Int(updateStatus))
         return false
     }
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ZIP=${1:?
-"Usage: $0 JackApp-<ver>.zip"}
+"Usage: $0 Silky-<ver>.zip"}
 FEED_URL=${2:-"https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml"}
 PRIVATE_KEY_FILE=${SPARKLE_PRIVATE_KEY_FILE:-}
 if [[ -z "$PRIVATE_KEY_FILE" ]]; then

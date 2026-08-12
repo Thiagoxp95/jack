@@ -1,8 +1,8 @@
-# Jack
+# Silky
 
-Jack is a macOS voice-to-text dictation app. Press a global shortcut, speak, and the transcript is pasted into whatever field has focus — transcription runs fully on-device using a local CoreML Parakeet model (via [FluidAudio](https://github.com/FluidInference/FluidAudio)).
+Silky is a macOS voice-to-text dictation app. Press a global shortcut, speak, and the transcript is pasted into whatever field has focus — transcription runs fully on-device using a local CoreML Parakeet model (via [FluidAudio](https://github.com/FluidInference/FluidAudio)).
 
-On top of dictation, Jack includes:
+On top of dictation, Silky includes:
 
 - **LLM transcript cleanup** — optionally post-process raw transcripts through any OpenRouter model for punctuation, filler-word removal, and formatting.
 - **Notes** — voice notes saved to daily markdown files (`~/Documents/Jack Notes/YYYY-MM-DD.md`), with optional cloud sync into spaces.
@@ -50,7 +50,7 @@ Then wait for the one-time model download to complete.
 
 ## Bring your own keys
 
-Jack is open source, but the backend it ships pointing at is the maintainer's deployment. To use the optional features, supply your own keys:
+Silky is open source, but the backend it ships pointing at is the maintainer's deployment. To use the optional features, supply your own keys:
 
 ### Transcript cleanup and auto mode (OpenRouter)
 
