@@ -3,6 +3,44 @@
     <channel>
         <title>JackApp</title>
         <item>
+            <title>1.4.3</title>
+            <pubDate>Wed, 12 Aug 2026 02:51:16 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>1.4.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Jack 1.4.3</title>
+<style>
+  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
+         margin: 0; padding: 4px 2px; color: #1d1d1f; }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+       color: #6e6e73; margin: 14px 0 6px; }
+  h3:first-child { margin-top: 0; }
+  ul { margin: 0 0 10px; padding-left: 20px; }
+  li { margin-bottom: 5px; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f5f5f7; }
+    h3 { color: #a1a1a6; }
+    code { background: rgba(255,255,255,.12); }
+  }
+</style>
+<body>
+<h3>Added</h3>
+<ul>
+<li><strong>Smart routing can be turned off.</strong> Settings → Smart Routing → "Enable smart routing". With it off, every dictation pastes where your cursor is and the pill afterwards still offers Todo and AI, so the same two destinations are one keypress away — you decide instead of a model. Nothing is sent to a routing model, and the paste lands as soon as the transcript does, without waiting on a round trip.</li>
+</ul>
+</body>
+</html>
+]]></description>
+            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.4.3/JackApp-1.4.3.zip" length="9629518" type="application/octet-stream" sparkle:edSignature="WKVQTaYgaH+Wm7RzMRZWoKXCcT5U7sMKb3qYE6vi5xMXNxpEAB28QbZc5ATUhyIRIl8xCZwstNFL5V6KiSBECQ=="/>
+        </item>
+        <item>
             <title>1.4.2</title>
             <pubDate>Wed, 12 Aug 2026 01:00:18 +0000</pubDate>
             <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
@@ -83,26 +121,6 @@
 </html>
 ]]></description>
             <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.4.1/JackApp-1.4.1.zip" length="9626223" type="application/octet-stream" sparkle:edSignature="6vSKHOEptNjr5ql8CBv8WOJgFM45Sb/a2PwW5kFW3lxmnFPVpag/HKkTR+bmW86T7PyskfTBR4UJDJftGODBAg=="/>
-        </item>
-        <item>
-            <title>1.4.0</title>
-            <pubDate>Tue, 11 Aug 2026 16:33:47 +0000</pubDate>
-            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>1.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>JackApp-1.4.0</title>
-<body>
-<h2>JackApp-1.4.0</h2>
-<p>Release notes not provided.</p>
-</body>
-</html>
-]]></description>
-            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.4.0/JackApp-1.4.0.zip" length="9617321" type="application/octet-stream" sparkle:edSignature="eZ+rXqqo2pvvu19S1WVb8r7TLJbcIpU+aUPMgPG2Ft6KirQNiatoUo3UiBhqntA9h+7OthKQIXEdw0tonQ8vCQ=="/>
         </item>
     </channel>
 </rss>
