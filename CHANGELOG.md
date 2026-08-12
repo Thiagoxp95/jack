@@ -5,6 +5,28 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.4.4 — 2026-08-12
+
+### Fixed
+
+- **The AI chat works again.** Pressing A on the pill after a dictation opened
+  the chat panel but never sent your question — it sat there saying "No chats
+  yet". Chat was still talking to a backend that stopped accepting requests
+  when accounts were removed, and every failure along the way was silent. Chats
+  now live on this Mac and stream straight from OpenRouter with your own key,
+  the same way todos moved local. Existing conversations were never reachable,
+  so there is nothing to migrate.
+- **Failures in chat now say so.** A missing or rejected key, or a model that
+  will not answer, shows up in the panel instead of leaving you with an empty
+  window.
+- **The voice meter tracks your voice for the whole dictation.** The bars used
+  to flatten out partway through — the animation was being starved rather than
+  the audio being misread.
+- **The pill no longer shows a dead button.** It split into three droplets when
+  there were only ever two things to press: AI and Todo. The third was blank
+  and swallowed clicks. There are two now, and they match the pill's own height
+  as it comes apart.
+
 ## 1.4.3 — 2026-08-11
 
 ### Added
