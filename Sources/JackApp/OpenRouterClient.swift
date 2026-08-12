@@ -33,6 +33,24 @@ enum OpenRouterClient {
     /// Note-vs-todo is a one-line classification; a cheaper model is plenty.
     static let defaultRoutingModel = "google/gemini-2.5-flash-lite"
 
+    /// The chat sheet's default. Unlike cleanup and routing, this one is a
+    /// conversation the user reads, so it gets a general-purpose model rather
+    /// than the cheapest thing that can follow an instruction.
+    static let defaultChatModel = "anthropic/claude-sonnet-5"
+
+    /// Chat defaults Jack shipped before. `anthropic/claude-sonnet-4` still
+    /// resolves at OpenRouter, so this is not about a dead id — it is that the
+    /// value was never chosen by anyone. Chat has been broken since accounts
+    /// were removed, so nothing ever wrote `chat_last_used_model`; any copy of
+    /// it on disk is the old hardcoded fallback leaking into storage.
+    static let supersededChatDefaults: Set<String> = ["anthropic/claude-sonnet-4"]
+
+    /// Resolve the stored chat-model preference, re-pointing the stale default.
+    static func resolveChatModel(_ stored: String?) -> String {
+        guard let stored, !stored.isEmpty else { return defaultChatModel }
+        return supersededChatDefaults.contains(stored) ? defaultChatModel : stored
+    }
+
     /// Model ids Jack once shipped as defaults that OpenRouter has since
     /// retired. Stored settings pointing at these are silently re-pointed.
     static let retiredDefaults: Set<String> = ["google/gemini-2.0-flash-001"]
@@ -160,6 +178,110 @@ enum OpenRouterClient {
         }
 
         return content
+    }
+
+    // MARK: - Streaming
+
+    /// One line of an OpenRouter SSE stream, reduced to what chat cares about.
+    enum StreamEvent: Equatable {
+        case token(String)
+        case done
+        /// Keep-alive comments, blank separators, role-only first deltas, and
+        /// anything unparseable. A malformed line is skipped rather than thrown
+        /// on: one bad frame should not discard a reply that is already
+        /// half-rendered on screen.
+        case ignore
+    }
+
+    /// Pure so the stream's grammar can be tested without a network.
+    static func parseStreamLine(_ line: String) -> StreamEvent {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        // OpenRouter sends ": OPENROUTER PROCESSING" comments to hold the
+        // connection open while a provider is still cold.
+        guard trimmed.hasPrefix("data:") else { return .ignore }
+
+        let payload = trimmed.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        if payload == "[DONE]" { return .done }
+
+        guard let data = payload.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let delta = choices.first?["delta"] as? [String: Any],
+              let content = delta["content"] as? String,
+              !content.isEmpty
+        else { return .ignore }
+
+        return .token(content)
+    }
+
+    /// Stream a chat completion, yielding content deltas as they arrive.
+    ///
+    /// The stream finishes on `data: [DONE]` or when the body ends, and throws
+    /// a `Failure` for anything the caller should show the user. Cancelling the
+    /// consuming task tears the HTTP request down with it.
+    static func streamChat(
+        model: String,
+        messages: [Message],
+        apiKey: String,
+        timeout: TimeInterval = 120
+    ) -> AsyncThrowingStream<String, Swift.Error> {
+        AsyncThrowingStream { continuation in
+            let work = Task {
+                do {
+                    guard !apiKey.isEmpty else { throw Failure.missingKey }
+                    guard let url = URL(string: chatCompletionsURL) else { throw Failure.malformedResponse }
+
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                    request.setValue("https://github.com/Thiagoxp95/jack", forHTTPHeaderField: "HTTP-Referer")
+                    request.setValue("Jack", forHTTPHeaderField: "X-Title")
+                    request.timeoutInterval = timeout
+
+                    let body: [String: Any] = [
+                        "model": model,
+                        "stream": true,
+                        "messages": messages.map { ["role": $0.role, "content": $0.content] },
+                    ]
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+                    guard status == 200 else {
+                        // The error body arrives down the same byte stream, so
+                        // it has to be drained to be reported at all.
+                        var detail = ""
+                        for try await line in bytes.lines {
+                            detail += line
+                            if detail.count > 400 { break }
+                        }
+                        throw Failure.http(status: status, body: String(detail.prefix(400)))
+                    }
+
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        switch parseStreamLine(line) {
+                        case .token(let content):
+                            continuation.yield(content)
+                        case .done:
+                            continuation.finish()
+                            return
+                        case .ignore:
+                            continue
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in work.cancel() }
+        }
     }
 
     // MARK: - Catalog

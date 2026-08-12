@@ -7,19 +7,20 @@ struct ChatSideSheetView: View {
     var spaceController: SpaceController
     var onResize: ((CGFloat) -> Void)?
 
-    // Local state
-    @State private var selectedModelForNewThread = "anthropic/claude-sonnet-4"
     @FocusState private var isInputFocused: Bool
 
     private let sidebarWidth: CGFloat = 160
 
     var body: some View {
-        HStack(spacing: 0) {
-            resizeHandle
-            threadSidebar
-                .frame(width: sidebarWidth)
-            Divider().opacity(0.3)
-            chatArea
+        VStack(spacing: 0) {
+            errorBanner
+            HStack(spacing: 0) {
+                resizeHandle
+                threadSidebar
+                    .frame(width: sidebarWidth)
+                Divider().opacity(0.3)
+                chatArea
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .background(
@@ -54,6 +55,43 @@ struct ChatSideSheetView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will permanently delete this chat and all its messages.")
+        }
+    }
+
+    // MARK: - Error Banner
+
+    /// Chat failures used to be an `NSLog` and an empty sheet. Anything the user
+    /// could act on — no key, a rejected key, a model that wouldn't answer —
+    /// belongs on screen, above the conversation, until they dismiss it.
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let message = chatController.error {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .padding(.top, 1)
+
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 4)
+
+                Button {
+                    chatController.error = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.orange.opacity(0.14))
         }
     }
 
@@ -160,7 +198,7 @@ struct ChatSideSheetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func threadRow(_ thread: ConvexChatThread) -> some View {
+    private func threadRow(_ thread: ChatThread) -> some View {
         let isSelected = sheetState.selectedThreadId == thread.id
 
         return VStack(alignment: .leading, spacing: 3) {
@@ -235,7 +273,7 @@ struct ChatSideSheetView: View {
         }
     }
 
-    private func chatContent(thread: ConvexChatThread) -> some View {
+    private func chatContent(thread: ChatThread) -> some View {
         VStack(spacing: 0) {
             chatTopBar(thread: thread)
             Divider().opacity(0.3)
@@ -247,7 +285,7 @@ struct ChatSideSheetView: View {
 
     // MARK: - Chat Top Bar
 
-    private func chatTopBar(thread: ConvexChatThread) -> some View {
+    private func chatTopBar(thread: ChatThread) -> some View {
         HStack(spacing: 8) {
             Text(thread.title)
                 .font(.system(size: 13, weight: .semibold))
@@ -261,7 +299,7 @@ struct ChatSideSheetView: View {
         .padding(.vertical, 10)
     }
 
-    private func modelSwitcher(thread: ConvexChatThread) -> some View {
+    private func modelSwitcher(thread: ChatThread) -> some View {
         Menu {
             let favorites = chatController.availableModels.filter {
                 chatController.favoriteModelIds.contains($0.id)
@@ -367,7 +405,7 @@ struct ChatSideSheetView: View {
     }
 
     @ViewBuilder
-    private func messageBubble(_ message: ConvexChatMessage) -> some View {
+    private func messageBubble(_ message: ChatMessage) -> some View {
         let isUser = message.role == "user"
 
         HStack {
@@ -497,7 +535,7 @@ struct ChatSideSheetView: View {
 
     private func createNewThreadQuick() {
         Task {
-            let model = selectedModelForNewThread
+            let model = chatController.defaultModelId
             if let threadId = await chatController.createThread(
                 title: "New Chat",
                 model: model,

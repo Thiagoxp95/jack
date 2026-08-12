@@ -265,8 +265,7 @@ final class ChatSideSheetController: ChatSheetKeyboardDelegate {
 
     private func createNewThread() {
         Task {
-            // Get the default model from UserDefaults or use a sensible default
-            let defaultModel = UserDefaults.standard.string(forKey: "chat_last_used_model") ?? "anthropic/claude-sonnet-4"
+            let defaultModel = chatController.defaultModelId
             if let threadId = await chatController.createThread(
                 title: "New Chat",
                 model: defaultModel,
@@ -288,7 +287,7 @@ final class ChatSideSheetController: ChatSheetKeyboardDelegate {
         }
 
         Task {
-            let defaultModel = UserDefaults.standard.string(forKey: "chat_last_used_model") ?? "anthropic/claude-sonnet-4"
+            let defaultModel = chatController.defaultModelId
             // Use first ~50 chars as thread title
             let titleEnd = text.index(text.startIndex, offsetBy: min(50, text.count))
             let title = String(text[text.startIndex..<titleEnd])
@@ -297,7 +296,12 @@ final class ChatSideSheetController: ChatSheetKeyboardDelegate {
                 title: title,
                 model: defaultModel,
                 spaceId: spaceController.currentSpaceId
-            ) else { return }
+            ) else {
+                // This used to be a bare `return`, which is how "the message is
+                // never sent" managed to look like "the sheet is just empty".
+                chatController.error = "Couldn't start a chat for that dictation."
+                return
+            }
 
             await chatController.fetchThreads(spaceId: spaceController.currentSpaceId)
             sheetState.selectedThreadId = threadId
