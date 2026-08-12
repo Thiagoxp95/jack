@@ -140,10 +140,13 @@ private final class ActionGlyphView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        let iconSize = round(d * 0.34)
+        // Proportions are relative to a droplet that is now the pill's own cap
+        // diameter rather than 1.4x it, so the icon and keycap take a larger
+        // share of it to stay legible.
+        let iconSize = round(d * 0.40)
         iconView.frame = NSRect(
             x: round((bounds.width - iconSize) / 2),
-            y: round(bounds.midY + d * 0.06),
+            y: round(bounds.midY + d * 0.04),
             width: iconSize,
             height: iconSize
         )
@@ -151,13 +154,13 @@ private final class ActionGlyphView: NSView {
             pointSize: round(iconSize * 0.92), weight: .semibold
         )
 
-        let capW = round(d * 0.30)
-        let capH = round(d * 0.22)
-        let capY = round(bounds.midY - d * 0.06 - capH)
+        let capW = round(d * 0.36)
+        let capH = round(d * 0.26)
+        let capY = round(bounds.midY - d * 0.04 - capH)
         keycapBg.frame = NSRect(x: round((bounds.width - capW) / 2), y: capY, width: capW, height: capH)
         keycapBg.cornerRadius = min(3, capH / 2)
 
-        keycapLabel.font = .monospacedSystemFont(ofSize: max(7, round(d * 0.17)), weight: .bold)
+        keycapLabel.font = .monospacedSystemFont(ofSize: max(7, round(d * 0.20)), weight: .bold)
         keycapLabel.frame = NSRect(
             x: keycapBg.frame.minX,
             y: capY - round(capH * 0.08),
@@ -171,12 +174,29 @@ private final class ActionGlyphView: NSView {
 
 // MARK: - Liquid split view
 
-/// Draws the pill breaking apart into three droplets: the body contracts into
-/// the middle droplet while the two end caps travel outward, joined by necks
-/// that thin out and snap. All one filled path, so the blobs read as one body
-/// of liquid until they separate.
+/// Draws the pill pinching apart into one droplet per action — AI and Todo —
+/// joined by necks that thin out and snap. All one filled path, so the blobs
+/// read as a single body of liquid until they separate.
+///
+/// At `progress == 0` the droplets sit on the pill's own cap centres and the
+/// neck between them is at full cling, which makes the union *exactly* the
+/// pill: same width, same height, same corner radius. That is what lets the
+/// split panel take over the pill's silhouette without a seam.
 private final class LiquidSplitView: NSView {
     var onClick: ((PostDictationAction) -> Void)?
+
+    /// One droplet per action, derived rather than hardcoded. The old geometry
+    /// drew a literal three while the enum only had two cases, so the third
+    /// droplet had no glyph and `PostDictationAction(rawValue: 2)` was nil —
+    /// a visible target that silently swallowed clicks. Deriving the count
+    /// means every drawn droplet always maps to a real action.
+    private static let dropletCount = PostDictationAction.allCases.count
+
+    /// Centre-to-centre distance, in droplet diameters, at which a neck stops
+    /// being able to hold and snaps. Sits between the pill's starting cap
+    /// spacing (1.44 diameters) and the settled spacing (1.70), so the thread
+    /// survives most of the travel and lets go near the end.
+    private static let neckBreakRatio: CGFloat = 1.65
 
     private let pillSize: NSSize
     private let diameter: CGFloat
@@ -213,8 +233,10 @@ private final class LiquidSplitView: NSView {
     /// Panel size that fits the fully-separated droplets plus slack for the
     /// settle wobble and the drop shadow.
     static func canvasSize(pillSize: NSSize, diameter: CGFloat, gap: CGFloat, padding: CGFloat) -> NSSize {
-        NSSize(
-            width: max(diameter * 3 + gap * 2, pillSize.width) + padding * 2,
+        let n = CGFloat(dropletCount)
+        let spread = (n - 1) * (diameter + gap) + diameter
+        return NSSize(
+            width: max(spread, pillSize.width) + padding * 2,
             height: max(diameter, pillSize.height) + padding * 2
         )
     }
@@ -266,47 +288,34 @@ private final class LiquidSplitView: NSView {
         return sin(settle * .pi * 3.1) * exp(-settle * 4.4) * 0.085
     }
 
-    private var startRadius: CGFloat { pillSize.height / 2 }
-    private var endRadius: CGFloat { diameter / 2 }
-
-    /// Distance from centre to each outer droplet. Starts at the pill's end
-    /// caps, so frame zero is pixel-identical to the pill it replaced.
-    private var outerOffset: CGFloat {
-        lerp((pillSize.width - pillSize.height) / 2, diameter + gap, travel)
+    /// Surface tension beads the liquid up while the necks are stretching, then
+    /// lets it relax. Peaks mid-tear and is back to exactly zero by the time the
+    /// droplets settle, so the swell is transient and the final three dots are
+    /// the same size as the pill's caps to the pixel.
+    private var bead: CGFloat {
+        sin(clamp01(progress / 0.72) * .pi) * 0.07
     }
 
-    private var radius: CGFloat { lerp(startRadius, endRadius, travel) }
+    /// Every droplet is the pill's own cap size, start to finish. Nothing grows
+    /// or shrinks during the split — the shape changes, the scale never does.
+    private var radius: CGFloat { diameter / 2 * (1 + bead) }
 
-    /// The contracting body: a capsule that ends up as the middle droplet.
-    private var bodySize: NSSize {
-        NSSize(
-            width: lerp(pillSize.width, diameter, travel),
-            height: lerp(pillSize.height, diameter, travel)
-        )
+    /// Centre-to-centre spacing. Starts at the pill's cap centres, so the
+    /// droplets begin life exactly where the pill's rounded ends already are.
+    private var spacing: CGFloat {
+        let start = (pillSize.width - pillSize.height) / max(1, CGFloat(Self.dropletCount) - 1)
+        return lerp(start, diameter + gap, travel)
     }
 
     private func centre() -> CGPoint { CGPoint(x: bounds.midX, y: bounds.midY) }
 
     private func dropletCentres() -> [CGPoint] {
         let c = centre()
-        let off = outerOffset
-        return [
-            CGPoint(x: c.x - off, y: c.y),
-            c,
-            CGPoint(x: c.x + off, y: c.y),
-        ]
-    }
-
-    private func bodyRect() -> NSRect {
-        let c = centre()
-        let s = bodySize
-        let w = wobble
-        return NSRect(
-            x: c.x - s.width * (1 - w) / 2,
-            y: c.y - s.height * (1 + w) / 2,
-            width: s.width * (1 - w),
-            height: s.height * (1 + w)
-        )
+        let s = spacing
+        let mid = CGFloat(Self.dropletCount - 1) / 2
+        return (0..<Self.dropletCount).map { i in
+            CGPoint(x: c.x + (CGFloat(i) - mid) * s, y: c.y)
+        }
     }
 
     private func outerRect(at centre: CGPoint) -> NSRect {
@@ -334,34 +343,31 @@ private final class LiquidSplitView: NSView {
 
     // MARK: Drawing
 
-    /// One outline for body + droplets + necks. A real boolean union, not
-    /// stacked subpaths: overlapping subpaths would cancel under the non-zero
-    /// winding rule and carve notches out of the goo.
+    /// One outline for every droplet plus the necks between adjacent pairs. A
+    /// real boolean union, not stacked subpaths: overlapping subpaths would
+    /// cancel under the non-zero winding rule and carve notches out of the goo.
+    ///
+    /// At `travel == 0` the cling is a full 1, which pushes each neck's edges
+    /// out to its droplets' tangents — the union is then the pill itself, to
+    /// the pixel. The taper from there is the entire tearing motion.
     private func gooPath() -> CGPath {
         let centres = dropletCentres()
-        let body = bodyRect()
         let r = radius
 
-        // The body's end caps are what the necks actually hang off of.
-        let capRadius = min(body.width, body.height) / 2
-        let leftCap = CGPoint(x: body.minX + capRadius, y: body.midY)
-        let rightCap = CGPoint(x: body.maxX - capRadius, y: body.midY)
+        var path = CGPath(ellipseIn: outerRect(at: centres[0]), transform: nil)
+        for centre in centres.dropFirst() {
+            path = path.union(CGPath(ellipseIn: outerRect(at: centre), transform: nil))
+        }
 
-        var path = CGPath(
-            roundedRect: body,
-            cornerWidth: body.height / 2,
-            cornerHeight: body.height / 2,
-            transform: nil
-        )
-        path = path.union(CGPath(ellipseIn: outerRect(at: centres[0]), transform: nil))
-        path = path.union(CGPath(ellipseIn: outerRect(at: centres[2]), transform: nil))
-
-        // Surface tension eases off as the droplets get away from the body.
-        let cling = lerp(0.78, 0.5, progress)
-        let maxDistance = (r + capRadius) * 1.34
-        for (cap, droplet) in [(leftCap, centres[0]), (rightCap, centres[2])] {
+        // Surface tension eases off as the droplets pull away from each other.
+        // Keyed to travel so the thinning tracks the actual separation, and
+        // taken low enough that the neck reads as a thread narrowing to a snap
+        // rather than a bar that stays fat right up to the frame it vanishes.
+        let cling = lerp(1.0, 0.30, travel)
+        let maxDistance = r * 2 * Self.neckBreakRatio
+        for (left, right) in zip(centres, centres.dropFirst()) {
             guard let neck = metaballConnector(
-                c1: cap, r1: capRadius, c2: droplet, r2: r,
+                c1: left, r1: r, c2: right, r2: r,
                 v: cling, handleSize: 2.4, maxDistance: maxDistance
             ) else { continue }
             path = path.union(neck.cgPath)
@@ -386,14 +392,11 @@ private final class LiquidSplitView: NSView {
         context.restoreGraphicsState()
 
         // Hover highlight only once the droplets are separate and clickable.
-        if isSettled, let hovered {
+        // Every droplet is a circle now, so there is no special case for the
+        // middle one the way there was when it was the contracted body.
+        if isSettled, let hovered, dropletCentres().indices.contains(hovered) {
             NSColor(white: 0.18, alpha: 1).setFill()
-            if hovered == 1 {
-                let body = bodyRect()
-                NSBezierPath(roundedRect: body, xRadius: body.height / 2, yRadius: body.height / 2).fill()
-            } else {
-                NSBezierPath(ovalIn: outerRect(at: dropletCentres()[hovered])).fill()
-            }
+            NSBezierPath(ovalIn: outerRect(at: dropletCentres()[hovered])).fill()
         }
     }
 
@@ -451,9 +454,9 @@ private final class LiquidSplitView: NSView {
 
 // MARK: - Controller
 
-/// After a paste-mode dictation lands, the floating pill breaks apart like a
-/// drop of water into three droplets — AI, Note, Todo — so the capture can be
-/// rerouted with one keypress (default A/S/D) or a click. Auto-dismisses after
+/// After a paste-mode dictation lands, the floating pill pinches apart like a
+/// drop of water into one droplet per destination — AI and Todo — so the
+/// capture can be rerouted with one keypress or a click. Auto-dismisses after
 /// a timeout, on Escape, on any other typing, or on a click elsewhere.
 @MainActor
 final class PostActionPillController {
@@ -461,7 +464,11 @@ final class PostActionPillController {
     /// over the exact same silhouette. Keeps the handoff invisible.
     static let handoffFadeDuration: TimeInterval = 0.09
 
-    private let gapRatio: CGFloat = 0.42
+    /// Edge-to-edge gap between settled droplets, as a fraction of their
+    /// diameter. Wider than it was for three droplets: with two, the pill's
+    /// caps already start far apart, so a narrow gap would leave them barely
+    /// moving and the tear would not read.
+    private let gapRatio: CGFloat = 0.70
     private let padding: CGFloat = 16
     private let bottomOffset: CGFloat = 48
     private let displayTimeout: TimeInterval = 6.0
@@ -494,7 +501,11 @@ final class PostActionPillController {
         self.onDismiss = onDismiss
 
         let pillSize = originPillFrame.size
-        let diameter = min(64, max(40, pillSize.height * 1.4))
+        // Every droplet settles at exactly the pill's cap diameter. The two end
+        // caps slide straight out at the radius they already had and the body
+        // pinches into an identical third dot, so the split changes the shape
+        // without ever changing the scale — no growth pop partway through.
+        let diameter = pillSize.height
         let gap = round(diameter * gapRatio)
         let canvas = LiquidSplitView.canvasSize(
             pillSize: pillSize, diameter: diameter, gap: gap, padding: padding

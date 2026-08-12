@@ -464,8 +464,14 @@ final class DictationController: ObservableObject {
     private var lastKeepModelWarmAt: Date?
     private var smoothedRiveLevel: Double = 0
     private var previousRiveLevel: Double = 0
-    private var riveObservedPeakLevel: Double = 0.25
+    /// Loudest recent input, used *only* to give a quiet mic makeup gain.
+    /// Seeded near the makeup target so the first words aren't over-boosted.
+    private var riveObservedPeakLevel: Double = 0.5
     private var lastRivePulseAt: Date?
+    /// Wall-clock stamp of the previous reactive tick. `Task.sleep` only
+    /// guarantees a minimum, so the real poll interval stretches whenever the
+    /// main actor is busy; every rate above is integrated against this.
+    private var lastRiveTickAt: Date?
     /// Counts consecutive ticks where raw level is below the voice gate.
     /// After enough quiet ticks, the level decays smoothly to zero.
     private var silenceTickCount: Int = 0
@@ -489,6 +495,22 @@ final class DictationController: ObservableObject {
     private let riveReactivePollInterval: TimeInterval = 0.03
     private let riveReactivePulseThreshold: Double = 0.14
     private let riveReactivePulseCooldown: TimeInterval = 0.40
+    /// Level the makeup gain aims a quiet mic's loudest moments at.
+    private let riveMakeupTargetLevel: Double = 0.62
+    /// Ceiling on that gain. Bounded so the meter can never auto-level itself
+    /// flat the way an unbounded normalizer does.
+    private let riveMaxMakeupGain: Double = 1.7
+    /// Decay of the observed peak per second, slow enough to survive pauses
+    /// between phrases.
+    private let riveObservedPeakDecayPerSecond: Double = 0.94
+    /// Below this the input counts as silence for the decay-to-zero path.
+    private let riveSilenceGate: Double = 0.10
+    /// Rise fast on syllable onsets, fall gently after them. Expressed per
+    /// second: at the nominal 30ms poll these work out to ~0.55 and ~0.18.
+    private let riveAttackRate: Double = 26.6
+    private let riveReleaseRate: Double = 6.6
+    /// Decay applied to a confirmed-silent level, per second.
+    private let riveSilenceDecayPerSecond: Double = 0.0008
     private let keepModelWarmInterval: TimeInterval = 45
     private let liveReuseMaxAudioGap: TimeInterval = 0.30
     private let liveReuseMaxAge: TimeInterval = 1.30
@@ -2871,8 +2893,9 @@ final class DictationController: ObservableObject {
 
         smoothedRiveLevel = 0
         previousRiveLevel = 0
-        riveObservedPeakLevel = 0.25
+        riveObservedPeakLevel = 0.5
         lastRivePulseAt = nil
+        lastRiveTickAt = nil
         silenceTickCount = 0
         if riveAssetPathIfEnabled(forRecordingState: true) != nil {
             bubble.updateRiveReactiveInputs(listening: true, level: 0, shouldPulse: false)
@@ -2903,8 +2926,9 @@ final class DictationController: ObservableObject {
         riveReactiveLoopTask = nil
         smoothedRiveLevel = 0
         previousRiveLevel = 0
-        riveObservedPeakLevel = 0.25
+        riveObservedPeakLevel = 0.5
         lastRivePulseAt = nil
+        lastRiveTickAt = nil
         silenceTickCount = 0
 
         if resetInputs {
@@ -2919,19 +2943,38 @@ final class DictationController: ObservableObject {
             return
         }
 
-        let rawLevel = audioCapture.currentInputLevelNormalized()
-        riveObservedPeakLevel = max(riveObservedPeakLevel * 0.985, rawLevel)
-        let leveled = min(max(rawLevel / max(riveObservedPeakLevel, 0.15), 0), 1)
+        let tickAt = Date()
+        let dt = lastRiveTickAt.map { min(0.25, tickAt.timeIntervalSince($0)) }
+            ?? riveReactivePollInterval
+        lastRiveTickAt = tickAt
 
-        // Heavy smoothing for gentle VU-meter feel.
-        // Track consecutive quiet ticks; after a sustained silence period,
-        // smoothly decay to zero (no abrupt snap).
-        if leveled < 0.10 {
+        let rawLevel = audioCapture.currentInputLevelNormalized()
+
+        // The observed peak buys a quiet mic makeup gain — it never attenuates
+        // a loud one. Dividing by the peak outright (as this used to) is an
+        // auto-leveller: the first words land while the peak is still the seed
+        // and slam the bars to full, then the peak locks onto the speaking
+        // level and every syllable after normalizes to roughly the same value,
+        // so the meter goes flat a second or two into the dictation.
+        riveObservedPeakLevel = max(
+            riveObservedPeakLevel * pow(riveObservedPeakDecayPerSecond, dt),
+            rawLevel
+        )
+        let makeupGain = min(
+            riveMaxMakeupGain,
+            max(1.0, riveMakeupTargetLevel / max(riveObservedPeakLevel, 0.05))
+        )
+        let leveled = min(max(rawLevel * makeupGain, 0), 1)
+
+        // Asymmetric smoothing: snap up on a syllable onset, ease back down
+        // after it. The old symmetric 0.15 both ways, stacked on top of the
+        // pill's own 0.15 lerp, averaged neighbouring syllables together.
+        if leveled < riveSilenceGate {
             silenceTickCount += 1
             // ~5 ticks at 30ms = ~150ms of confirmed silence before decaying.
             // Decay smoothly rather than snapping to zero.
             if silenceTickCount >= 5 {
-                smoothedRiveLevel *= 0.80 // Smooth exponential decay
+                smoothedRiveLevel *= pow(riveSilenceDecayPerSecond, dt)
                 if smoothedRiveLevel < 0.01 {
                     smoothedRiveLevel = 0
                 }
@@ -2940,7 +2983,8 @@ final class DictationController: ObservableObject {
             // to avoid cutting off between syllables.
         } else {
             silenceTickCount = 0
-            smoothedRiveLevel += (leveled - smoothedRiveLevel) * 0.15
+            let rate = leveled > smoothedRiveLevel ? riveAttackRate : riveReleaseRate
+            smoothedRiveLevel += (leveled - smoothedRiveLevel) * (1 - exp(-rate * dt))
         }
         let level = smoothedRiveLevel
 

@@ -41,6 +41,17 @@ private final class PillIndicatorView: NSView {
 
     // Animation timer
     private var displayTimer: Timer?
+    /// Wall-clock stamp of the previous tick. The timer is a best-effort 60Hz
+    /// that slips whenever the main run loop is busy — local transcription
+    /// running mid-dictation is enough to do it — so every rate below is
+    /// expressed per second and integrated against the real elapsed time.
+    private var lastTickAt: CFTimeInterval = 0
+
+    /// Volume smoothing rates, per second. Rise fast on a syllable onset, fall
+    /// gently after it. `1 - exp(-34/60) ≈ 0.43` and `1 - exp(-11/60) ≈ 0.17`,
+    /// so a healthy 60Hz tick behaves as before.
+    private static let volumeAttackRate: CGFloat = 34
+    private static let volumeReleaseRate: CGFloat = 11
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -174,6 +185,7 @@ private final class PillIndicatorView: NSView {
 
     func startAnimating() {
         guard displayTimer == nil else { return }
+        lastTickAt = 0
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.tick()
@@ -191,12 +203,27 @@ private final class PillIndicatorView: NSView {
     private func tick() {
         guard blockedPercent == nil else { return }
 
-        animationTime += 1.0 / 60.0
+        // Advance on real elapsed time, not on a hoped-for 1/60. Assuming the
+        // nominal interval meant that whenever the run loop got busy the wave
+        // slowed down in lockstep with the dropped frames and the smoothing
+        // stretched out — the bars went sluggish exactly when the app was
+        // working hardest, which is a few seconds into a dictation. Capped so
+        // a long stall resumes rather than jumping.
+        let now = CACurrentMediaTime()
+        let dt = lastTickAt == 0 ? 1.0 / 60.0 : min(0.25, now - lastTickAt)
+        lastTickAt = now
+
+        animationTime += CGFloat(dt)
         if animationTime > 1000 { animationTime -= 1000 }
 
-        // Smooth volume toward target
-        let lerpSpeed: CGFloat = 0.15
-        volumeLevel += (targetVolume - volumeLevel) * lerpSpeed
+        // Smooth volume toward target. Asymmetric on purpose: the controller
+        // already smooths the level, so all this needs to do is take the step
+        // out of the 30ms polls. A symmetric lerp here was a second lag stage
+        // on top of that one, and between them the bars stopped tracking
+        // individual syllables at all.
+        let rate = targetVolume > volumeLevel ? Self.volumeAttackRate : Self.volumeReleaseRate
+        let k = 1 - exp(-rate * CGFloat(dt))
+        volumeLevel += (targetVolume - volumeLevel) * k
         if volumeLevel < 0.005 { volumeLevel = 0 }
 
         let h = bounds.height
@@ -227,10 +254,15 @@ private final class PillIndicatorView: NSView {
 
             let idleBarH = minBarH + abs(wave) * h * 0.06
             let transcribingBarH = minBarH + abs(wave) * h * 0.04
-            let activeBarH = minBarH + (maxBarH - minBarH) * volumeLevel * (0.5 + 0.5 * abs(wave))
+            // The wave only shapes the voice response, it no longer halves it:
+            // `abs(wave)` passes through zero often, and at 0.5/0.5 that pulled
+            // every bar back to the floor mid-syllable.
+            let activeBarH = minBarH + (maxBarH - minBarH) * volumeLevel * (0.62 + 0.38 * abs(wave))
             let barH: CGFloat
             if isListening {
-                barH = volumeLevel > 0.01 ? activeBarH : minBarH
+                // Idle shimmer is the floor while listening, so a pause reads as
+                // breathing rather than as a dead meter.
+                barH = volumeLevel > 0.01 ? max(activeBarH, idleBarH) : idleBarH
             } else if isActive {
                 barH = transcribingBarH
             } else {
