@@ -5,6 +5,20 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.6.0 — 2026-08-13
+
+### Added
+
+- **Cleanup can run on Groq instead of OpenRouter.** Settings → Transcription
+  Cleanup now has a provider switch. Pick Groq, paste a Groq key
+  (console.groq.com/keys), and hit Refresh Models to choose from Groq's
+  catalog — it defaults to `llama-3.1-8b-instant`. Cleanup sits between your
+  last word and the paste, so this is the one call where the faster inference
+  is worth a second key. Nothing changes if you leave it on OpenRouter, and
+  smart routing and chat keep using your OpenRouter key either way. The two
+  providers remember their own model, so switching back and forth doesn't lose
+  your pick.
+
 ## 1.5.0 — 2026-08-12
 
 ### Changed
