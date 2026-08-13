@@ -183,10 +183,10 @@ final class TranscriptionResultTests: XCTestCase {
 
 final class FuzzyMatchTests: XCTestCase {
     private let catalog = [
-        OpenRouterModelInfo(id: "google/gemini-3.1-flash-lite", name: "Google: Gemini 3.1 Flash Lite", contextLength: 1_048_576, isFree: false),
-        OpenRouterModelInfo(id: "google/gemini-3.1-flash-lite-image", name: "Google: Gemini 3.1 Flash Lite Image", contextLength: 65_536, isFree: false),
-        OpenRouterModelInfo(id: "anthropic/claude-haiku-4.5", name: "Anthropic: Claude Haiku 4.5", contextLength: 200_000, isFree: false),
-        OpenRouterModelInfo(id: "openai/gpt-5-nano", name: "OpenAI: GPT-5 Nano", contextLength: 400_000, isFree: false),
+        LLMModelInfo(id: "google/gemini-3.1-flash-lite", name: "Google: Gemini 3.1 Flash Lite", contextLength: 1_048_576, isFree: false),
+        LLMModelInfo(id: "google/gemini-3.1-flash-lite-image", name: "Google: Gemini 3.1 Flash Lite Image", contextLength: 65_536, isFree: false),
+        LLMModelInfo(id: "anthropic/claude-haiku-4.5", name: "Anthropic: Claude Haiku 4.5", contextLength: 200_000, isFree: false),
+        LLMModelInfo(id: "openai/gpt-5-nano", name: "OpenAI: GPT-5 Nano", contextLength: 400_000, isFree: false),
     ]
 
     func testAbbreviationMatchesAcrossSegments() {
@@ -249,5 +249,50 @@ final class CleanupGuardTests: XCTestCase {
     func testShortTranscriptsSkipTheGuard() {
         // Too few words for the ratio to mean anything; upstream handles empties.
         XCTAssertTrue(DictationController.resemblesCleanup(of: "cloud code", candidate: "Claude Code"))
+    }
+}
+
+final class GroqCatalogTests: XCTestCase {
+    private let raw: [[String: Any]] = [
+        ["id": "llama-3.1-8b-instant", "active": true, "context_window": 131_072],
+        ["id": "whisper-large-v3-turbo", "active": true, "context_window": 448],
+        ["id": "playai-tts", "active": true],
+        ["id": "openai/gpt-oss-120b", "active": true, "context_window": 131_072],
+        ["id": "retired-model", "active": false, "context_window": 8_192],
+        ["context_window": 4_096], // no id at all
+    ]
+
+    func testSpeechModelsAreExcluded() {
+        // Whisper and TTS 400 on /chat/completions, so a cleanup picker that
+        // offers them is offering a guaranteed failure.
+        let ids = GroqClient.parseModels(raw).map(\.id)
+        XCTAssertFalse(ids.contains("whisper-large-v3-turbo"))
+        XCTAssertFalse(ids.contains("playai-tts"))
+    }
+
+    func testInactiveAndMalformedEntriesAreDropped() {
+        let ids = GroqClient.parseModels(raw).map(\.id)
+        XCTAssertFalse(ids.contains("retired-model"))
+        XCTAssertEqual(ids, ["llama-3.1-8b-instant", "openai/gpt-oss-120b"])
+    }
+
+    func testContextWindowMapsToContextLength() {
+        let model = GroqClient.parseModels(raw).first { $0.id == "llama-3.1-8b-instant" }
+        XCTAssertEqual(model?.contextLength, 131_072)
+        // Groq has no free tier in the catalog sense; a "free" badge would lie.
+        XCTAssertEqual(model?.isFree, false)
+    }
+}
+
+final class CleanupProviderTests: XCTestCase {
+    func testStoredValueRoundTrips() {
+        XCTAssertEqual(CleanupProvider.resolve("groq"), .groq)
+        XCTAssertEqual(CleanupProvider.resolve("openrouter"), .openRouter)
+    }
+
+    func testUnknownOrMissingValueFallsBackToOpenRouter() {
+        // A downgrade must not strand cleanup on a provider that no longer exists.
+        XCTAssertEqual(CleanupProvider.resolve(nil), .openRouter)
+        XCTAssertEqual(CleanupProvider.resolve("anthropic"), .openRouter)
     }
 }

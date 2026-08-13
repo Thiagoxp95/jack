@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// Small wrapper over the login keychain for the one secret Jack holds.
+/// Small wrapper over the login keychain for the API keys Jack holds.
 ///
 /// The OpenRouter key used to live in `UserDefaults`, which was wrong twice
 /// over: the plist is world-readable by any process running as the user, and
@@ -13,6 +13,10 @@ enum KeychainStore {
 
     /// Account name for the OpenRouter key item.
     static let openRouterAPIKeyAccount = "openrouter_api_key"
+
+    /// Groq's key, used only when cleanup is pointed at Groq. Separate item:
+    /// the two keys are independent, and clearing one must not touch the other.
+    static let groqAPIKeyAccount = "groq_api_key"
 
     /// Keychain items are scoped per bundle id so a debug build and a release
     /// build don't fight over one item. The fallback matches the release id

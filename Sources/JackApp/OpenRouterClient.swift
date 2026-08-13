@@ -1,7 +1,9 @@
 import Foundation
 
-/// One model as advertised by OpenRouter's public catalog.
-struct OpenRouterModelInfo: Identifiable, Hashable, Sendable {
+/// One model as advertised by a provider's catalog — OpenRouter's public list,
+/// or Groq's when cleanup is pointed there. Shared so `ModelPickerField` works
+/// against either without knowing which.
+struct LLMModelInfo: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let contextLength: Int?
@@ -288,7 +290,7 @@ enum OpenRouterClient {
 
     /// The model catalog is public — the key is sent when present only so
     /// OpenRouter can surface models gated to that account.
-    static func fetchModels(apiKey: String) async throws -> [OpenRouterModelInfo] {
+    static func fetchModels(apiKey: String) async throws -> [LLMModelInfo] {
         guard let url = URL(string: modelsURL) else { throw Failure.malformedResponse }
 
         var request = URLRequest(url: url)
@@ -309,12 +311,12 @@ enum OpenRouterClient {
             throw Failure.malformedResponse
         }
 
-        return items.compactMap { item -> OpenRouterModelInfo? in
+        return items.compactMap { item -> LLMModelInfo? in
             guard let id = item["id"] as? String else { return nil }
             let pricing = item["pricing"] as? [String: Any]
             let promptPrice = (pricing?["prompt"] as? String).flatMap(Double.init) ?? 1
             let completionPrice = (pricing?["completion"] as? String).flatMap(Double.init) ?? 1
-            return OpenRouterModelInfo(
+            return LLMModelInfo(
                 id: id,
                 name: (item["name"] as? String) ?? id,
                 contextLength: (item["context_length"] as? NSNumber)?.intValue,

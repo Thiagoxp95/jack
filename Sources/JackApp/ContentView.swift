@@ -31,6 +31,59 @@ struct ContentView: View {
         return controller.openRouterApiKey.isEmpty ? .orange : .green
     }
 
+    private var groqStatusColor: Color {
+        controller.groqApiKey.isEmpty ? .orange : .green
+    }
+
+    private var groqStatusText: String {
+        if controller.groqApiKey.isEmpty {
+            return "No key — cleanup will fall back to the raw transcript"
+        }
+        return "Key set · \(controller.groqModels.count) models available"
+    }
+
+    /// Groq's key + catalog, shown only while cleanup is pointed at Groq. It
+    /// lives inside the cleanup card rather than beside the OpenRouter card
+    /// because cleanup is the only thing this key is used for.
+    @ViewBuilder
+    private var groqCleanupControls: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Groq API Key")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SecureField("gsk_...", text: $controller.groqApiKey)
+                .textFieldStyle(.roundedBorder)
+        }
+
+        HStack(spacing: 8) {
+            Circle()
+                .fill(groqStatusColor)
+                .frame(width: 8, height: 8)
+            Text(groqStatusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button(controller.isLoadingGroqModels ? "Loading…" : "Refresh Models") {
+                Task { await controller.refreshGroqModels() }
+            }
+            .buttonStyle(.bordered)
+            .font(.caption)
+            .disabled(controller.isLoadingGroqModels || controller.groqApiKey.isEmpty)
+        }
+
+        if let error = controller.groqModelsError {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+
+        Text("Get a key at console.groq.com/keys. Routing and chat keep using OpenRouter.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
     private var openRouterStatusText: String {
         if let failure = controller.openRouterAuthFailure {
             return "\(failure) — routing and cleanup are falling back to plain paste"
@@ -545,11 +598,28 @@ struct ContentView: View {
                 Toggle("Enable cleanup", isOn: $controller.cleanupEnabled)
 
                 if controller.cleanupEnabled {
+                    Picker("Provider", selection: $controller.cleanupProvider) {
+                        ForEach(CleanupProvider.allCases) { provider in
+                            Text(provider.label).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    // Groq brings its own key and its own catalog; OpenRouter's
+                    // is already entered above, so only Groq needs a field here.
+                    if controller.cleanupProvider == .groq {
+                        groqCleanupControls
+                    }
+
                     ModelPickerField(
                         icon: "wand.and.rays",
                         title: "Cleanup Model",
-                        models: controller.openRouterModels,
-                        selection: $controller.cleanupModelId
+                        models: controller.cleanupModels,
+                        providerName: controller.cleanupProvider.label,
+                        selection: controller.cleanupProvider == .groq
+                            ? $controller.groqCleanupModelId
+                            : $controller.cleanupModelId
                     )
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -571,6 +641,16 @@ struct ContentView: View {
                             )
                     }
                 }
+            }
+            // Switching to Groq with a key already saved should show its models
+            // without a trip to the Refresh button. Keyed on the provider so it
+            // does not re-fire on every keystroke in the key field.
+            .task(id: controller.cleanupProvider) {
+                guard controller.cleanupProvider == .groq,
+                      controller.groqModels.isEmpty,
+                      !controller.groqApiKey.isEmpty
+                else { return }
+                await controller.refreshGroqModels()
             }
 
             // 5b. Auto-mode routing + knowledge base plumbing

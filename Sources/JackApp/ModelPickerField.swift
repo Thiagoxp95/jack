@@ -43,7 +43,7 @@ enum FuzzyMatch {
     }
 
     /// Best score across a model's display name and its id.
-    static func score(query: String, model: OpenRouterModelInfo) -> Int? {
+    static func score(query: String, model: LLMModelInfo) -> Int? {
         let byName = score(query: query, candidate: model.name)
         let byId = score(query: query, candidate: model.id)
         switch (byName, byId) {
@@ -56,12 +56,12 @@ enum FuzzyMatch {
 
     /// Models matching `query`, best first. Ties fall back to name order so the
     /// list doesn't reshuffle between keystrokes.
-    static func rank(query: String, models: [OpenRouterModelInfo]) -> [OpenRouterModelInfo] {
+    static func rank(query: String, models: [LLMModelInfo]) -> [LLMModelInfo] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return models }
 
         return models
-            .compactMap { model -> (OpenRouterModelInfo, Int)? in
+            .compactMap { model -> (LLMModelInfo, Int)? in
                 score(query: trimmed, model: model).map { (model, $0) }
             }
             .sorted {
@@ -80,7 +80,10 @@ enum FuzzyMatch {
 struct ModelPickerField: View {
     let icon: String
     let title: String
-    let models: [OpenRouterModelInfo]
+    let models: [LLMModelInfo]
+    /// Named in the empty-state and the not-in-catalog warning, so the cleanup
+    /// picker says "Groq" when that is where the request will actually go.
+    var providerName: String = "OpenRouter"
     @Binding var selection: String
 
     @State private var isPresented = false
@@ -94,11 +97,11 @@ struct ModelPickerField: View {
     @State private var pointerLocation: CGPoint?
     @State private var pointerIsLive = false
 
-    private var matches: [OpenRouterModelInfo] {
+    private var matches: [LLMModelInfo] {
         FuzzyMatch.rank(query: query, models: models)
     }
 
-    private var selectedModel: OpenRouterModelInfo? {
+    private var selectedModel: LLMModelInfo? {
         models.first { $0.id == selection }
     }
 
@@ -143,7 +146,7 @@ struct ModelPickerField: View {
             // A model id that isn't in the catalog 404s at request time, which
             // would otherwise only show up as a silent cleanup failure.
             if !models.isEmpty, selectedModel == nil {
-                Label("Not in OpenRouter's catalog — requests will fail. Pick another.", systemImage: "exclamationmark.triangle.fill")
+                Label("Not in \(providerName)'s catalog — requests will fail. Pick another.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -190,7 +193,7 @@ struct ModelPickerField: View {
             Divider()
 
             if models.isEmpty {
-                message("No models loaded — add your OpenRouter key, then hit Refresh Models.")
+                message("No models loaded — add your \(providerName) key, then hit Refresh Models.")
             } else if matches.isEmpty {
                 message("No model matches “\(query)”.")
             } else {
@@ -237,7 +240,7 @@ struct ModelPickerField: View {
         }
     }
 
-    private func row(_ model: OpenRouterModelInfo, isHighlighted: Bool) -> some View {
+    private func row(_ model: LLMModelInfo, isHighlighted: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark")
                 .font(.caption.weight(.semibold))

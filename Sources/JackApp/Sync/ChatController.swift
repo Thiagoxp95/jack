@@ -14,7 +14,7 @@ final class ChatController {
 
     private(set) var threads: [ChatThread] = []
     private(set) var messages: [ChatMessage] = []
-    private(set) var availableModels: [OpenRouterModelInfo] = []
+    private(set) var availableModels: [LLMModelInfo] = []
     private(set) var isLoading = false
     private(set) var isStreaming = false
     var streamedContent: String = ""
