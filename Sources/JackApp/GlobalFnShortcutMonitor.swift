@@ -47,6 +47,8 @@ final class GlobalFnShortcutMonitor {
 
     var onEvent: ((ShortcutEvent) -> Void)?
     var onScreenshotKeyPressed: (() -> Void)?
+    /// Double-tap Shift anywhere in macOS — saves the current selection.
+    var onSelectionCaptureRequested: (() -> Void)?
     var onTodoSwitchKeyPressed: (() -> Void)?
     var onAiSwitchKeyPressed: (() -> Void)?
 
@@ -100,6 +102,10 @@ final class GlobalFnShortcutMonitor {
     private var todoSheetShortcut: InvocationShortcut?
     private var isTodoSheetShortcutActive = false
 
+    // Double-tap Shift → save selection to the knowledge base
+    private var selectionCaptureEnabled = false
+    private var doubleShift = DoubleTapModifierDetector()
+
     // Multi-key chat sheet shortcut
     var onChatSheetKeyPressed: (() -> Void)?
     private var chatSheetShortcut: InvocationShortcut?
@@ -118,6 +124,11 @@ final class GlobalFnShortcutMonitor {
     func setTodoSheetShortcut(_ shortcut: InvocationShortcut?) {
         todoSheetShortcut = shortcut
         isTodoSheetShortcutActive = false
+    }
+
+    func setSelectionCaptureEnabled(_ enabled: Bool) {
+        selectionCaptureEnabled = enabled
+        doubleShift.reset()
     }
 
     func setChatSheetShortcut(_ shortcut: InvocationShortcut?) {
@@ -264,6 +275,7 @@ final class GlobalFnShortcutMonitor {
         runLoopSource = nil
         eventTap = nil
         isInvocationShortcutActive = false
+        doubleShift.reset()
         postActionArmed = false
         consumePostActionKeyUpCode = nil
         setRecordingControlsActive(false)
@@ -279,6 +291,12 @@ final class GlobalFnShortcutMonitor {
         currentModifierFlags = Self.nsModifierFlags(from: rawFlags)
 
         holdDebugLog("flagsChanged: keyCode=\(keyCode) flags=\(rawFlags.rawValue) modifiers=\(currentModifierFlags.rawValue) isActive=\(isInvocationShortcutActive)")
+
+        // Double-tap Shift → capture the current selection. Never consumes the
+        // event: Shift has to keep working as Shift.
+        if selectionCaptureEnabled {
+            trackShiftDoubleTap(keyCode: keyCode)
+        }
 
         // Todo sheet shortcut: modifier-based matching
         if let tsShortcut = todoSheetShortcut {
@@ -390,6 +408,10 @@ final class GlobalFnShortcutMonitor {
         let eventModifierFlags = Self.nsModifierFlags(from: event.flags)
         currentModifierFlags = eventModifierFlags
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if selectionCaptureEnabled {
+            // Any real keystroke means the Shift presses around it were typing.
+            doubleShift.noteOtherActivity()
+        }
         let invocationHasPriority = Self.invocationShouldTakePriority(
             forKeyCode: keyCode,
             currentModifierFlags: eventModifierFlags,
@@ -437,13 +459,14 @@ final class GlobalFnShortcutMonitor {
             return true
         }
 
-        // Space cycling: intercept left/right arrow keys during recording
+        // Space cycling: intercept arrow keys during recording.
+        // Left/up = previous space, right/down = next space.
         if !invocationHasPriority, isRecordingForSpaceCycle, isKeyDown {
             if !isRepeat {
-                if keyCode == 123 { // left arrow
+                if keyCode == 123 || keyCode == 126 { // left / up arrow
                     onSpaceCycleKeyPressed?(.left)
                     return true
-                } else if keyCode == 124 { // right arrow
+                } else if keyCode == 124 || keyCode == 125 { // right / down arrow
                     onSpaceCycleKeyPressed?(.right)
                     return true
                 }
@@ -579,6 +602,31 @@ final class GlobalFnShortcutMonitor {
         }
 
         return false
+    }
+
+    // MARK: - Selection Capture (double-tap Shift)
+
+    private func trackShiftDoubleTap(keyCode: Int64) {
+        let now = Date().timeIntervalSinceReferenceDate
+        let isShiftKey = keyCode == 56 || keyCode == 60
+
+        guard isShiftKey else {
+            // Another modifier changed state — Shift was part of a combo.
+            doubleShift.noteOtherActivity()
+            return
+        }
+
+        let otherModifiers = currentModifierFlags.intersection([.command, .control, .option, .function])
+        guard otherModifiers.isEmpty else {
+            doubleShift.noteOtherActivity()
+            return
+        }
+
+        if currentModifierFlags.contains(.shift) {
+            doubleShift.modifierPressed(at: now)
+        } else if doubleShift.modifierReleased(at: now) {
+            onSelectionCaptureRequested?()
+        }
     }
 
     // MARK: - Shortcut Matching Helpers

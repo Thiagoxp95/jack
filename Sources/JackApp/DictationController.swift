@@ -225,6 +225,13 @@ final class DictationController: ObservableObject {
             NotificationCenter.default.post(name: .statusBarVisibilityChanged, object: nil, userInfo: ["visible": showInStatusBar])
         }
     }
+    /// Double-tap Shift to save the highlighted text into the knowledge base.
+    @Published var selectionCaptureEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(selectionCaptureEnabled, forKey: DefaultsKey.selectionCaptureEnabled)
+            shortcutMonitor.setSelectionCaptureEnabled(selectionCaptureEnabled)
+        }
+    }
     @Published var soundEffectsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(soundEffectsEnabled, forKey: DefaultsKey.soundEffectsEnabled)
@@ -445,6 +452,10 @@ final class DictationController: ObservableObject {
     private let audioCapture = AudioCaptureService()
     private let transcription = ParakeetTranscriptionService()
     private let pasteService = PasteService()
+    private let selectionCapture = SelectionCaptureService()
+    private let captureToast = CaptureToastController()
+    /// Guards against a second double-tap landing while a capture is in flight.
+    private var isCapturingSelection = false
     private let noteService = NoteService()
     let knowledgeService = KnowledgeService()
     private let noteScreenshot = NoteScreenshotController()
@@ -580,6 +591,7 @@ final class DictationController: ObservableObject {
         static let showInDock = "show_in_dock"
         static let showInStatusBar = "show_in_status_bar"
         static let soundEffectsEnabled = "sound_effects_enabled"
+        static let selectionCaptureEnabled = "selection_capture_enabled"
         static let hapticFeedbackEnabled = "haptic_feedback_enabled"
         static let autoCopyToClipboard = "auto_copy_to_clipboard"
         static let wordReplacementsJSON = "word_replacements_json"
@@ -719,6 +731,7 @@ final class DictationController: ObservableObject {
         launchAtLoginEnabled = defaults.object(forKey: DefaultsKey.launchAtLogin) as? Bool ?? false
         showInDock = defaults.object(forKey: DefaultsKey.showInDock) as? Bool ?? true
         showInStatusBar = defaults.object(forKey: DefaultsKey.showInStatusBar) as? Bool ?? true
+        selectionCaptureEnabled = defaults.object(forKey: DefaultsKey.selectionCaptureEnabled) as? Bool ?? true
         soundEffectsEnabled = defaults.object(forKey: DefaultsKey.soundEffectsEnabled) as? Bool ?? false
         hapticFeedbackEnabled = defaults.object(forKey: DefaultsKey.hapticFeedbackEnabled) as? Bool ?? false
         autoCopyToClipboard = defaults.object(forKey: DefaultsKey.autoCopyToClipboard) as? Bool ?? true
@@ -891,6 +904,13 @@ final class DictationController: ObservableObject {
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
                 self.setAiChatMode()
+            }
+        }
+        shortcutMonitor.setSelectionCaptureEnabled(selectionCaptureEnabled)
+        shortcutMonitor.onSelectionCaptureRequested = { [weak self] in
+            guard let self else { return }
+            runOnMainActorImmediatelyIfPossible {
+                self.captureSelectionToKnowledge()
             }
         }
         shortcutMonitor.onSpaceCycleKeyPressed = { [weak self] direction in
@@ -1924,6 +1944,51 @@ final class DictationController: ObservableObject {
         statusText = "Recording cancelled."
         showTransientBubble(message: "Cancelled", duration: 0.8)
         playSoundEffect()
+    }
+
+    // MARK: - Selection Capture
+
+    /// Double-tap Shift: grab whatever is highlighted in the frontmost app and
+    /// file it in the knowledge base. Silent when nothing is selected — the
+    /// shortcut fires often enough that a toast every time would be noise.
+    private func captureSelectionToKnowledge() {
+        guard selectionCaptureEnabled, !isCapturingSelection else { return }
+        isCapturingSelection = true
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isCapturingSelection = false }
+
+            let outcome = await self.selectionCapture.captureSelection()
+            switch outcome {
+            case .missingAccessibilityPermission:
+                self.captureToast.show(
+                    symbol: "exclamationmark.triangle.fill",
+                    message: "Grant Accessibility to save selections",
+                    tint: .systemOrange
+                )
+
+            case .emptySelection:
+                break
+
+            case let .captured(text, sourceApp):
+                self.captureToast.show(symbol: "brain.head.profile", message: "Saved to knowledge")
+                self.playSoundEffect()
+
+                let knowledge = self.knowledgeService
+                let stored = await Task.detached(priority: .userInitiated) {
+                    await knowledge.ingest(text: text, source: .selection, sourceApp: sourceApp)
+                }.value
+
+                if stored == nil {
+                    self.captureToast.show(
+                        symbol: "exclamationmark.triangle.fill",
+                        message: "Couldn't save selection",
+                        tint: .systemOrange
+                    )
+                }
+            }
+        }
     }
 
     private func playSoundEffect() {

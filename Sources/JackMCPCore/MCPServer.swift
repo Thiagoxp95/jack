@@ -191,6 +191,7 @@ public final class MCPServer: Sendable {
         if let score { object["score"] = .number(Double(score)) }
         if let dayStamp = entry.dayStamp { object["dayStamp"] = .string(dayStamp) }
         if let imagePath = entry.imagePath { object["imagePath"] = .string(imagePath) }
+        if let sourceApp = entry.sourceApp { object["sourceApp"] = .string(sourceApp) }
         return .object(object)
     }
 

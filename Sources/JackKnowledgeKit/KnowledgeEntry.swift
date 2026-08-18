@@ -9,6 +9,8 @@ public enum KnowledgeSource: String, Codable, Sendable, CaseIterable {
     case todo
     case chat
     case screenshotOCR = "screenshot_ocr"
+    /// Text highlighted anywhere on the Mac and saved with the capture shortcut.
+    case selection
 }
 
 // MARK: - KnowledgeEntry
@@ -25,6 +27,8 @@ public struct KnowledgeEntry: Codable, Sendable, Identifiable, Equatable {
     public let dayStamp: String?
     /// Absolute path to the screenshot this OCR text came from, when applicable.
     public let imagePath: String?
+    /// App the text was captured from (plus window title, when readable).
+    public let sourceApp: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -32,7 +36,8 @@ public struct KnowledgeEntry: Codable, Sendable, Identifiable, Equatable {
         source: KnowledgeSource,
         text: String,
         dayStamp: String? = nil,
-        imagePath: String? = nil
+        imagePath: String? = nil,
+        sourceApp: String? = nil
     ) {
         self.id = id
         self.ts = ts
@@ -40,6 +45,7 @@ public struct KnowledgeEntry: Codable, Sendable, Identifiable, Equatable {
         self.text = text
         self.dayStamp = dayStamp
         self.imagePath = imagePath
+        self.sourceApp = sourceApp
     }
 
     public var date: Date? {

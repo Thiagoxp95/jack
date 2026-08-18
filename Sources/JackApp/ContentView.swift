@@ -464,6 +464,18 @@ struct ContentView: View {
                 Text("Open/close the AI Chat side sheet overlay.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Divider()
+
+                toggleRow(
+                    icon: "text.viewfinder",
+                    title: "Save Selection on Double-Shift",
+                    isOn: $controller.selectionCaptureEnabled
+                )
+
+                Text("Highlight text anywhere on the Mac and tap Shift twice to file it in the knowledge base. Needs Accessibility.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // 3. Audio & Feedback
@@ -777,6 +789,7 @@ struct ContentView: View {
         case .todo: return "checklist"
         case .chat: return "sparkles"
         case .screenshotOCR: return "camera.viewfinder"
+        case .selection: return "text.viewfinder"
         }
     }
 

@@ -27,7 +27,8 @@ public final class KnowledgeService: Sendable {
         source: KnowledgeSource,
         date: Date = .now,
         dayStamp: String? = nil,
-        imagePath: String? = nil
+        imagePath: String? = nil,
+        sourceApp: String? = nil
     ) async -> KnowledgeEntry? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -37,7 +38,8 @@ public final class KnowledgeService: Sendable {
             source: source,
             text: trimmed,
             dayStamp: dayStamp,
-            imagePath: imagePath
+            imagePath: imagePath,
+            sourceApp: sourceApp
         )
         let vector = await embeddings.embed(trimmed)
         let model = vector == nil ? nil : await embeddings.modelIdentifier
