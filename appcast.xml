@@ -3,6 +3,47 @@
     <channel>
         <title>JackApp</title>
         <item>
+            <title>1.8.0</title>
+            <pubDate>Thu, 03 Sep 2026 02:29:48 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Jack 1.8.0</title>
+<style>
+  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
+         margin: 0; padding: 4px 2px; color: #1d1d1f; }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+       color: #6e6e73; margin: 14px 0 6px; }
+  h3:first-child { margin-top: 0; }
+  ul { margin: 0 0 10px; padding-left: 20px; }
+  li { margin-bottom: 5px; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f5f5f7; }
+    h3 { color: #a1a1a6; }
+    code { background: rgba(255,255,255,.12); }
+  }
+</style>
+<body>
+<h3>Added</h3>
+<ul>
+<li><strong>Muse Voice Transcribe as a transcription model.</strong> Settings → Transcription Model has a new cloud option running Meta's Muse Voice Transcribe — the most accurate streaming speech model published so far (3.1% word error rate). Paste a Meta API key (developer.meta.com) into the field that appears when you select it; the key lives in your keychain, and Silky calls Meta directly. Billing is Meta's, at $0.18 per audio hour. The local Parakeet models stay the default and still run entirely on your Mac.</li>
+</ul>
+<ul>
+<li><strong>Press Return after pasting, per app.</strong> Settings → Text Input Method now takes a list of apps. Only the apps you pick get the Return, so a dictated Slack or WhatsApp message sends itself while an editor just receives the text. Nothing presses Return until you add an app.</li>
+</ul>
+</body>
+</html>
+]]></description>
+            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.8.0/Silky-1.8.0.zip" length="9762685" type="application/octet-stream" sparkle:edSignature="c0PRKe1QVwO3ONfcXf3AySb+w8KDOemQO4dYquWAdLKIn5vefEyfZT/HotKwVtDGl3jaxHrCUwePT/k3APMaAQ=="/>
+        </item>
+        <item>
             <title>1.7.0</title>
             <pubDate>Tue, 18 Aug 2026 18:51:42 +0000</pubDate>
             <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
@@ -74,44 +115,6 @@
 </html>
 ]]></description>
             <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.6.0/Silky-1.6.0.zip" length="9697122" type="application/octet-stream" sparkle:edSignature="MwZXl0kya4+4cFs3mOElnJwA3bP9pkpj5AjzLhoz2jbOV0RNA8FhCqznOxguD2VWMvVlDBgKsqKsGx4MaumNDA=="/>
-        </item>
-        <item>
-            <title>1.5.0</title>
-            <pubDate>Wed, 12 Aug 2026 17:33:57 +0000</pubDate>
-            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
-            <sparkle:version>13</sparkle:version>
-            <sparkle:shortVersionString>1.5.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Jack 1.5.0</title>
-<style>
-  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
-         margin: 0; padding: 4px 2px; color: #1d1d1f; }
-  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
-       color: #6e6e73; margin: 14px 0 6px; }
-  h3:first-child { margin-top: 0; }
-  ul { margin: 0 0 10px; padding-left: 20px; }
-  li { margin-bottom: 5px; }
-  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
-         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
-  @media (prefers-color-scheme: dark) {
-    body { color: #f5f5f7; }
-    h3 { color: #a1a1a6; }
-    code { background: rgba(255,255,255,.12); }
-  }
-</style>
-<body>
-<h3>Changed</h3>
-<ul>
-<li><strong>Jack is now Silky.</strong> Same app, new name. The app in your Applications folder is now <code>Silky.app</code>, the menu bar and all windows say Silky, and releases ship as <code>Silky-&lt;version&gt;.zip</code> / <code>Silky-&lt;version&gt;.dmg</code>. Your settings, shortcuts, notes, todos, knowledge base, and system permissions all carry over — nothing to re-grant and nothing to migrate. Existing notes stay in <code>~/Documents/Jack Notes</code>.</li>
-</ul>
-</body>
-</html>
-]]></description>
-            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.5.0/Silky-1.5.0.zip" length="9667074" type="application/octet-stream" sparkle:edSignature="y/XvqijYp2kHTrfCS/48ND4U4HAX72QeYLDBZsqDlg8oMyv0boO1cfevk7pQFVN8z6hmfrS918HyMuoLFCpEDQ=="/>
         </item>
     </channel>
 </rss>
