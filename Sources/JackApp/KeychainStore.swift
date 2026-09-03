@@ -18,6 +18,10 @@ enum KeychainStore {
     /// the two keys are independent, and clearing one must not touch the other.
     static let groqAPIKeyAccount = "groq_api_key"
 
+    /// Meta's key, used only when transcription is pointed at Muse Voice
+    /// Transcribe. Separate item for the same reason as Groq's.
+    static let metaAPIKeyAccount = "meta_api_key"
+
     /// Keychain items are scoped per bundle id so a debug build and a release
     /// build don't fight over one item. The fallback matches the release id
     /// rather than something invented, because a build with no bundle id is

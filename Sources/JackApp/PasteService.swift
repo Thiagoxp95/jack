@@ -44,6 +44,36 @@ final class PasteService {
         return true
     }
 
+    /// Synthesizes a Return keypress into the frontmost app — used by
+    /// "press Return after pasting" so a dictated message sends itself.
+    ///
+    /// Posted on its own after the ⌘V events so the target app has processed
+    /// the paste first; a Return that races the paste sends an empty message.
+    @discardableResult
+    func postReturn() -> Bool {
+        guard AXIsProcessTrusted(), let source = CGEventSource(stateID: .hidSystemState) else {
+            return false
+        }
+
+        let returnKey: CGKeyCode = 36
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: returnKey, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: returnKey, keyDown: false)
+        else {
+            return false
+        }
+
+        // Modifiers the user is still physically holding (the dictation
+        // shortcut is often a modifier chord) would turn this into ⇧↵ or ⌘↵,
+        // which means something different in every chat app.
+        keyDown.flags = []
+        keyUp.flags = []
+
+        keyDown.post(tap: .cgAnnotatedSessionEventTap)
+        keyUp.post(tap: .cgAnnotatedSessionEventTap)
+
+        return true
+    }
+
     /// Erases the last `count` characters from the focused input by posting
     /// backspace key events — used when a pasted transcript is rerouted to a
     /// note/todo/AI and shouldn't stay in the field it landed in.

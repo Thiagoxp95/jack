@@ -5,6 +5,23 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.8.0 — 2026-09-03
+
+### Added
+
+- **Muse Voice Transcribe as a transcription model.** Settings → Transcription
+  Model has a new cloud option running Meta's Muse Voice Transcribe — the most
+  accurate streaming speech model published so far (3.1% word error rate).
+  Paste a Meta API key (developer.meta.com) into the field that appears when
+  you select it; the key lives in your keychain, and Silky calls Meta directly.
+  Billing is Meta's, at $0.18 per audio hour. The local Parakeet models stay
+  the default and still run entirely on your Mac.
+
+- **Press Return after pasting, per app.** Settings → Text Input Method now
+  takes a list of apps. Only the apps you pick get the Return, so a dictated
+  Slack or WhatsApp message sends itself while an editor just receives the
+  text. Nothing presses Return until you add an app.
+
 ## 1.6.0 — 2026-08-13
 
 ### Added

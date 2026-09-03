@@ -13,6 +13,7 @@ struct ContentView: View {
     var todoListController: TodoListController
     @State private var showSpaceSettings = false
     @State private var showWordReplacements = false
+    @State private var showAutoReturnApps = false
     @State private var knowledgeStats: KnowledgeStats?
     @State private var embeddingAssetsAvailable: Bool?
     @State private var isDownloadingAssets = false
@@ -40,6 +41,35 @@ struct ContentView: View {
             return "No key — cleanup will fall back to the raw transcript"
         }
         return "Key set · \(controller.groqModels.count) models available"
+    }
+
+    private var metaStatusColor: Color {
+        controller.metaApiKey.isEmpty ? .orange : .green
+    }
+
+    /// Meta's key, shown only while transcription is pointed at Muse. Muse is
+    /// the one cloud model that calls its provider directly, so without a key
+    /// here it has nothing to call.
+    @ViewBuilder
+    private var museTranscriptionControls: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Meta API Key")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SecureField("LLM_...", text: $controller.metaApiKey)
+                .textFieldStyle(.roundedBorder)
+        }
+
+        HStack(spacing: 8) {
+            Circle()
+                .fill(metaStatusColor)
+                .frame(width: 8, height: 8)
+            Text(controller.metaApiKey.isEmpty
+                 ? "No key — Muse cannot transcribe"
+                 : "Key set · $0.18 per audio hour")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Groq's key + catalog, shown only while cleanup is pointed at Groq. It
@@ -182,6 +212,10 @@ struct ContentView: View {
         .sheet(isPresented: $showWordReplacements) {
             WordReplacementsView(replacements: $controller.wordReplacements)
                 .frame(minWidth: 400, minHeight: 300)
+        }
+        .sheet(isPresented: $showAutoReturnApps) {
+            AutoReturnAppsView(apps: $controller.autoReturnApps)
+                .frame(minWidth: 440, minHeight: 380)
         }
         .sheet(isPresented: $showShortcutCapture) {
             ShortcutCaptureView(
@@ -509,6 +543,41 @@ struct ContentView: View {
             settingsCard(title: "Text Handling", subtitle: "How transcriptions are processed and output.") {
                 toggleRow(icon: "doc.on.clipboard", title: "Auto-Copy to Clipboard", isOn: $controller.autoCopyToClipboard)
 
+                Divider()
+
+                toggleRow(
+                    icon: "return",
+                    title: "Press Return After Pasting",
+                    isOn: $controller.autoReturnEnabled
+                )
+
+                HStack {
+                    Image(systemName: "app.badge.checkmark")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    Text("Apps")
+                        .font(.body.weight(.medium))
+                    Spacer()
+                    Text(controller.autoReturnApps.isEmpty ? "None" : "\(controller.autoReturnApps.count) selected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        showAutoReturnApps = true
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .opacity(controller.autoReturnEnabled ? 1 : 0.5)
+
+                Text("Only the apps you pick get the Return — a dictated Slack or WhatsApp message sends itself, while an editor just receives the text.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
                 HStack {
                     Image(systemName: "arrow.left.arrow.right")
                         .foregroundStyle(.secondary)
@@ -554,6 +623,10 @@ struct ContentView: View {
                 Text(controller.selectedTranscriptionModel.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if controller.selectedTranscriptionModel == .muse {
+                    museTranscriptionControls
+                }
 
                 modelDownloadStatus
             }

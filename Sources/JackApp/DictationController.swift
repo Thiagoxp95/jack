@@ -33,6 +33,7 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
     case parakeetV3 = "parakeet-v3"
     case aquaVoice = "aqua-voice"
     case gpt4oMiniTranscribe = "gpt-4o-mini-transcribe"
+    case muse = "muse-voice-transcribe"
 
     var id: String { rawValue }
 
@@ -42,6 +43,7 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         case .parakeetV3: return "Parakeet v3 (Multilingual)"
         case .aquaVoice: return "AquaVoice Avalon (English)"
         case .gpt4oMiniTranscribe: return "GPT-4o Mini Transcribe"
+        case .muse: return "Muse Voice Transcribe"
         }
     }
 
@@ -51,13 +53,14 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         case .parakeetV3: return "Supports multiple languages"
         case .aquaVoice: return "Cloud-based · Optimized for dictation · Low latency"
         case .gpt4oMiniTranscribe: return "Cloud-based · Requires internet · High accuracy"
+        case .muse: return "Cloud-based · Highest accuracy · Multilingual"
         }
     }
 
     var isLocal: Bool {
         switch self {
         case .parakeetV2, .parakeetV3: return true
-        case .aquaVoice, .gpt4oMiniTranscribe: return false
+        case .aquaVoice, .gpt4oMiniTranscribe, .muse: return false
         }
     }
 
@@ -67,6 +70,7 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         case .parakeetV3: return "FluidInference/parakeet-tdt-0.6b-v3-coreml"
         case .aquaVoice: return "avalon-v1-en"
         case .gpt4oMiniTranscribe: return "gpt-4o-mini-transcribe"
+        case .muse: return "muse-voice-transcribe-1.0"
         }
     }
 }
@@ -247,6 +251,21 @@ final class DictationController: ObservableObject {
             UserDefaults.standard.set(autoCopyToClipboard, forKey: DefaultsKey.autoCopyToClipboard)
         }
     }
+    /// Press Return after a transcript is pasted — only in the apps the user
+    /// listed, because a stray Return in an editor is a line break but in a
+    /// chat app it sends the message.
+    @Published var autoReturnEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(autoReturnEnabled, forKey: DefaultsKey.autoReturnEnabled)
+        }
+    }
+    @Published var autoReturnApps: [AutoReturnApp] {
+        didSet {
+            if let data = try? JSONEncoder().encode(autoReturnApps) {
+                UserDefaults.standard.set(data, forKey: DefaultsKey.autoReturnAppsJSON)
+            }
+        }
+    }
     @Published var wordReplacements: [WordReplacement] {
         didSet {
             if let data = try? JSONEncoder().encode(wordReplacements) {
@@ -423,6 +442,16 @@ final class DictationController: ObservableObject {
             KeychainStore.write(groqApiKey, account: KeychainStore.groqAPIKeyAccount)
         }
     }
+
+    /// Meta's key, keychain-stored for the same reasons. Used only by Muse
+    /// Voice Transcribe, which calls Meta directly rather than going through
+    /// the Convex proxy the other cloud models use.
+    @Published var metaApiKey: String {
+        didSet {
+            guard metaApiKey != oldValue else { return }
+            KeychainStore.write(metaApiKey, account: KeychainStore.metaAPIKeyAccount)
+        }
+    }
     /// Kept apart from `cleanupModelId`: the two catalogs share no ids, so one
     /// setting would mean switching provider silently points cleanup at a model
     /// that 404s. With two, flipping back and forth restores each choice.
@@ -452,6 +481,8 @@ final class DictationController: ObservableObject {
     private let audioCapture = AudioCaptureService()
     private let transcription = ParakeetTranscriptionService()
     private let pasteService = PasteService()
+    /// Gap between the synthesized ⌘V and the synthesized Return.
+    private static let autoReturnDelay: TimeInterval = 0.2
     private let selectionCapture = SelectionCaptureService()
     private let captureToast = CaptureToastController()
     /// Guards against a second double-tap landing while a capture is in flight.
@@ -594,6 +625,8 @@ final class DictationController: ObservableObject {
         static let selectionCaptureEnabled = "selection_capture_enabled"
         static let hapticFeedbackEnabled = "haptic_feedback_enabled"
         static let autoCopyToClipboard = "auto_copy_to_clipboard"
+        static let autoReturnEnabled = "auto_return_enabled"
+        static let autoReturnAppsJSON = "auto_return_apps_json"
         static let wordReplacementsJSON = "word_replacements_json"
         static let microphonePriorityUIDs = "microphone_priority_uids"
         static let duckingEnabled = "ducking_enabled"
@@ -735,6 +768,13 @@ final class DictationController: ObservableObject {
         soundEffectsEnabled = defaults.object(forKey: DefaultsKey.soundEffectsEnabled) as? Bool ?? false
         hapticFeedbackEnabled = defaults.object(forKey: DefaultsKey.hapticFeedbackEnabled) as? Bool ?? false
         autoCopyToClipboard = defaults.object(forKey: DefaultsKey.autoCopyToClipboard) as? Bool ?? true
+        autoReturnEnabled = defaults.object(forKey: DefaultsKey.autoReturnEnabled) as? Bool ?? false
+        if let arData = defaults.data(forKey: DefaultsKey.autoReturnAppsJSON),
+           let decoded = try? JSONDecoder().decode([AutoReturnApp].self, from: arData) {
+            autoReturnApps = decoded
+        } else {
+            autoReturnApps = []
+        }
 
         if let wrData = defaults.data(forKey: DefaultsKey.wordReplacementsJSON),
            let decoded = try? JSONDecoder().decode([WordReplacement].self, from: wrData) {
@@ -808,6 +848,7 @@ final class DictationController: ObservableObject {
         // Groq's key was never in UserDefaults — it arrived after the move — so
         // it is a straight keychain read with no migration behind it.
         groqApiKey = KeychainStore.read(account: KeychainStore.groqAPIKeyAccount) ?? ""
+        metaApiKey = KeychainStore.read(account: KeychainStore.metaAPIKeyAccount) ?? ""
         cleanupProvider = CleanupProvider.resolve(defaults.string(forKey: DefaultsKey.cleanupProvider))
         groqCleanupModelId = defaults.string(forKey: DefaultsKey.groqCleanupModelId) ?? GroqClient.defaultCleanupModel
 
@@ -1900,6 +1941,12 @@ final class DictationController: ObservableObject {
                     }
                     self.transcribeLocally(recordedFile: recordedFile, finalDuration: finalDuration, configuration: configuration)
                 }
+            } else if selectedTranscriptionModel == .muse {
+                // Muse calls Meta directly with the user's own key. The Convex
+                // proxy below is unreachable in shipped builds — auth was
+                // removed and `getToken()` always throws — so a proxied Muse
+                // would be a menu item that never works.
+                transcribeViaMeta(recordedFile: recordedFile)
             } else {
                 let provider: String
                 switch selectedTranscriptionModel {
@@ -2286,6 +2333,49 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// Muse Voice Transcribe, called straight from the app with the user's own
+    /// Meta key. Same shape as `transcribeViaCloud` minus the Convex hop.
+    private func transcribeViaMeta(recordedFile: URL) {
+        let apiKey = metaApiKey
+        Task(priority: .userInitiated) {
+            let startedAt = Date()
+            defer {
+                try? FileManager.default.removeItem(at: recordedFile)
+            }
+
+            do {
+                let text = try await MetaVoiceClient.transcribe(
+                    audioFileURL: recordedFile,
+                    apiKey: apiKey,
+                    model: TranscriptionModelChoice.muse.modelIdentifier
+                )
+
+                let totalLatency = Date().timeIntervalSince(startedAt)
+                await MainActor.run {
+                    logPipelineTiming(
+                        String(
+                            format: "stop->meta total=%.3fs backend=%@",
+                            totalLatency,
+                            MetaVoiceClient.defaultModel
+                        )
+                    )
+                    lastTranscriptionLatency = totalLatency
+                    lastTranscriptionBackend = MetaVoiceClient.defaultModel
+                }
+                await handleTranscriptionResult(text)
+            } catch {
+                let summary = (error as? MetaVoiceClient.Failure)?.userFacingSummary
+                    ?? error.localizedDescription
+                await MainActor.run {
+                    isTranscribing = false
+                    recordingOutputMode = .paste
+                    statusText = "Muse transcription failed: \(summary)"
+                    bubble.hide()
+                }
+            }
+        }
+    }
+
     private func transcribeViaCloud(recordedFile: URL, model: String, provider: String = "openai") {
         Task(priority: .userInitiated) {
             let startedAt = Date()
@@ -2303,6 +2393,9 @@ final class DictationController: ObservableObject {
                 switch provider {
                 case "aquavoice":
                     action = "transcription:transcribeAquaVoice"
+                    args["model"] = model
+                case "meta":
+                    action = "transcription:transcribeMuse"
                     args["model"] = model
                 default:
                     action = "transcription:transcribe"
@@ -2453,6 +2546,10 @@ final class DictationController: ObservableObject {
             // apps, and re-reading this below would let the status line claim a
             // missing Accessibility grant for a paste we deliberately withheld.
             let jackWasFrontmost = Self.isJackFrontmost()
+            // Sampled alongside it, and for the same reason: the auto-Return
+            // decision has to be about the app that received the ⌘V, not
+            // whatever is frontmost a few hundred milliseconds later.
+            let pasteTargetBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             if jackWasFrontmost {
                 // Jack's own windows are never a paste target. Settings is full
                 // of fields that write straight through on every keystroke, and
@@ -2480,7 +2577,24 @@ final class DictationController: ObservableObject {
                 )
             )
 
-            if didPaste {
+            let didPressReturn = AutoReturnRule.shouldPressReturn(
+                enabled: autoReturnEnabled,
+                didPaste: didPaste,
+                frontmostBundleID: pasteTargetBundleID,
+                apps: autoReturnApps
+            )
+            if didPressReturn {
+                let paster = pasteService
+                // The target app needs to have processed the ⌘V before the
+                // Return lands, or it sends an empty message.
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoReturnDelay) {
+                    _ = paster.postReturn()
+                }
+            }
+
+            if didPressReturn {
+                statusText = "Transcribed, pasted and sent."
+            } else if didPaste {
                 statusText = "Transcribed and pasted."
             } else if jackWasFrontmost {
                 statusText = "Copied — Silky doesn’t paste into its own window."
@@ -2494,7 +2608,10 @@ final class DictationController: ObservableObject {
             if postActionPillEnabled {
                 presentPostActionPill(
                     text: finalText,
-                    pastedCharacterCount: didPaste ? finalText.count : nil
+                    // Once Return has been pressed the text is gone from the
+                    // field — sent, submitted, committed — so backspacing it
+                    // on a reroute would eat whatever is there now instead.
+                    pastedCharacterCount: (didPaste && !didPressReturn) ? finalText.count : nil
                 )
             } else {
                 bubble.hide()
