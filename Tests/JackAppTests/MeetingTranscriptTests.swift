@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import JackApp
 
@@ -70,5 +71,67 @@ final class MeetingTranscriptTests: XCTestCase {
 
     func testNoTurnsProducesNoBlocks() {
         XCTAssertTrue(MeetingController.groupIntoBlocks([]).isEmpty)
+    }
+}
+
+// MARK: - Track writer
+
+/// The writer is fed from the audio render thread and rotated from the main
+/// actor, and until 1.9.1 that combination crashed on the first buffer. These
+/// exercise it off the main thread, at a sample rate that needs converting.
+final class MeetingTrackWriterTests: XCTestCase {
+
+    private func makeBuffer(sampleRate: Double, channels: AVAudioChannelCount, frames: AVAudioFrameCount, amplitude: Float) -> AVAudioPCMBuffer {
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        for channel in 0 ..< Int(channels) {
+            let samples = buffer.floatChannelData![channel]
+            for frame in 0 ..< Int(frames) {
+                samples[frame] = amplitude * sin(Float(frame) * 0.05)
+            }
+        }
+        return buffer
+    }
+
+    func testWritesAResampledWavFromABackgroundThread() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-writer-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let writer = MeetingTrackWriter(label: "test")
+        writer.open(url: url)
+
+        // 48 kHz stereo in, like ScreenCaptureKit hands over; 16 kHz mono out.
+        let buffer = makeBuffer(sampleRate: 48_000, channels: 2, frames: 4_800, amplitude: 0.5)
+        let done = expectation(description: "audio thread finished")
+        DispatchQueue.global(qos: .userInitiated).async {
+            for _ in 0 ..< 10 { writer.append(buffer) }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+
+        let finished = try XCTUnwrap(writer.close())
+        XCTAssertEqual(finished.url, url)
+        // 10 × 0.1s of 48 kHz audio, resampled — allow the resampler's rounding.
+        XCTAssertEqual(finished.duration, 1.0, accuracy: 0.05)
+        XCTAssertGreaterThan(finished.peak, MeetingTrackWriter.silenceFloor)
+
+        let written = try AVAudioFile(forReading: url)
+        XCTAssertEqual(written.fileFormat.sampleRate, 16_000)
+        XCTAssertEqual(written.fileFormat.channelCount, 1)
+    }
+
+    func testSilenceStaysUnderTheFloorSoTheChunkIsNotUploaded() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-writer-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let writer = MeetingTrackWriter(label: "test")
+        writer.open(url: url)
+        writer.append(makeBuffer(sampleRate: 16_000, channels: 1, frames: 1_600, amplitude: 0.0005))
+
+        let finished = try XCTUnwrap(writer.close())
+        XCTAssertLessThan(finished.peak, MeetingTrackWriter.silenceFloor)
     }
 }

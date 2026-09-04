@@ -255,14 +255,27 @@ final class MeetingAudioCapture {
             throw Failure.micEngineFailed("input device reported no sample rate")
         }
 
-        let track = micTrack
-        input.installTap(onBus: 0, bufferSize: 4_096, format: format) { buffer, _ in
-            track.append(buffer)
-        }
+        Self.installTap(on: input, format: format, writer: micTrack)
         micTapInstalled = true
 
         engine.prepare()
         try engine.start()
+    }
+
+    /// The tap block runs on the audio render thread, so it must not be
+    /// main-actor isolated. `installTap`'s block is not marked `@Sendable` in
+    /// the SDK, which means a closure written inline in a `@MainActor` method
+    /// silently inherits that isolation — and then traps on the very first
+    /// buffer when the runtime checks which executor it is on. Building it
+    /// inside a `nonisolated` function is what keeps it off the main actor.
+    private nonisolated static func installTap(
+        on input: AVAudioInputNode,
+        format: AVAudioFormat,
+        writer: MeetingTrackWriter
+    ) {
+        input.installTap(onBus: 0, bufferSize: 4_096, format: format) { buffer, _ in
+            writer.append(buffer)
+        }
     }
 
     private func stopMicrophone() {

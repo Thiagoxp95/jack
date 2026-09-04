@@ -5,6 +5,15 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.9.1 — 2026-09-04
+
+### Fixed
+
+- **Meeting mode crashed the app the moment it started listening.** The
+  microphone tap ran a main-thread check on the audio render thread and
+  tripped it on the very first buffer. 1.9.0 could not record a meeting at
+  all; nothing else in it was affected.
+
 ## 1.9.0 — 2026-09-04
 
 ### Added
