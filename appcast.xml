@@ -3,6 +3,44 @@
     <channel>
         <title>JackApp</title>
         <item>
+            <title>1.9.1</title>
+            <pubDate>Fri, 04 Sep 2026 17:13:12 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
+            <sparkle:version>18</sparkle:version>
+            <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Jack 1.9.1</title>
+<style>
+  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
+         margin: 0; padding: 4px 2px; color: #1d1d1f; }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+       color: #6e6e73; margin: 14px 0 6px; }
+  h3:first-child { margin-top: 0; }
+  ul { margin: 0 0 10px; padding-left: 20px; }
+  li { margin-bottom: 5px; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f5f5f7; }
+    h3 { color: #a1a1a6; }
+    code { background: rgba(255,255,255,.12); }
+  }
+</style>
+<body>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Meeting mode crashed the app the moment it started listening.</strong> The microphone tap ran a main-thread check on the audio render thread and tripped it on the very first buffer. 1.9.0 could not record a meeting at all; nothing else in it was affected.</li>
+</ul>
+</body>
+</html>
+]]></description>
+            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.9.1/Silky-1.9.1.zip" length="9836822" type="application/octet-stream" sparkle:edSignature="gA0fgw7TJ8tzaBzZlkAKH+bDKh16SAjv4NJ+AA1fdeGcp0+thtF/G5Gtd6NraDI5vnMqPW6VCnrvcyn9acFKBw=="/>
+        </item>
+        <item>
             <title>1.9.0</title>
             <pubDate>Fri, 04 Sep 2026 17:06:10 +0000</pubDate>
             <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
@@ -81,41 +119,6 @@
 </html>
 ]]></description>
             <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.8.0/Silky-1.8.0.zip" length="9762685" type="application/octet-stream" sparkle:edSignature="c0PRKe1QVwO3ONfcXf3AySb+w8KDOemQO4dYquWAdLKIn5vefEyfZT/HotKwVtDGl3jaxHrCUwePT/k3APMaAQ=="/>
-        </item>
-        <item>
-            <title>1.7.0</title>
-            <pubDate>Tue, 18 Aug 2026 18:51:42 +0000</pubDate>
-            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
-            <sparkle:version>15</sparkle:version>
-            <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Jack 1.7.0</title>
-<style>
-  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
-         margin: 0; padding: 4px 2px; color: #1d1d1f; }
-  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
-       color: #6e6e73; margin: 14px 0 6px; }
-  h3:first-child { margin-top: 0; }
-  ul { margin: 0 0 10px; padding-left: 20px; }
-  li { margin-bottom: 5px; }
-  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
-         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
-  @media (prefers-color-scheme: dark) {
-    body { color: #f5f5f7; }
-    h3 { color: #a1a1a6; }
-    code { background: rgba(255,255,255,.12); }
-  }
-</style>
-<body>
-<p>Jack 1.7.0. See <a href="https://github.com/Thiagoxp95/jack/releases">the releases page</a> for details.</p>
-</body>
-</html>
-]]></description>
-            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.7.0/Silky-1.7.0.zip" length="9714822" type="application/octet-stream" sparkle:edSignature="ng2bKuQ/RRr5uWlP2btGpZbiopJ2RzCq+YoTituIOxe8frPovnD8A2oVnzoy3k7YPkMfmc/Vve1+BPQQ6uJNDQ=="/>
         </item>
     </channel>
 </rss>
