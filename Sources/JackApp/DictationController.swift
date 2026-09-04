@@ -1,6 +1,7 @@
 import ApplicationServices
 import AppKit
 import FluidAudio
+import Combine
 import Foundation
 import JackKnowledgeKit
 import os.log
@@ -139,12 +140,14 @@ final class DictationController: ObservableObject {
     @Published private(set) var screenshotKeyCode: Int64
     @Published private(set) var todoSheetShortcut: InvocationShortcut?
     @Published private(set) var chatSheetShortcut: InvocationShortcut?
+    @Published private(set) var meetingShortcut: InvocationShortcut?
     @Published private(set) var todoSwitchKeyCode: Int64
     @Published var isCapturingInvocationKey = false
     @Published var isCapturingScreenshotKey = false
     @Published var isCapturingTodoSwitchKey = false
     @Published var isCapturingTodoSheetKey = false
     @Published var isCapturingChatSheetKey = false
+    @Published var isCapturingMeetingKey = false
     @Published private(set) var aiSwitchKeyCode: Int64
     @Published var isCapturingAiSwitchKey = false
     @Published var postActionPillEnabled: Bool {
@@ -489,6 +492,12 @@ final class DictationController: ObservableObject {
     private var isCapturingSelection = false
     private let noteService = NoteService()
     let knowledgeService = KnowledgeService()
+    /// Meeting mode. Lazy because it needs `knowledgeService`, which is not
+    /// available to a stored-property initializer.
+    private(set) lazy var meeting = MeetingController(knowledge: knowledgeService)
+    /// Meeting mode is its own observable object; this republishes its changes
+    /// so views bound to the controller redraw when a meeting starts or ends.
+    private var meetingObservation: AnyCancellable?
     private let noteScreenshot = NoteScreenshotController()
     /// Screenshots captured during the current note-mode recording, attached to
     /// the note once the transcript lands.
@@ -616,6 +625,7 @@ final class DictationController: ObservableObject {
         static let aiSwitchKeyCode = "ai_switch_key_code"
         static let todoSheetShortcutJSON = "todo_sheet_shortcut_json"
         static let chatSheetShortcutJSON = "chat_sheet_shortcut_json"
+        static let meetingShortcutJSON = "meeting_shortcut_json"
         static let onboardingCompleted = "onboarding_completed"
         static let escapeToCancelEnabled = "escape_to_cancel_enabled"
         static let launchAtLogin = "launch_at_login"
@@ -663,6 +673,7 @@ final class DictationController: ObservableObject {
         case todoSwitch
         case todoSheet
         case chatSheet
+        case meeting
         case aiSwitch
     }
 
@@ -746,6 +757,15 @@ final class DictationController: ObservableObject {
             initialChatSheetShortcut = InvocationShortcut(primaryKeyCode: 37, modifiers: NSEvent.ModifierFlags.option.rawValue)
         }
 
+        let initialMeetingShortcut: InvocationShortcut?
+        if let jsonData = defaults.data(forKey: DefaultsKey.meetingShortcutJSON),
+           let decoded = try? JSONDecoder().decode(InvocationShortcut.self, from: jsonData) {
+            initialMeetingShortcut = decoded
+        } else {
+            // Default: ⌥M (Option+M) — free alongside ⌥T and ⌥L.
+            initialMeetingShortcut = InvocationShortcut(primaryKeyCode: 46, modifiers: NSEvent.ModifierFlags.option.rawValue)
+        }
+
         mode = initialMode
         // Infer shortcut type from existing shortcut if not persisted
         if let storedType = ShortcutType(rawValue: defaults.string(forKey: DefaultsKey.shortcutType) ?? "") {
@@ -759,6 +779,7 @@ final class DictationController: ObservableObject {
         aiSwitchKeyCode = initialAiSwitchKeyCode
         todoSheetShortcut = initialTodoSheetShortcut
         chatSheetShortcut = initialChatSheetShortcut
+        meetingShortcut = initialMeetingShortcut
 
         escapeToCancelEnabled = defaults.object(forKey: DefaultsKey.escapeToCancelEnabled) as? Bool ?? false
         launchAtLoginEnabled = defaults.object(forKey: DefaultsKey.launchAtLogin) as? Bool ?? false
@@ -978,6 +999,29 @@ final class DictationController: ObservableObject {
                 self.handleChatSheetShortcut()
             }
         }
+        if let initialMeetingShortcut = meetingShortcut {
+            shortcutMonitor.setMeetingShortcut(initialMeetingShortcut)
+        }
+        shortcutMonitor.onMeetingKeyPressed = { [weak self] in
+            guard let self else { return }
+            runOnMainActorImmediatelyIfPossible {
+                self.meeting.toggle()
+            }
+        }
+        meeting.onStatus = { [weak self] message in
+            self?.statusText = message
+        }
+        meeting.onToast = { [weak self] symbol, message, tint in
+            self?.captureToast.show(symbol: symbol, message: message, tint: tint)
+        }
+        meeting.metaApiKey = { [weak self] in self?.metaApiKey ?? "" }
+        meeting.openRouterApiKey = { [weak self] in self?.openRouterApiKey ?? "" }
+        meeting.summaryModelId = { [weak self] in
+            self?.cleanupModelId ?? OpenRouterClient.defaultCleanupModel
+        }
+        meetingObservation = meeting.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         shortcutMonitor.onPostActionKeyPressed = { [weak self] index in
             guard let self else { return }
             runOnMainActorImmediatelyIfPossible {
@@ -1137,6 +1181,24 @@ final class DictationController: ObservableObject {
         chatSheetShortcut?.displayName ?? "Not Set"
     }
 
+    var meetingKeyDisplayName: String {
+        meetingShortcut?.displayName ?? "Not Set"
+    }
+
+    /// One line describing what meeting mode is doing, for the settings card.
+    var meetingStatusText: String {
+        switch meeting.phase {
+        case .idle:
+            return meeting.lastError ?? "Not recording"
+        case .recording:
+            return "Recording — \(meeting.elapsedLabel())"
+        case .transcribing:
+            return "Transcribing…"
+        case .summarizing:
+            return "Summarizing…"
+        }
+    }
+
     func showOnboardingWizard() {
         shouldShowOnboardingWizard = true
     }
@@ -1211,6 +1273,10 @@ final class DictationController: ObservableObject {
     func applyTodoSheetShortcut(_ shortcut: InvocationShortcut) {
         setTodoSheetShortcut(shortcut)
         statusText = "Todo sheet shortcut set to \(todoSheetKeyDisplayName)."
+    }
+
+    func applyMeetingShortcut(_ shortcut: InvocationShortcut) {
+        setMeetingShortcut(shortcut)
     }
 
     func applyChatSheetShortcut(_ shortcut: InvocationShortcut) {
@@ -1364,6 +1430,38 @@ final class DictationController: ObservableObject {
         UserDefaults.standard.removeObject(forKey: DefaultsKey.chatSheetShortcutJSON)
     }
 
+    func startMeetingKeyCapture() {
+        guard !isCapturingInvocationKey, !isCapturingScreenshotKey, !isCapturingTodoSwitchKey, !isCapturingTodoSheetKey, !isCapturingChatSheetKey, !isCapturingMeetingKey, !isCapturingAiSwitchKey else {
+            return
+        }
+
+        keyCaptureTarget = .meeting
+        isCapturingMeetingKey = true
+        statusText = "Press a key combination for the Meeting Mode shortcut."
+        installInvocationKeyCaptureMonitors()
+    }
+
+    func cancelMeetingKeyCapture() {
+        guard isCapturingMeetingKey else {
+            return
+        }
+
+        isCapturingMeetingKey = false
+        keyCaptureTarget = nil
+        removeInvocationKeyCaptureMonitors()
+        statusText = "Meeting Mode key capture canceled."
+    }
+
+    /// Unsetting the shortcut is the only way to turn meeting mode off, so it
+    /// also stops a meeting that is running rather than orphaning it.
+    func clearMeetingKey() {
+        cancelMeetingKeyCapture()
+        meeting.cancel()
+        meetingShortcut = nil
+        shortcutMonitor.setMeetingShortcut(nil)
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.meetingShortcutJSON)
+    }
+
     func requestKeyboardPrompt() {
         keyboardMonitoringGranted = requestKeyboardMonitoringPermission(prompt: true)
         _ = startShortcutMonitor()
@@ -1469,6 +1567,9 @@ final class DictationController: ObservableObject {
     }
 
     func applicationWillTerminate() {
+        // A meeting still recording at quit has nothing to save — its audio
+        // lives in a temp directory that would otherwise be left behind.
+        meeting.cancel()
         riveReactiveLoopTask?.cancel()
         riveReactiveLoopTask = nil
         stopHoldReleaseWatchdog()
@@ -3692,6 +3793,12 @@ final class DictationController: ObservableObject {
             removeInvocationKeyCaptureMonitors()
             setChatSheetShortcut(shortcut)
             statusText = "Chat sheet shortcut set to \(chatSheetKeyDisplayName)."
+        case .meeting:
+            isCapturingMeetingKey = false
+            keyCaptureTarget = nil
+            removeInvocationKeyCaptureMonitors()
+            setMeetingShortcut(shortcut)
+            statusText = "Meeting mode shortcut set to \(meetingKeyDisplayName)."
         }
 
         isCapturingInvocationKey = false
@@ -3699,6 +3806,7 @@ final class DictationController: ObservableObject {
         isCapturingTodoSwitchKey = false
         isCapturingTodoSheetKey = false
         isCapturingChatSheetKey = false
+        isCapturingMeetingKey = false
         isCapturingAiSwitchKey = false
         self.keyCaptureTarget = nil
         removeInvocationKeyCaptureMonitors()
@@ -3726,6 +3834,14 @@ final class DictationController: ObservableObject {
             UserDefaults.standard.set(data, forKey: DefaultsKey.todoSheetShortcutJSON)
         } else {
             NSLog("[Silky] WARNING: Failed to encode todo sheet shortcut")
+        }
+    }
+
+    private func setMeetingShortcut(_ shortcut: InvocationShortcut) {
+        meetingShortcut = shortcut
+        shortcutMonitor.setMeetingShortcut(shortcut)
+        if let data = try? JSONEncoder().encode(shortcut) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.meetingShortcutJSON)
         }
     }
 

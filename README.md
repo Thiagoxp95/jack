@@ -9,6 +9,7 @@ On top of dictation, Silky includes:
 - **Todos** — a todo mode with kanban board, confirmation cards, and sync.
 - **Auto mode** — press the auto switch key while recording and an OpenRouter model decides whether the capture is a note or a todo, using the transcript, OCR text from any screenshots you grabbed, and the frontmost app/window.
 - **Chat** — an AI chat side sheet backed by a Convex + OpenRouter backend.
+- **Meeting mode** — one shortcut records a call from both the microphone and the computer's own audio, transcribes it in chunks as it runs, and files a speaker-labelled transcript plus an LLM summary in the knowledge base.
 - **Knowledge base** — a local vector store over your dictations, searchable from an MCP server.
 
 Core dictation works entirely offline with no account. Cloud features (chat, spaces/todos sync, cloud transcription) are optional and require a self-hosted backend — see [Bring your own keys](#bring-your-own-keys).
@@ -36,6 +37,7 @@ On first launch, grant:
 - Input Monitoring (global shortcut)
 - Accessibility (global shortcut + auto-paste)
 - Microphone (recording)
+- Screen Recording (meeting mode only — this is how macOS exposes the computer's own audio)
 
 Then wait for the one-time model download to complete.
 

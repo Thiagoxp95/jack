@@ -11,6 +11,10 @@ public enum KnowledgeSource: String, Codable, Sendable, CaseIterable {
     case screenshotOCR = "screenshot_ocr"
     /// Text highlighted anywhere on the Mac and saved with the capture shortcut.
     case selection
+    /// One stretch of a meeting captured in meeting mode (mic + system audio).
+    case meeting
+    /// The LLM-written summary and action items for a meeting.
+    case meetingSummary = "meeting_summary"
 }
 
 // MARK: - KnowledgeEntry
@@ -29,6 +33,11 @@ public struct KnowledgeEntry: Codable, Sendable, Identifiable, Equatable {
     public let imagePath: String?
     /// App the text was captured from (plus window title, when readable).
     public let sourceApp: String?
+    /// Title of the multi-entry session this belongs to — a meeting, today.
+    /// Every chunk of one meeting carries the same title, which is how the
+    /// transcript is reassembled and how its summary points back at it.
+    /// Absent on entries written before meeting mode existed.
+    public let sessionTitle: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -37,7 +46,8 @@ public struct KnowledgeEntry: Codable, Sendable, Identifiable, Equatable {
         text: String,
         dayStamp: String? = nil,
         imagePath: String? = nil,
-        sourceApp: String? = nil
+        sourceApp: String? = nil,
+        sessionTitle: String? = nil
     ) {
         self.id = id
         self.ts = ts
@@ -46,6 +56,7 @@ public struct KnowledgeEntry: Codable, Sendable, Identifiable, Equatable {
         self.dayStamp = dayStamp
         self.imagePath = imagePath
         self.sourceApp = sourceApp
+        self.sessionTitle = sessionTitle
     }
 
     public var date: Date? {

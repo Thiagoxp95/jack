@@ -5,6 +5,26 @@ What changed in each release, written for the person about to install it.
 release notes Sparkle shows in the update dialog, so the wording here is
 what users actually read — keep it plain, and say what they have to do.
 
+## 1.9.0 — 2026-09-04
+
+### Added
+
+- **Meeting mode.** Press ⌥M (changeable in Settings → Shortcuts) to record a
+  call — your microphone and the computer's own audio, as two separate tracks.
+  Press it again to stop. Silky transcribes the meeting in 8-minute chunks
+  while it runs, so stopping is quick even after an hour, and files a
+  speaker-labelled transcript plus an LLM-written summary with action items in
+  the knowledge base. Search it like anything else you have dictated.
+
+  It needs three things: the Meta API key from Settings → Transcription Model
+  (meeting transcription always runs on Muse, in its diarization mode, at
+  Meta's $0.18 per audio hour, doubled because both tracks go up separately),
+  an OpenRouter key for the summary, and Screen Recording permission — macOS
+  asks the first time you start a meeting, and Silky needs a restart after you
+  grant it. Lines you spoke are labelled "You"; everyone else is labelled by
+  Muse, which restarts its lettering every chunk, so "Speaker A" early on is
+  not necessarily "Speaker A" an hour later.
+
 ## 1.8.0 — 2026-09-03
 
 ### Added

@@ -111,6 +111,11 @@ final class GlobalFnShortcutMonitor {
     private var chatSheetShortcut: InvocationShortcut?
     private var isChatSheetShortcutActive = false
 
+    // Multi-key meeting mode shortcut
+    var onMeetingKeyPressed: (() -> Void)?
+    private var meetingShortcut: InvocationShortcut?
+    private var isMeetingShortcutActive = false
+
     func setInvocationShortcut(_ shortcut: InvocationShortcut) {
         invocationShortcut = shortcut
         isInvocationShortcutActive = false
@@ -134,6 +139,11 @@ final class GlobalFnShortcutMonitor {
     func setChatSheetShortcut(_ shortcut: InvocationShortcut?) {
         chatSheetShortcut = shortcut
         isChatSheetShortcutActive = false
+    }
+
+    func setMeetingShortcut(_ shortcut: InvocationShortcut?) {
+        meetingShortcut = shortcut
+        isMeetingShortcutActive = false
     }
 
     func setScreenshotKeyArmed(_ armed: Bool) {
@@ -330,6 +340,22 @@ final class GlobalFnShortcutMonitor {
             }
         }
 
+        // Meeting mode shortcut: modifier-based matching
+        if let mtShortcut = meetingShortcut {
+            if mtShortcut != invocationShortcut {
+                let mtResult = evaluateModifierShortcut(mtShortcut, keyCode: keyCode, isActive: isMeetingShortcutActive)
+                if let mtResult {
+                    if mtResult, !isMeetingShortcutActive {
+                        isMeetingShortcutActive = true
+                        onMeetingKeyPressed?()
+                    } else if !mtResult {
+                        isMeetingShortcutActive = false
+                    }
+                    return true
+                }
+            }
+        }
+
         // Invocation shortcut
         if invocationShortcut.isModifierOnly || (invocationShortcut.primaryKeyCode.map { InvocationKey.isModifierKeyCode($0) } ?? false) {
             // Modifier-only or single-modifier shortcut
@@ -493,6 +519,19 @@ final class GlobalFnShortcutMonitor {
                     let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                     if !isRepeat {
                         onChatSheetKeyPressed?()
+                    }
+                }
+                return true
+            }
+        }
+
+        // Meeting mode shortcut (non-modifier key variant)
+        if let mtShortcut = meetingShortcut, mtShortcut != invocationShortcut {
+            if matchesKeyEvent(mtShortcut, keyCode: keyCode, isKeyDown: isKeyDown) {
+                if isKeyDown {
+                    let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                    if !isRepeat {
+                        onMeetingKeyPressed?()
                     }
                 }
                 return true

@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var showShortcutCapture = false
     @State private var showTodoSheetCapture = false
     @State private var showChatSheetCapture = false
+    @State private var showMeetingCapture = false
     @State private var knowledgeTab: KnowledgeTab = .entries
 
     /// Red beats orange here: a rejected key looks identical to a working one
@@ -250,6 +251,18 @@ struct ContentView: View {
                 },
                 onCancel: {
                     showChatSheetCapture = false
+                }
+            )
+        }
+        .sheet(isPresented: $showMeetingCapture) {
+            ShortcutCaptureView(
+                title: "Record Meeting Mode Shortcut",
+                onSave: { shortcut in
+                    controller.applyMeetingShortcut(shortcut)
+                    showMeetingCapture = false
+                },
+                onCancel: {
+                    showMeetingCapture = false
                 }
             )
         }
@@ -496,6 +509,32 @@ struct ContentView: View {
                 )
 
                 Text("Open/close the AI Chat side sheet overlay.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                // Meeting Mode
+                shortcutRow(
+                    icon: "person.wave.2",
+                    title: "Meeting Mode",
+                    displayName: controller.meetingKeyDisplayName,
+                    hasShortcut: controller.meetingShortcut != nil,
+                    onCapture: { showMeetingCapture = true },
+                    onClear: { controller.clearMeetingKey() }
+                )
+
+                HStack(spacing: 6) {
+                    if controller.meeting.isActive {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(controller.meetingStatusText)
+                        .font(.caption)
+                        .foregroundStyle(controller.meeting.isActive ? .primary : .secondary)
+                }
+
+                Text("Press once to start recording both sides of a call — your microphone and the computer's audio — and again to stop. The speaker-labelled transcript and an LLM summary are filed in the knowledge base. Needs a Meta API key, an OpenRouter key for the summary, and Screen Recording permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -863,6 +902,8 @@ struct ContentView: View {
         case .chat: return "sparkles"
         case .screenshotOCR: return "camera.viewfinder"
         case .selection: return "text.viewfinder"
+        case .meeting: return "person.wave.2"
+        case .meetingSummary: return "list.bullet.rectangle"
         }
     }
 
