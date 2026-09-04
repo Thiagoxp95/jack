@@ -3,6 +3,45 @@
     <channel>
         <title>JackApp</title>
         <item>
+            <title>1.9.0</title>
+            <pubDate>Fri, 04 Sep 2026 17:06:10 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
+            <sparkle:version>17</sparkle:version>
+            <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Jack 1.9.0</title>
+<style>
+  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
+         margin: 0; padding: 4px 2px; color: #1d1d1f; }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+       color: #6e6e73; margin: 14px 0 6px; }
+  h3:first-child { margin-top: 0; }
+  ul { margin: 0 0 10px; padding-left: 20px; }
+  li { margin-bottom: 5px; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f5f5f7; }
+    h3 { color: #a1a1a6; }
+    code { background: rgba(255,255,255,.12); }
+  }
+</style>
+<body>
+<h3>Added</h3>
+<ul>
+<li><strong>Meeting mode.</strong> Press ⌥M (changeable in Settings → Shortcuts) to record a call — your microphone and the computer's own audio, as two separate tracks. Press it again to stop. Silky transcribes the meeting in 8-minute chunks while it runs, so stopping is quick even after an hour, and files a speaker-labelled transcript plus an LLM-written summary with action items in the knowledge base. Search it like anything else you have dictated.</li>
+</ul>
+<p>It needs three things: the Meta API key from Settings → Transcription Model (meeting transcription always runs on Muse, in its diarization mode, at Meta's $0.18 per audio hour, doubled because both tracks go up separately), an OpenRouter key for the summary, and Screen Recording permission — macOS asks the first time you start a meeting, and Silky needs a restart after you grant it. Lines you spoke are labelled "You"; everyone else is labelled by Muse, which restarts its lettering every chunk, so "Speaker A" early on is not necessarily "Speaker A" an hour later.</p>
+</body>
+</html>
+]]></description>
+            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.9.0/Silky-1.9.0.zip" length="9836895" type="application/octet-stream" sparkle:edSignature="fyQA6dmh5Q9rNa4V5K4Mal1GCodhn5biXoECCDgsWh82iSbc61uuWAHqrKRBfKmX4fCNWDzM21XAm4GACQFfBg=="/>
+        </item>
+        <item>
             <title>1.8.0</title>
             <pubDate>Thu, 03 Sep 2026 02:29:48 +0000</pubDate>
             <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
@@ -77,44 +116,6 @@
 </html>
 ]]></description>
             <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.7.0/Silky-1.7.0.zip" length="9714822" type="application/octet-stream" sparkle:edSignature="ng2bKuQ/RRr5uWlP2btGpZbiopJ2RzCq+YoTituIOxe8frPovnD8A2oVnzoy3k7YPkMfmc/Vve1+BPQQ6uJNDQ=="/>
-        </item>
-        <item>
-            <title>1.6.0</title>
-            <pubDate>Thu, 13 Aug 2026 17:05:56 +0000</pubDate>
-            <link>https://raw.githubusercontent.com/Thiagoxp95/jack/main/appcast.xml</link>
-            <sparkle:version>14</sparkle:version>
-            <sparkle:shortVersionString>1.6.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Jack 1.6.0</title>
-<style>
-  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
-         margin: 0; padding: 4px 2px; color: #1d1d1f; }
-  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
-       color: #6e6e73; margin: 14px 0 6px; }
-  h3:first-child { margin-top: 0; }
-  ul { margin: 0 0 10px; padding-left: 20px; }
-  li { margin-bottom: 5px; }
-  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
-         background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; }
-  @media (prefers-color-scheme: dark) {
-    body { color: #f5f5f7; }
-    h3 { color: #a1a1a6; }
-    code { background: rgba(255,255,255,.12); }
-  }
-</style>
-<body>
-<h3>Added</h3>
-<ul>
-<li><strong>Cleanup can run on Groq instead of OpenRouter.</strong> Settings → Transcription Cleanup now has a provider switch. Pick Groq, paste a Groq key (console.groq.com/keys), and hit Refresh Models to choose from Groq's catalog — it defaults to <code>llama-3.1-8b-instant</code>. Cleanup sits between your last word and the paste, so this is the one call where the faster inference is worth a second key. Nothing changes if you leave it on OpenRouter, and smart routing and chat keep using your OpenRouter key either way. The two providers remember their own model, so switching back and forth doesn't lose your pick.</li>
-</ul>
-</body>
-</html>
-]]></description>
-            <enclosure url="https://github.com/Thiagoxp95/jack/releases/download/v1.6.0/Silky-1.6.0.zip" length="9697122" type="application/octet-stream" sparkle:edSignature="MwZXl0kya4+4cFs3mOElnJwA3bP9pkpj5AjzLhoz2jbOV0RNA8FhCqznOxguD2VWMvVlDBgKsqKsGx4MaumNDA=="/>
         </item>
     </channel>
 </rss>
